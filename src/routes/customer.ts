@@ -1,10 +1,10 @@
-// Guest-facing API: QR resolve, bill view, payment, waiter call.
+// Guest-facing API: QR resolve, bill view, payment, waiter call. All public (no staff auth).
 import { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { query } from '../db.js';
-import { orderRemaining, retrieveOrder, SquareOrder } from '../square.js';
-import { payCheck, SplitMode } from '../services/payments.js';
-import { badRequest } from '../http.js';
+import { assertSquareId, orderRemaining, retrieveOrder, SquareOrder } from '../square.js';
+import { CARD_NONCE_RE, parsePaymentBody, payCheck } from '../services/payments.js';
+import { badRequest, notFound } from '../http.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function billView(order: SquareOrder, row: any) {
@@ -56,35 +56,28 @@ export async function customerRoutes(app: FastifyInstance) {
     return { table: { id: table.id, name: table.name, state: table.state }, check };
   });
 
-  // Bill detail for an order (used by staff app too).
+  // Bill detail for a check that has been linked to a table (arbitrary Square orders are not readable here).
   app.get('/api/checks/:orderId', async (req) => {
-    const { orderId } = req.params as { orderId: string };
-    const { order } = await retrieveOrder(orderId);
+    const orderId = assertSquareId((req.params as { orderId: string }).orderId, 'orderId');
     const c = await query(`SELECT * FROM checks WHERE square_order_id = $1`, [orderId]);
-    return { ...billView(order, c.rowCount ? c.rows[0] : { id: null, square_order_id: orderId }), square_state: order.state };
+    if (c.rowCount === 0) throw notFound('check not found');
+    const { order } = await retrieveOrder(orderId);
+    return { ...billView(order, c.rows[0]), square_state: order.state };
   });
 
-  // Pay: full | equal | items | custom. See src/services/payments.ts.
+  // Pay by card: full | equal | items | custom. See src/services/payments.ts.
+  // card_nonce (Square Web Payments SDK token) and idempotency_key (client UUID v4) are REQUIRED.
+  // There is deliberately no guest-reachable "external / no card" path: cash is recorded by staff
+  // through POST /api/checks/:orderId/record-external-payment.
   app.post('/api/checks/:orderId/pay', async (req) => {
-    const { orderId } = req.params as { orderId: string };
-    const body = (req.body ?? {}) as {
-      mode?: SplitMode;
-      amount_cents?: number;
-      tip_cents?: number;
-      card_nonce?: string;
-      payer_label?: string;
-    };
-    if (!body.mode || !['full', 'equal', 'items', 'custom'].includes(body.mode)) {
-      throw badRequest('mode must be one of: full | equal | items | custom');
+    const orderId = assertSquareId((req.params as { orderId: string }).orderId, 'orderId');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const nonce = body.card_nonce;
+    if (typeof nonce !== 'string' || !CARD_NONCE_RE.test(nonce)) {
+      throw badRequest('card_nonce is required (token from the Square Web Payments SDK)');
     }
-    return payCheck({
-      orderId,
-      mode: body.mode,
-      amountCents: body.amount_cents,
-      tipCents: body.tip_cents,
-      cardNonce: body.card_nonce,
-      payerLabel: body.payer_label,
-    });
+    const p = parsePaymentBody(body);
+    return payCheck({ orderId, ...p, source: { kind: 'card', nonce } });
   });
 
   // Guest calls the waiter from the web app (physical button comes with hardware).

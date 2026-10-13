@@ -29,6 +29,7 @@
   .center { text-align:center; }
   .ok-banner { background:#064e3b; border-radius:14px; padding:24px; text-align:center; }
   .err { color:#f87171; margin-top:8px; font-size:14px; }
+  #card-container { min-height:56px; margin:8px 0; }
 </style>
 </head>
 <body>
@@ -36,23 +37,24 @@
 <script>
 const token = location.pathname.split('/')[2];
 const $ = (s) => document.querySelector(s);
-const fmt = (c, cur='USD') => (c/100).toFixed(2) + ' ' + cur;
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = (c, cur='USD') => (c/100).toFixed(2) + ' ' + esc(cur);
 let S = { mode:'full', parts:2, custom:0, tipPct:15, tipCustom:null, table:null, check:null };
 
 async function api(path, opts={}) {
   const r = await fetch(path, { headers:{'Content-Type':'application/json'}, ...opts });
   const j = await r.json().catch(()=>({}));
-  if (!r.ok) throw new Error(j.error || ('HTTP '+r.status));
+  if (!r.ok) { const e = new Error(j.error || ('HTTP '+r.status)); e.status = r.status; throw e; }
   return j;
 }
 
 async function load() {
   const app = $('#app');
   try {
-    const d = await api('/api/t/' + token);
+    const d = await api('/api/t/' + encodeURIComponent(token));
     S.table = d.table; S.check = d.check;
     render();
-  } catch(e) { app.innerHTML = `<div class="card"><h1>Oops</h1><p class="mut">${e.message}</p></div>`; }
+  } catch(e) { app.innerHTML = `<div class="card"><h1>Oops</h1><p class="mut">${esc(e.message)}</p></div>`; }
 }
 
 function tipCents(base) {
@@ -70,7 +72,7 @@ function render() {
   const app = $('#app');
   const { table, check } = S;
   if (!check) {
-    app.innerHTML = `<div class="card"><h1>Table ${table.name}</h1>
+    app.innerHTML = `<div class="card"><h1>Table ${esc(table.name)}</h1>
       <p class="mut">No open bill on this table yet. Your server will link your check here.</p>
       <button class="ghost" id="waiter">Call waiter</button></div>`;
     $('#waiter').onclick = callWaiter;
@@ -79,14 +81,14 @@ function render() {
   if (check.remaining_cents <= 0) {
     app.innerHTML = `<div class="ok-banner"><h1>Paid ✓</h1>
       <p class="mut">Thanks for dining with us. Show this screen to your server.</p>
-      <p class="mut">Receipt #${check.square_order_id.slice(-8)}</p></div>`;
+      <p class="mut">Receipt #${esc(check.square_order_id.slice(-8))}</p></div>`;
     return;
   }
   const amt = payAmount(), tip = tipCents(amt);
   app.innerHTML = `
-    <div class="card"><h1>Table ${table.name}</h1><p class="mut">Your bill</p></div>
+    <div class="card"><h1>Table ${esc(table.name)}</h1><p class="mut">Your bill</p></div>
     <div class="card">
-      ${check.items.map(i=>`<div class="row"><span>${i.quantity}× ${i.name}</span><span>${fmt(i.amount_cents, check.currency)}</span></div>`).join('')}
+      ${check.items.map(i=>`<div class="row"><span>${esc(i.quantity)}× ${esc(i.name)}</span><span>${fmt(i.amount_cents, check.currency)}</span></div>`).join('')}
       <div class="row total"><span>Total</span><span>${fmt(check.total_cents, check.currency)}</span></div>
       ${check.tenders.length?`<div class="row"><span class="paid">Paid so far</span><span class="paid">${fmt(check.tenders.reduce((s,t)=>s+t.amount_cents,0), check.currency)}</span></div>`:''}
       <div class="row"><span class="remaining">Remaining</span><span class="remaining">${fmt(check.remaining_cents, check.currency)}</span></div>
@@ -101,15 +103,17 @@ function render() {
     </div>
     <div class="card"><p class="mut">Tip</p>
       <div class="btns">${[0,10,15,20].map(p=>`<button class="chip ${S.tipPct===p&&S.tipCustom==null?'on':''}" data-t="${p}">${p}%</button>`).join('')}
-      <input type="number" id="tipCustom" placeholder="Custom $" style="max-width:130px" value="${S.tipCustom??''}"></div>
+      <input type="number" id="tipCustom" placeholder="Custom $" style="max-width:130px" value="${esc(S.tipCustom??'')}"></div>
     </div>
     <div class="card">
       <div class="row"><span>Paying</span><span>${fmt(amt, check.currency)}</span></div>
       <div class="row"><span>Tip</span><span>${fmt(tip, check.currency)}</span></div>
       <div class="row total"><span>Charge</span><span>${fmt(amt+tip, check.currency)}</span></div>
+      <!-- TODO(card-pilot): the Square Web Payments SDK card form is mounted here (see getCardNonce below). -->
+      <div id="card-container"></div>
       <button class="big-pay" id="pay">Pay ${fmt(amt+tip, check.currency)}</button>
       <div class="err" id="err"></div>
-      <p class="mut center" style="margin-top:10px">Sandbox demo — payment is recorded as an external payment.</p>
+      <p class="mut center" style="margin-top:10px">Cash? Ask your server to record it.</p>
     </div>
     <div class="card center"><button class="ghost" id="waiter">Call waiter</button></div>`;
 
@@ -117,7 +121,7 @@ function render() {
   document.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{S.tipPct=+b.dataset.t;S.tipCustom=null;render();});
   const extra = $('#modeExtra');
   if (S.mode==='equal') extra.innerHTML = `<input type="number" id="parts" min="2" max="12" value="${S.parts}"><p class="mut">ways — you pay ${fmt(Math.ceil(check.remaining_cents/S.parts), check.currency)}</p>`;
-  if (S.mode==='custom') extra.innerHTML = `<input type="number" id="custom" min="1" step="0.01" placeholder="Amount in ${check.currency}" value="${S.custom||''}">`;
+  if (S.mode==='custom') extra.innerHTML = `<input type="number" id="custom" min="1" step="0.01" placeholder="Amount in ${esc(check.currency)}" value="${S.custom||''}">`;
   const parts=$('#parts'); if(parts) parts.oninput=()=>{S.parts=Math.max(2,+parts.value||2);};
   const cust=$('#custom'); if(cust) cust.oninput=()=>{S.custom=+cust.value||0;};
   $('#tipCustom').oninput=(e)=>{S.tipCustom=e.target.value===''?null:+e.target.value;};
@@ -125,19 +129,65 @@ function render() {
   $('#waiter').onclick = callWaiter;
 }
 
+// ---------------------------------------------------------------------------
+// Square Web Payments SDK integration point.
+//
+// TODO(card-pilot): replace this stub with the real SDK flow. Exact call shape:
+//
+//   1) load the SDK:
+//        <script src="https://sandbox.web.squarecdn.com/v1/square.js"></script>
+//        (production: https://web.squarecdn.com/v1/square.js)
+//   2) once per page, after the bill is rendered (mount into #card-container):
+//        const payments = window.Square.payments(SQUARE_APPLICATION_ID, SQUARE_LOCATION_ID);
+//        card = await payments.card();
+//        await card.attach('#card-container');
+//      (SQUARE_APPLICATION_ID / SQUARE_LOCATION_ID are public identifiers: serve them from the backend.)
+//   3) on "Pay":
+//        const res = await card.tokenize();
+//        if (res.status !== 'OK') throw new Error(res.errors?.[0]?.message || 'Please check your card details');
+//        return res.token;   // "cnon:..." -> sent as `card_nonce`
+//
+//   SCA / buyer verification (payments.verifyBuyer) is NOT accepted by the API yet (next batch).
+//
+// Until then, in the Square SANDBOX only, the stub returns Square's public test nonce so the guest flow can
+// be exercised end to end. In production it throws: there is no way to pay without a real card token.
+// ---------------------------------------------------------------------------
+let squareEnv = null;
+async function getCardNonce() {
+  if (squareEnv === null) {
+    try { squareEnv = (await api('/healthz')).env; } catch { squareEnv = 'unknown'; }
+  }
+  if (squareEnv === 'sandbox') return 'cnon:card-nonce-ok'; // Square sandbox test nonce — DEV ONLY
+  throw new Error('Card payment is not available yet. Please ask your server.');
+}
+
+// Idempotency: one UUID per payment *attempt*. Re-sent unchanged on a network error / 5xx / 409 so the server
+// can never charge twice; replaced after a definite rejection (4xx) or a success.
+let attempt = null; // { sig, key }
+function attemptKey(sig) {
+  if (!attempt || attempt.sig !== sig) attempt = { sig, key: crypto.randomUUID() };
+  return attempt.key;
+}
+
 async function doPay() {
   const err = $('#err'); err.textContent='';
   $('#pay').disabled = true;
   try {
-    const r = await api('/api/checks/'+S.check.square_order_id+'/pay', { method:'POST',
-      body: JSON.stringify({ mode:S.mode, amount_cents:payAmount(), tip_cents:tipCents(payAmount()) }) });
+    const amount = payAmount(), tip = tipCents(amount);
+    const sig = [S.check.square_order_id, S.mode, amount, tip].join('|');
+    const nonce = await getCardNonce();
+    await api('/api/checks/'+encodeURIComponent(S.check.square_order_id)+'/pay', { method:'POST',
+      body: JSON.stringify({ mode:S.mode, amount_cents:amount, tip_cents:tip, card_nonce:nonce, idempotency_key:attemptKey(sig) }) });
+    attempt = null;
     await load();
-    if (r.checkState === 'COMPLETED') { /* render shows receipt */ }
-  } catch(e){ err.textContent = e.message; $('#pay').disabled=false; }
+  } catch(e){
+    if (e.status && e.status < 500 && e.status !== 409) attempt = null; // definite rejection -> fresh key next time
+    err.textContent = e.message; $('#pay').disabled=false;
+  }
 }
 
 async function callWaiter() {
-  try { await api('/api/tables/'+S.table.id+'/call-waiter',{method:'POST'}); alert('Your waiter is on the way!'); }
+  try { await api('/api/tables/'+encodeURIComponent(S.table.id)+'/call-waiter',{method:'POST'}); alert('Your waiter is on the way!'); }
   catch(e){ alert(e.message); }
 }
 load();

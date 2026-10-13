@@ -1,8 +1,11 @@
 // Owner/staff dashboard API: live table map, sales snapshot, service metrics.
+// Staff-only, and always scoped to ONE location (location_id is required).
 // Metrics are computed in JS from the events table (portable across Postgres/pg-mem).
 import { FastifyInstance } from 'fastify';
 import { query } from '../db.js';
 import { getOpenWaiterCalls, getTables } from '../services/floor.js';
+import { badRequest } from '../http.js';
+import { staffOnly } from '../auth.js';
 
 interface Ev {
   table_id: string | null;
@@ -18,22 +21,25 @@ function avgSeconds(pairs: Array<[string, string]>): number | null {
 }
 
 export async function dashboardRoutes(app: FastifyInstance) {
-  app.get('/api/dashboard/overview', async (req) => {
+  app.get('/api/dashboard/overview', staffOnly, async (req) => {
     const { location_id } = req.query as { location_id?: string };
+    if (!location_id) throw badRequest('location_id is required');
     const tables = await getTables(location_id);
-    const waiter_calls = await getOpenWaiterCalls(20);
+    const waiter_calls = await getOpenWaiterCalls(location_id, 20);
     return { tables, waiter_calls };
   });
 
-  app.get('/api/dashboard/metrics', async (req) => {
+  app.get('/api/dashboard/metrics', staffOnly, async (req) => {
     const { location_id, days } = req.query as { location_id?: string; days?: string };
-    const since = new Date(Date.now() - (parseInt(days ?? '7', 10) || 7) * 86400000).toISOString();
+    if (!location_id) throw badRequest('location_id is required');
+    const windowDays = Math.min(Math.max(parseInt(days ?? '7', 10) || 7, 1), 90);
+    const since = new Date(Date.now() - windowDays * 86400000).toISOString();
     const r = await query<Ev>(
       `SELECT e.table_id, e.check_id, e.type, e.created_at FROM events e
        JOIN tables t ON t.id = e.table_id
-       WHERE e.created_at >= $1 AND ($2::text IS NULL OR t.location_id = $2)
+       WHERE e.created_at >= $1 AND t.location_id = $2
        ORDER BY e.created_at`,
-      [since, location_id ?? null],
+      [since, location_id],
     );
     const evs = r.rows;
 
@@ -59,7 +65,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
       if (later) responsePairs.push([c.at, later]);
     }
     return {
-      window_days: parseInt(days ?? '7', 10) || 7,
+      window_days: windowDays,
       avg_settlement_secs: avgSeconds(settlementPairs),
       settled_checks: settlementPairs.length,
       avg_waiter_response_secs: avgSeconds(responsePairs),

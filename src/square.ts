@@ -4,6 +4,7 @@
 // and the split flow: 2x partial external payments (autocomplete=false) + PayOrder -> COMPLETED.
 import { randomUUID } from 'node:crypto';
 import { config, requireSquareToken } from './config.js';
+import { badRequest } from './http.js';
 
 const BASE =
   config.squareEnv === 'production' ? 'https://connect.squareup.com' : 'https://connect.squareupsandbox.com';
@@ -20,6 +21,28 @@ export class SquareError extends Error {
     this.errors = errors;
   }
 }
+
+/** First Square error code (e.g. CARD_DECLINED) if it looks like a plain enum, else null. Safe to show to clients. */
+export function squareErrorCode(e: SquareError): string | null {
+  const code = e.errors?.[0]?.code;
+  return typeof code === 'string' && /^[A-Z0-9_]{1,64}$/.test(code) ? code : null;
+}
+
+// ---- ID safety -------------------------------------------------------------
+// Every Square ID that is interpolated into a URL path (or sent as an identifier)
+// must pass assertSquareId() first -> 400 before any network call, and is then
+// encodeURIComponent()'d. This closes `..%2F..%2Fv2%2Flocations` style traversal.
+const SQUARE_ID_RE = /^[A-Za-z0-9_-]+$/;
+const SQUARE_ID_MAX = 255;
+
+export function assertSquareId(id: unknown, label = 'id'): string {
+  if (typeof id !== 'string' || id.length === 0 || id.length > SQUARE_ID_MAX || !SQUARE_ID_RE.test(id)) {
+    throw badRequest(`invalid ${label}`);
+  }
+  return id;
+}
+
+const pathSeg = (id: unknown, label: string): string => encodeURIComponent(assertSquareId(id, label));
 
 async function sq<T>(method: string, path: string, body?: unknown, token?: string): Promise<T> {
   const t = token ?? requireSquareToken();
@@ -70,6 +93,7 @@ export async function createOrder(
   idempotencyKey = randomUUID(),
   token?: string,
 ): Promise<{ order: SquareOrder }> {
+  assertSquareId(locationId, 'location_id');
   return sq('POST', '/v2/orders', {
     idempotency_key: idempotencyKey,
     order: {
@@ -87,7 +111,7 @@ export interface CreatePaymentInput {
   orderId: string;
   amountCents: number;
   currency: string;
-  /** Card nonce from Square Web Payments SDK, or 'EXTERNAL' for outside payments (cash / other rails). */
+  /** Card nonce from Square Web Payments SDK, or 'EXTERNAL' for outside payments (cash / other rails; staff-only callers). */
   sourceId: string;
   tipCents?: number;
   autocomplete?: boolean;
@@ -101,6 +125,15 @@ export async function createPayment(input: CreatePaymentInput, token?: string): 
     tipCents = 0, autocomplete = false,
     idempotencyKey = randomUUID(), externalSource,
   } = input;
+  assertSquareId(orderId, 'order_id');
+  if (typeof sourceId !== 'string' || sourceId.length === 0 || sourceId.length > 255) {
+    throw badRequest('invalid source_id');
+  }
+  // Defence in depth: an EXTERNAL (no money moves through Square) payment must be an explicit,
+  // named choice of the caller — never a default.
+  if (sourceId === 'EXTERNAL' && !externalSource) {
+    throw new Error('createPayment: EXTERNAL source requires externalSource');
+  }
   return sq('POST', '/v2/payments', {
     idempotency_key: idempotencyKey,
     source_id: sourceId,
@@ -110,7 +143,7 @@ export async function createPayment(input: CreatePaymentInput, token?: string): 
     autocomplete,
     app_fee_money: undefined,
     ...(sourceId === 'EXTERNAL'
-      ? { external_details: { type: 'OTHER_GIFT_CARD', source: externalSource ?? 'Smart Table' } }
+      ? { external_details: { type: 'OTHER_GIFT_CARD', source: externalSource } }
       : {}),
   }, token);
 }
@@ -121,14 +154,17 @@ export async function payOrder(
   idempotencyKey = randomUUID(),
   token?: string,
 ): Promise<{ order: SquareOrder }> {
-  return sq('POST', `/v2/orders/${orderId}/pay`, { idempotency_key: idempotencyKey, payment_ids: paymentIds }, token);
+  const oid = pathSeg(orderId, 'order_id');
+  paymentIds.forEach((p) => assertSquareId(p, 'payment_id'));
+  return sq('POST', `/v2/orders/${oid}/pay`, { idempotency_key: idempotencyKey, payment_ids: paymentIds }, token);
 }
 
 export async function retrieveOrder(orderId: string, token?: string): Promise<{ order: SquareOrder }> {
-  return sq('GET', `/v2/orders/${orderId}`, undefined, token);
+  return sq('GET', `/v2/orders/${pathSeg(orderId, 'order_id')}`, undefined, token);
 }
 
 export async function searchOpenOrders(locationId: string, token?: string): Promise<{ orders?: SquareOrder[] }> {
+  assertSquareId(locationId, 'location_id');
   return sq(
     'POST',
     '/v2/orders/search',

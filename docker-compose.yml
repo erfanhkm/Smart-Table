@@ -1,23 +1,38 @@
+# Local / single-host deployment.
+#   Required in your shell or a .env next to this file:  POSTGRES_PASSWORD, STAFF_API_TOKEN
+#   Production also requires SQUARE_WEBHOOK_SIGNATURE_KEY (the app refuses to boot without it).
+#   Local sandbox play:  NODE_ENV=development docker compose up --build
+# Postgres is NOT published to the host. To reach it from your machine for debugging,
+# uncomment the `ports` line under `db` (127.0.0.1 only).
 services:
   db:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: smarttable
-      POSTGRES_PASSWORD: smarttable
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (e.g. openssl rand -hex 24)}
       POSTGRES_DB: smarttable
-    ports:
-      - "5432:5432"
+    # ports:
+    #   - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smarttable -d smarttable"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   api:
     build: .
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
+      NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
       APP_URL: ${APP_URL:-http://localhost:3000}
-      DATABASE_URL: postgres://smarttable:smarttable@db:5432/smarttable
+      TRUST_PROXY: ${TRUST_PROXY:-}
+      DATABASE_URL: postgres://smarttable:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/smarttable
+      STAFF_API_TOKEN: ${STAFF_API_TOKEN:?set STAFF_API_TOKEN (e.g. openssl rand -hex 32)}
       SQUARE_ENV: ${SQUARE_ENV:-sandbox}
       SQUARE_ACCESS_TOKEN: ${SQUARE_ACCESS_TOKEN:-}
       SQUARE_LOCATION_ID: ${SQUARE_LOCATION_ID:-}
@@ -27,7 +42,7 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
     ports:
       - "3000:3000"
-    command: sh -c "npm run migrate && npm start"
+    command: ["sh", "-c", "node dist/migrate-cli.js && node dist/index.js"]
 
 volumes:
   pgdata:

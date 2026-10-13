@@ -1,24 +1,28 @@
 // Postgres access. Real Postgres via DATABASE_URL, or in-memory pg-mem when
 // PG_MEM=1 (used by tests/smoke so no docker is needed locally).
+// pg-mem is a devDependency: it is imported lazily, only on the PG_MEM path, so a
+// production image installed with `npm ci --omit=dev` never needs it.
 import { Pool, PoolClient } from 'pg';
-import { newDb } from 'pg-mem';
 import { config } from './config.js';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let pool: any = null;
+let poolPromise: Promise<Pool> | null = null;
 
-function getPool(): Pool {
-  if (pool) return pool as Pool;
+async function createPool(): Promise<Pool> {
   if (config.usePgMem) {
+    if (config.isProd) throw new Error('PG_MEM=1 is not allowed when NODE_ENV=production');
+    const { newDb } = await import('pg-mem');
     const db = newDb();
-    pool = new (db.adapters.createPg().Pool)();
-  } else {
-    if (!config.databaseUrl) {
-      throw new Error('DATABASE_URL is not set (or run with PG_MEM=1 for in-memory DB)');
-    }
-    pool = new Pool({ connectionString: config.databaseUrl });
+    return new (db.adapters.createPg().Pool)() as unknown as Pool;
   }
-  return pool as Pool;
+  if (!config.databaseUrl) {
+    throw new Error('DATABASE_URL is not set (or run with PG_MEM=1 for in-memory DB)');
+  }
+  return new Pool({ connectionString: config.databaseUrl });
+}
+
+function getPool(): Promise<Pool> {
+  if (!poolPromise) poolPromise = createPool();
+  return poolPromise;
 }
 
 export interface QueryResult<T> {
@@ -33,12 +37,14 @@ export function forUpdate(): string {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function query<T = any>(text: string, params?: unknown[]): Promise<QueryResult<T>> {
-  const res = await getPool().query(text, params as unknown[]);
+  const pool = await getPool();
+  const res = await pool.query(text, params as unknown[]);
   return { rows: res.rows as T[], rowCount: res.rowCount ?? 0 };
 }
 
 export async function withTx<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await getPool().connect();
+  const pool = await getPool();
+  const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const out = await fn(client);

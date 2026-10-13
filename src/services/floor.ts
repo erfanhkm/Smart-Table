@@ -1,6 +1,7 @@
 // Floor helpers shared by the staff API and the dashboard.
 // Written with plain, portable SQL (no correlated subqueries) so the same code
 // runs on real Postgres and on the pg-mem in-memory DB used by tests.
+// Both readers REQUIRE a location_id: there is no "all locations" fallback.
 import { query } from '../db.js';
 
 export interface TableView {
@@ -13,13 +14,21 @@ export interface TableView {
   paid_cents: number;
 }
 
-export async function getTables(locationId?: string | null): Promise<TableView[]> {
+function requireLocation(locationId: unknown, fn: string): string {
+  if (typeof locationId !== 'string' || locationId.length === 0) {
+    throw new Error(`${fn} requires a location_id`);
+  }
+  return locationId;
+}
+
+export async function getTables(locationId: string): Promise<TableView[]> {
+  const loc = requireLocation(locationId, 'getTables');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tables = await query<any>(
     `SELECT t.id, t.name, t.state, t.qr_token, t.location_id FROM tables t
-     WHERE ($1::text IS NULL OR t.location_id = $1)
+     WHERE t.location_id = $1
      ORDER BY t.name`,
-    [locationId ?? null],
+    [loc],
   );
   const ids = new Set(tables.rows.map((r) => r.id));
 
@@ -61,17 +70,25 @@ export interface WaiterCall {
   created_at: string;
 }
 
-/** Waiter calls with no later acknowledgement. */
-export async function getOpenWaiterCalls(limit = 20): Promise<WaiterCall[]> {
+/** Waiter calls at one location with no later acknowledgement. */
+export async function getOpenWaiterCalls(locationId: string, limit = 20): Promise<WaiterCall[]> {
+  const loc = requireLocation(locationId, 'getOpenWaiterCalls');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const calls = await query<any>(
     `SELECT e.id, e.table_id, t.name AS table_name, e.created_at
      FROM events e JOIN tables t ON t.id = e.table_id
-     WHERE e.type = 'call_waiter'
+     WHERE e.type = 'call_waiter' AND t.location_id = $1
      ORDER BY e.created_at DESC LIMIT 100`,
+    [loc],
   );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const acks = await query<any>(`SELECT table_id, created_at FROM events WHERE type = 'waiter_ack' ORDER BY created_at`);
+  const acks = await query<any>(
+    `SELECT e.table_id, e.created_at
+     FROM events e JOIN tables t ON t.id = e.table_id
+     WHERE e.type = 'waiter_ack' AND t.location_id = $1
+     ORDER BY e.created_at`,
+    [loc],
+  );
   return calls.rows
     .filter((c) => !acks.rows.some((a) => a.table_id === c.table_id && a.created_at > c.created_at))
     .slice(0, limit);
