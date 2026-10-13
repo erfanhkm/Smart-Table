@@ -96,363 +96,371 @@
             </div>
         </div>
 
-        <button class="floating-waiter" id="btn-call-waiter" onclick="callWaiter()">
+        <button class="floating-waiter" id="btn-call-waiter" data-action="waiter">
             🔔 Call Waiter
         </button>
 
         <div class="pay-footer" id="pay-footer" style="display: none;">
+            <div id="card-container"></div>
             <div class="trust-badge">🔒 Secure payment · No app needed · No account needed</div>
-            <button class="btn-primary" id="btn-pay-main" onclick="processPayment()">Pay $0.00</button>
+            <button class="btn-primary" id="btn-pay-main" data-action="pay">Pay $0.00</button>
         </div>
     </div>
 
     <script>
-        const API_BASE = '';
-        const SQUARE_APP_ID = 'sandbox-sq0idp-PLACEHOLDER';
-        const SQUARE_LOCATION_ID = 'LOC-PLACEHOLDER';
+'use strict';
+// ---------------------------------------------------------------------------
+// Smart Table — guest app. API contract (backend v0.2):
+//   GET  /api/t/:token                      -> { table:{id,name,state}, check:null|{square_order_id,total_cents,currency,remaining_cents,items[],tenders[]} }
+//   POST /api/checks/:squareOrderId/pay     <- { mode, amount_cents, tip_cents, card_nonce, idempotency_key }
+//                                           -> { paymentId, remainingCents, checkState, currency, replayed }
+//   errors: { error:<message>, code?:<machine code> }   (read `code`, never match on `error`)
+//   POST /api/tables/:tableId/call-waiter
+// ---------------------------------------------------------------------------
 
-        function getTableToken() {
-            const pathParts = window.location.pathname.split('/');
-            const tIndex = pathParts.indexOf('t');
-            if (tIndex !== -1 && pathParts[tIndex + 1]) {
-                return pathParts[tIndex + 1];
-            }
-            const params = new URLSearchParams(window.location.search);
-            return params.get('token') || 'demo-token';
+// TODO(card-pilot): serve these (public) identifiers from the backend; location = the Square location of this table.
+const SQUARE_APP_ID = 'sandbox-sq0idp-PLACEHOLDER';
+const SQUARE_LOCATION_ID = 'LOC-PLACEHOLDER';
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function uuid() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+    const h = Array.from(b, (x) => x.toString(16).padStart(2, '0'));
+    return `${h.slice(0, 4).join('')}-${h.slice(4, 6).join('')}-${h.slice(6, 8).join('')}-${h.slice(8, 10).join('')}-${h.slice(10).join('')}`;
+}
+
+function formatMoney(cents, currency) {
+    try { return new Intl.NumberFormat('en-CA', { style: 'currency', currency: currency || 'CAD' }).format(cents / 100); }
+    catch { return (cents / 100).toFixed(2) + ' ' + esc(currency || ''); }
+}
+
+function getTableToken() {
+    const parts = location.pathname.split('/').filter(Boolean);
+    const i = parts.indexOf('t');
+    if (i === -1 || !parts[i + 1]) return null;
+    try { return decodeURIComponent(parts[i + 1]); } catch { return null; }
+}
+const tableToken = getTableToken();
+
+// ---- state ----------------------------------------------------------------
+let table = null;
+let check = null;
+let receipt = null;          // sticky success snapshot (GET /api/t/:token no longer returns a completed check)
+let loadFailed = false;
+let mode = 'full', people = 2, customCents = 0, items = {}, tipPct = 15;
+let paying = false;
+let notice = null;           // { text, kind: 'err' | 'ok' }
+let lastRenderKey = '';
+let renderDeferred = false;
+
+const setNotice = (text, kind = 'err') => { notice = text ? { text, kind } : null; };
+
+// ---- payment attempts (idempotency) ----------------------------------------
+// ONE attempt = one idempotency key + frozen {mode, amount, tip}. It is persisted (sessionStorage, with an in-memory
+// fallback) so a reload cannot lose an unconfirmed attempt. The key is rotated ONLY after the server confirmed that
+// nothing was charged (400, 402, 409 payment_failed|payment_cancelled) or after success. It is NEVER rotated on a
+// network error, timeout, 5xx, 429, unparseable response, or 409 idempotency_key_reused / payment_state_unknown /
+// payment_needs_reconciliation: those may have charged the card.
+const memAttempts = new Map();
+const attemptStoreKey = (orderId) => 'st_attempt_' + orderId;
+function loadAttempt(orderId) {
+    let a = memAttempts.get(orderId) || null;
+    if (!a) {
+        try { a = JSON.parse(sessionStorage.getItem(attemptStoreKey(orderId)) || 'null'); } catch { a = null; }
+    }
+    return a && typeof a.key === 'string' ? a : null;
+}
+function saveAttempt(a) {
+    memAttempts.set(a.orderId, a);
+    try { sessionStorage.setItem(attemptStoreKey(a.orderId), JSON.stringify(a)); } catch { /* private mode: memory copy only */ }
+}
+function clearAttempt(orderId) {
+    memAttempts.delete(orderId);
+    try { sessionStorage.removeItem(attemptStoreKey(orderId)); } catch { /* ignore */ }
+}
+const currentAttempt = () => (check ? loadAttempt(check.square_order_id) : null);
+
+// If the bill moved since the unconfirmed attempt, the attempt may have gone through (or someone else paid):
+// drop it and make the guest look at "Already paid" before paying again.
+function reconcileAttempt() {
+    const a = currentAttempt();
+    if (a && check && check.remaining_cents !== a.remainingBefore) {
+        clearAttempt(a.orderId);
+        setNotice('Your bill changed since your last payment attempt. If that payment went through you will see it under "Already paid". Please review the balance before paying again.', 'err');
+    }
+}
+
+// ---- amounts ----------------------------------------------------------------
+function payCents() {
+    if (!check) return 0;
+    const r = check.remaining_cents;
+    if (mode === 'full') return r;
+    if (mode === 'equal') return Math.min(r, Math.ceil(r / people));
+    if (mode === 'custom') return Math.min(r, Math.max(0, customCents));
+    let sum = 0;
+    check.items.forEach((it, idx) => { if (items[idx]) sum += it.amount_cents; });
+    return Math.min(r, sum);
+}
+const tipCentsFor = (pay) => (tipPct === 0 ? 0 : Math.round(pay * (tipPct / 100)));
+
+// ---- card nonce (Square Web Payments SDK integration point) -------------------
+// TODO(card-pilot): replace the body of getCardNonce() with the real SDK flow. Exact call shape:
+//   1) <script src="https://sandbox.web.squarecdn.com/v1/square.js"></script>   (prod: https://web.squarecdn.com/v1/square.js)
+//   2) ONCE per page, mounted into #card-container — which lives in the static footer, OUTSIDE #main-content, so the
+//      5s refresh / render() can never destroy the SDK iframe:
+//        const payments = window.Square.payments(SQUARE_APP_ID, SQUARE_LOCATION_ID);
+//        card = await payments.card();  await card.attach('#card-container');
+//   3) here: const r = await card.tokenize();
+//            if (r.status !== 'OK') throw new Error(r.errors?.[0]?.message || 'Please check your card details');
+//            return r.token;            // "cnon:..." -> card_nonce. Single-use: tokenize again on every attempt, also on retries.
+//   Tokenize BEFORE an attempt/key exists (see processPayment): a tokenize failure must never touch idempotency state.
+//   CSP will need web.squarecdn.com + pci-connect.squareup.com (script/frame/connect) — plus a nonce/hash for the inline script.
+let squareEnv = null;
+async function getCardNonce() {
+    if (squareEnv === null) {
+        try { squareEnv = (await (await fetch('/healthz')).json()).env; } catch { squareEnv = 'unknown'; }
+    }
+    if (squareEnv === 'sandbox') return 'cnon:card-nonce-ok'; // Square's public sandbox test nonce — DEV ONLY
+    throw new Error('Card payment is not available yet. Please ask your server.');
+}
+
+// ---- data -------------------------------------------------------------------
+async function fetchBill() {
+    if (receipt || !tableToken) return;
+    try {
+        const res = await fetch(`/api/t/${encodeURIComponent(tableToken)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Failed to load table info');
+        table = data.table; check = data.check; loadFailed = false;
+        reconcileAttempt();
+    } catch (err) {
+        if (!table) loadFailed = true; // keep showing the last good bill on transient errors
+    }
+    render();
+}
+
+async function callWaiter() {
+    if (!table) return;
+    const btn = $('btn-call-waiter');
+    try {
+        const res = await fetch(`/api/tables/${encodeURIComponent(table.id)}/call-waiter`, { method: 'POST' });
+        if (!res.ok) throw new Error('call failed');
+        btn.textContent = '✓ Waiter on the way';
+        btn.style.background = '#DCFCE7'; btn.style.color = '#16A34A';
+        setTimeout(() => { btn.textContent = '🔔 Call Waiter'; btn.style.background = 'white'; btn.style.color = 'var(--navy)'; }, 5000);
+    } catch { alert('Could not call the waiter right now. Please wave to your server.'); }
+}
+
+// ---- pay ---------------------------------------------------------------------
+const UNCONFIRMED = 'We could not confirm whether your payment went through. Tap "Retry payment" — it is safe: the same request is re-sent and you will not be charged twice.';
+const ASK_STAFF = 'We could not confirm your payment. Please ask your server — do NOT pay again.';
+
+async function processPayment() {
+    if (paying || !check || receipt) return;
+    const orderId = check.square_order_id;
+    let a = loadAttempt(orderId);
+    if (a && a.blocked) return;
+
+    const base = a ? { mode: a.mode, amount: a.amount, tip: a.tip } : (() => { const p = payCents(); return { mode, amount: p, tip: tipCentsFor(p) }; })();
+    if (!Number.isInteger(base.amount) || base.amount <= 0 || !Number.isInteger(base.tip) || base.tip < 0 || base.tip > base.amount) {
+        setNotice('Please select a valid amount to pay.'); render(true); return;
+    }
+
+    paying = true; setNotice(null); render(true);
+    try {
+        let nonce;
+        try { nonce = await getCardNonce(); }
+        catch (e) { setNotice(e.message || 'Card entry failed — please try again.'); return; } // no attempt exists yet: nothing to resolve
+
+        if (!a) {
+            a = { orderId, key: uuid(), mode: base.mode, amount: base.amount, tip: base.tip, remainingBefore: check.remaining_cents, blocked: false, ts: Date.now() };
+            saveAttempt(a); // persisted BEFORE the request: a reload / lost response keeps the key
         }
 
-        const tableToken = getTableToken();
-        let currentCheck = null;
-        let tableData = null;
-        let splitMode = 'full';
-        let equalPeople = 2;
-        let customAmountCents = 0;
-        let selectedItemsMap = {};
-        let selectedTipPercent = 15;
-        let currentIdempotencyKey = generateUUIDv4();
-        let errorMessage = null;
-
-        function generateUUIDv4() {
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-                const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-                return v.toString(16);
+        let res;
+        try {
+            res = await fetch(`/api/checks/${encodeURIComponent(orderId)}/pay`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: a.mode, amount_cents: a.amount, tip_cents: a.tip, card_nonce: nonce, idempotency_key: a.key }),
             });
-        }
+        } catch { setNotice(UNCONFIRMED); return; } // network error: outcome unknown -> keep the attempt
 
-        function formatMoney(cents, currency = 'CAD') {
-            return new Intl.NumberFormat('en-CA', { style: 'currency', currency: currency }).format(cents / 100);
-        }
+        const data = await res.json().catch(() => ({}));
+        const code = data.code;
 
-        async function fetchBill() {
-            try {
-                const res = await fetch(`${API_BASE}/api/t/${tableToken}`);
-                if (!res.ok) throw new Error('Failed to load table info');
-                const data = await res.json();
-                tableData = data.table;
-                currentCheck = data.check;
-                renderApp();
-            } catch (err) {
-                console.error(err);
+        if (res.ok) {
+            clearAttempt(orderId);
+            if (data.checkState === 'COMPLETED') {
+                receipt = { items: check.items, total_cents: check.total_cents, currency: check.currency };
+            } else {
+                setNotice(`Payment received ✓ Remaining balance: ${formatMoney(data.remainingCents ?? 0, check.currency)}`, 'ok');
             }
+            return;
         }
-
-        async function callWaiter() {
-            if (!tableData) return;
-            try {
-                await fetch(`${API_BASE}/api/tables/${tableData.id}/call-waiter`, { method: 'POST' });
-                const btn = document.getElementById('btn-call-waiter');
-                btn.innerHTML = '✓ Waiter on the way';
-                btn.style.background = '#DCFCE7';
-                btn.style.color = '#16A34A';
-                setTimeout(() => {
-                    btn.innerHTML = '🔔 Call Waiter';
-                    btn.style.background = 'white';
-                    btn.style.color = 'var(--navy)';
-                }, 5000);
-            } catch(e) {
-                alert('Could not call waiter at the moment.');
-            }
+        if (res.status === 400) { clearAttempt(orderId); setNotice(data.error || 'Payment could not be processed.'); return; }
+        if (res.status === 402) { clearAttempt(orderId); setNotice('Card declined or could not be charged — you were not charged. Please try another card.'); return; }
+        if (res.status === 409 && (code === 'payment_failed' || code === 'payment_cancelled')) {
+            clearAttempt(orderId); setNotice('That attempt did not go through and you were not charged. Please try again or use another card.'); return;
         }
+        if (res.status === 409) { // payment_state_unknown | payment_needs_reconciliation | idempotency_key_reused | anything else
+            a.blocked = true; saveAttempt(a); setNotice(ASK_STAFF); return;
+        }
+        setNotice(UNCONFIRMED); // 5xx / 429 / unexpected: unknown outcome -> keep the attempt
+    } finally {
+        paying = false;
+        render(true);
+        if (!receipt) fetchBill();
+    }
+}
 
-        function renderApp() {
-            document.getElementById('table-badge-label').innerText = tableData ? `Table ${tableData.name}` : 'Table';
-            const container = document.getElementById('main-content');
-            const footer = document.getElementById('pay-footer');
+// ---- render -------------------------------------------------------------------
+function noticeHtml() {
+    if (!notice) return '';
+    if (notice.kind === 'ok') return `<div class="alert-box" style="background:#DCFCE7;color:#166534;border-color:#86EFAC;">${esc(notice.text)}</div>`;
+    return `<div class="alert-box">${esc(notice.text)}</div>`;
+}
 
-            if (!currentCheck) {
-                footer.style.display = 'none';
-                container.innerHTML = `
-                    <div class="empty-state">
-                        <h3>Your bill will appear here soon</h3>
-                        <p>Your bill will appear here as soon as your order is fired by your server.</p>
-                    </div>
-                `;
-                return;
-            }
+function updatePayButton() {
+    const btn = $('btn-pay-main');
+    const footer = $('pay-footer');
+    if (!check || receipt || check.remaining_cents <= 0) { footer.style.display = 'none'; return; }
+    footer.style.display = 'flex';
+    const a = currentAttempt();
+    if (a && a.blocked) { btn.disabled = true; btn.textContent = 'Ask your server'; return; }
+    if (a) { btn.disabled = paying; btn.textContent = paying ? 'Processing payment...' : `Retry payment · ${formatMoney(a.amount + a.tip, check.currency)}`; return; }
+    const p = payCents();
+    btn.disabled = paying;
+    btn.textContent = paying ? 'Processing payment...' : `Pay ${formatMoney(p + tipCentsFor(p), check.currency)}`;
+}
 
-            if (currentCheck.state === 'COMPLETED' || currentCheck.remaining_cents <= 0) {
-                footer.style.display = 'none';
-                container.innerHTML = renderSuccessState();
-                return;
-            }
+function render(force = false) {
+    const active = document.activeElement;
+    const typing = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+    const key = JSON.stringify([table, check, loadFailed, !!receipt, notice, paying, mode, people, items, tipPct, currentAttempt()]);
+    if (!force && key === lastRenderKey) return;            // poll with no change: leave the DOM (and focus) alone
+    if (!force && typing) { renderDeferred = true; return; } // never rebuild the DOM under a focused input
+    lastRenderKey = key; renderDeferred = false;
 
-            footer.style.display = 'flex';
-            
-            let calculatedPayCents = getCalculatedPayCents();
-            let tipCents = getCalculatedTipCents(calculatedPayCents);
-            let totalDueCents = calculatedPayCents + tipCents;
+    $('table-badge-label').textContent = table ? `Table ${table.name}` : 'Table';
+    const container = $('main-content');
 
-            document.getElementById('btn-pay-main').innerText = `Pay ${formatMoney(totalDueCents, currentCheck.currency)}`;
+    if (!tableToken) { $('pay-footer').style.display = 'none'; container.innerHTML = '<div class="empty-state"><h3>Invalid link</h3><p>Please scan the QR code on your table again.</p></div>'; return; }
+    if (loadFailed) { $('pay-footer').style.display = 'none'; container.innerHTML = '<div class="empty-state"><h3>Could not load your bill</h3><p>Retrying… If this continues, please ask your server.</p></div>'; return; }
+    if (receipt) { $('pay-footer').style.display = 'none'; container.innerHTML = noticeHtml() + renderSuccessState(); return; }
+    if (!check) {
+        $('pay-footer').style.display = 'none';
+        container.innerHTML = `${noticeHtml()}<div class="empty-state"><h3>${table ? 'Your bill will appear here soon' : 'Loading your bill...'}</h3><p>${table ? 'Your bill will appear here as soon as your order is fired by your server.' : 'Connecting securely to the restaurant.'}</p></div>`;
+        return;
+    }
+    if (check.state === 'COMPLETED' || check.remaining_cents <= 0) { $('pay-footer').style.display = 'none'; container.innerHTML = renderSuccessState(); return; }
 
-            container.innerHTML = `
-                ${errorMessage ? `<div class="alert-box">${escapeHtml(errorMessage)}</div>` : ''}
-                
-                <div class="card">
-                    <h2>Itemized Bill</h2>
-                    <div id="items-list">
-                        ${currentCheck.items.map(i => `
-                            <div class="item-row">
-                                <span>${i.quantity} × ${escapeHtml(i.name)}</span>
-                                <span class="tabular">${formatMoney(i.amount_cents, currentCheck.currency)}</span>
-                            </div>
-                        `).join('')}
-                    </div>
+    const a = currentAttempt();
+    updatePayButton();
 
-                    ${currentCheck.tenders && currentCheck.tenders.length > 0 ? `
-                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border);">
-                            <div style="font-size:0.8rem; font-weight:600; color:var(--text-muted); margin-bottom:6px;">ALREADY PAID</div>
-                            ${currentCheck.tenders.map(t => `
-                                <div class="item-row" style="color:var(--green);">
-                                    <span>Tender (${t.type || 'Card'})</span>
-                                    <span class="tabular">-${formatMoney(t.amount_cents, currentCheck.currency)}</span>
-                                </div>
-                            `).join('')}
-                        </div>
-                    ` : ''}
+    const itemsHtml = check.items.map((i) => `
+        <div class="item-row"><span>${esc(i.quantity)} × ${esc(i.name)}</span><span class="tabular">${formatMoney(i.amount_cents, check.currency)}</span></div>`).join('');
+    const tendersHtml = check.tenders && check.tenders.length ? `
+        <div style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--border);">
+            <div style="font-size:0.8rem;font-weight:600;color:var(--text-muted);margin-bottom:6px;">ALREADY PAID</div>
+            ${check.tenders.map((t) => `<div class="item-row" style="color:var(--green);"><span>Payment (${esc(t.type || 'Card')})</span><span class="tabular">-${formatMoney(t.amount_cents, check.currency)}</span></div>`).join('')}
+        </div>` : '';
 
-                    <div class="totals-box">
-                        <div class="total-line"><span>Total Bill</span><span class="tabular">${formatMoney(currentCheck.total_cents, currentCheck.currency)}</span></div>
-                        <div class="hero-total-line"><span>Remaining Due</span><span class="tabular">${formatMoney(currentCheck.remaining_cents, currentCheck.currency)}</span></div>
-                    </div>
+    let controls = '';
+    if (a) {
+        controls = `<div class="card"><h2>${a.blocked ? 'Payment needs attention' : 'Unconfirmed payment'}</h2>
+            <p style="font-size:0.9rem;color:var(--text-muted);">${a.blocked ? 'Please ask your server before paying again.' : `Your last attempt (${formatMoney(a.amount, check.currency)} + ${formatMoney(a.tip, check.currency)} tip) was not confirmed. Retrying re-sends exactly that payment and cannot charge you twice.`}</p></div>`;
+    } else {
+        controls = `
+            <div class="card"><h2>Split Payment</h2>
+                <div class="split-tabs">
+                    ${['full', 'equal', 'custom', 'items'].map((m) => `<button class="split-tab ${mode === m ? 'active' : ''}" data-action="mode" data-v="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}
                 </div>
-
-                <div class="card">
-                    <h2>Split Payment</h2>
-                    <div class="split-tabs">
-                        <button class="split-tab ${splitMode==='full'?'active':''}" onclick="setSplitMode('full')">Full</button>
-                        <button class="split-tab ${splitMode==='equal'?'active':''}" onclick="setSplitMode('equal')">Equal</button>
-                        <button class="split-tab ${splitMode==='custom'?'active':''}" onclick="setSplitMode('custom')">Custom</button>
-                        <button class="split-tab ${splitMode==='items'?'active':''}" onclick="setSplitMode('items')">Items</button>
-                    </div>
-
-                    ${renderSplitUI()}
+                ${renderSplitUI()}
+            </div>
+            <div class="card"><h2>Add Tip</h2>
+                <div class="tip-chips">
+                    ${[15, 18, 20, 25, 0].map((p) => `<div class="tip-chip ${tipPct === p ? 'active' : ''}" data-action="tip" data-v="${p}">${p === 0 ? 'None' : p + '%'}</div>`).join('')}
                 </div>
+            </div>`;
+    }
 
-                <div class="card">
-                    <h2>Add Tip</h2>
-                    <div class="tip-chips">
-                        <div class="tip-chip ${selectedTipPercent===15?'active':''}" onclick="setTip(15)">15%</div>
-                        <div class="tip-chip ${selectedTipPercent===18?'active':''}" onclick="setTip(18)">18%</div>
-                        <div class="tip-chip ${selectedTipPercent===20?'active':''}" onclick="setTip(20)">20%</div>
-                        <div class="tip-chip ${selectedTipPercent===25?'active':''}" onclick="setTip(25)">25%</div>
-                        <div class="tip-chip ${selectedTipPercent===0?'active':''}" onclick="setTip(0)">None</div>
-                    </div>
-                </div>
-            `;
-        }
+    container.innerHTML = `
+        ${noticeHtml()}
+        <div class="card"><h2>Itemized Bill</h2>
+            <div id="items-list">${itemsHtml}</div>
+            ${tendersHtml}
+            <div class="totals-box">
+                <div class="total-line"><span>Total Bill</span><span class="tabular">${formatMoney(check.total_cents, check.currency)}</span></div>
+                <div class="hero-total-line"><span>Remaining Due</span><span class="tabular">${formatMoney(check.remaining_cents, check.currency)}</span></div>
+            </div>
+        </div>
+        ${controls}`;
+}
 
-        function renderSplitUI() {
-            if (splitMode === 'full') {
-                return `<p style="font-size:0.9rem; color:var(--text-muted);">Paying the full remaining balance of <strong>${formatMoney(currentCheck.remaining_cents, currentCheck.currency)}</strong>.</p>`;
-            } else if (splitMode === 'equal') {
-                const share = Math.ceil(currentCheck.remaining_cents / equalPeople);
-                return `
-                    <div class="stepper">
-                        <button onclick="adjustEqual(-1)">-</button>
-                        <span>Split among ${equalPeople} people</span>
-                        <button onclick="adjustEqual(1)">+</button>
-                    </div>
-                    <p style="font-size:0.9rem; color:var(--text-muted); text-align:center;">Your share: <strong class="tabular">${formatMoney(share, currentCheck.currency)}</strong></p>
-                `;
-            } else if (splitMode === 'custom') {
-                return `
-                    <div class="input-group">
-                        <label>Custom Amount ($)</label>
-                        <input type="number" step="0.01" max="${currentCheck.remaining_cents/100}" value="${(customAmountCents/100).toFixed(2)}" oninput="updateCustomAmount(this.value)" placeholder="0.00">
-                    </div>
-                `;
-            } else if (splitMode === 'items') {
-                return `
-                    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:10px;">Tap items you are paying for:</p>
-                    <div class="items-select-list">
-                        ${currentCheck.items.map((item, idx) => `
-                            <label class="item-checkbox">
-                                <input type="checkbox" ${selectedItemsMap[idx] ? 'checked' : ''} onchange="toggleItem(${idx}, ${item.amount_cents})">
-                                <div style="flex:1; display:flex; justify-content:space-between;">
-                                    <span>${escapeHtml(item.name)}</span>
-                                    <span class="tabular">${formatMoney(item.amount_cents, currentCheck.currency)}</span>
-                                </div>
-                            </label>
-                        `).join('')}
-                    </div>
-                `;
-            }
-            return '';
-        }
+function renderSplitUI() {
+    const cur = check.currency;
+    if (mode === 'full') return `<p style="font-size:0.9rem;color:var(--text-muted);">Paying the full remaining balance of <strong>${formatMoney(check.remaining_cents, cur)}</strong>.</p>`;
+    if (mode === 'equal') {
+        const share = Math.min(check.remaining_cents, Math.ceil(check.remaining_cents / people));
+        return `<div class="stepper"><button data-action="equal" data-v="-1">-</button><span>Split among ${people} people</span><button data-action="equal" data-v="1">+</button></div>
+            <p style="font-size:0.9rem;color:var(--text-muted);text-align:center;">Your share: <strong class="tabular">${formatMoney(share, cur)}</strong></p>`;
+    }
+    if (mode === 'custom') {
+        return `<div class="input-group"><label>Custom Amount</label>
+            <input type="number" inputmode="decimal" step="0.01" min="0" max="${check.remaining_cents / 100}" value="${customCents ? (customCents / 100).toFixed(2) : ''}" data-input="custom" placeholder="0.00"></div>`;
+    }
+    return `<p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">Tap items you are paying for. Item totals exclude tax and service — use Full or Custom to cover those.</p>
+        <div class="items-select-list">
+            ${check.items.map((it, idx) => `<label class="item-checkbox"><input type="checkbox" ${items[idx] ? 'checked' : ''} data-item="${idx}">
+                <div style="flex:1;display:flex;justify-content:space-between;"><span>${esc(it.name)}</span><span class="tabular">${formatMoney(it.amount_cents, cur)}</span></div></label>`).join('')}
+        </div>`;
+}
 
-        function setSplitMode(mode) {
-            splitMode = mode;
-            errorMessage = null;
-            renderApp();
-        }
+function renderSuccessState() {
+    const src = receipt || check;
+    return `<div class="success-box"><div class="success-icon">✓</div>
+        <h2>Payment Successful!</h2>
+        <p style="color:var(--text-muted);font-size:0.9rem;margin-bottom:20px;">Thank you for dining with us. Your payment has been processed.</p>
+        <div class="card" style="text-align:left;"><h2>Receipt Summary</h2>
+            ${src.items.map((i) => `<div class="item-row"><span>${esc(i.quantity)} × ${esc(i.name)}</span><span class="tabular">${formatMoney(i.amount_cents, src.currency)}</span></div>`).join('')}
+            <div class="totals-box"><div class="total-line"><span>Total Settled</span><span class="tabular">${formatMoney(src.total_cents, src.currency)}</span></div></div>
+        </div></div>`;
+}
 
-        function adjustEqual(delta) {
-            equalPeople = Math.min(12, Math.max(2, equalPeople + delta));
-            renderApp();
-        }
+// ---- events (no inline handlers: CSP-friendly) ---------------------------------
+document.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    switch (el.dataset.action) {
+        case 'mode': mode = el.dataset.v; setNotice(null); render(true); break;
+        case 'equal': people = Math.min(12, Math.max(2, people + Number(el.dataset.v))); render(true); break;
+        case 'tip': tipPct = Number(el.dataset.v); render(true); break;
+        case 'pay': processPayment(); break;
+        case 'waiter': callWaiter(); break;
+    }
+});
+document.addEventListener('input', (e) => {
+    if (e.target.matches && e.target.matches('[data-input="custom"]')) {
+        const v = parseFloat(e.target.value);
+        customCents = Number.isFinite(v) && v > 0 ? Math.round(v * 100) : 0;
+        updatePayButton(); // label only: do not rebuild the DOM while typing
+    }
+});
+document.addEventListener('change', (e) => {
+    if (e.target.matches && e.target.matches('[data-item]')) { items[e.target.dataset.item] = e.target.checked; render(true); }
+});
+document.addEventListener('focusout', () => { if (renderDeferred) setTimeout(() => render(true), 0); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) fetchBill(); });
 
-        function updateCustomAmount(val) {
-            customAmountCents = Math.round(parseFloat(val || 0) * 100);
-        }
+setInterval(() => { if (!document.hidden && !paying) fetchBill(); }, 5000);
+render(true);
+fetchBill();
 
-        function toggleItem(idx, amt) {
-            selectedItemsMap[idx] = !selectedItemsMap[idx];
-            renderApp();
-        }
-
-        function setTip(pct) {
-            selectedTipPercent = pct;
-            renderApp();
-        }
-
-        function getCalculatedPayCents() {
-            if (!currentCheck) return 0;
-            if (splitMode === 'full') return currentCheck.remaining_cents;
-            if (splitMode === 'equal') return Math.ceil(currentCheck.remaining_cents / equalPeople);
-            if (splitMode === 'custom') return Math.min(currentCheck.remaining_cents, Math.max(0, customAmountCents));
-            if (splitMode === 'items') {
-                let sum = 0;
-                currentCheck.items.forEach((item, idx) => {
-                    if (selectedItemsMap[idx]) sum += item.amount_cents;
-                });
-                return Math.min(currentCheck.remaining_cents, sum);
-            }
-            return currentCheck.remaining_cents;
-        }
-
-        function getCalculatedTipCents(payCents) {
-            if (selectedTipPercent === 0) return 0;
-            return Math.round(payCents * (selectedTipPercent / 100));
-        }
-
-        async function processPayment() {
-            if (!currentCheck) return;
-            const amountCents = getCalculatedPayCents();
-            const tipCents = getCalculatedTipCents(amountCents);
-            
-            if (amountCents <= 0) {
-                errorMessage = 'Please select a valid amount to pay.';
-                renderApp();
-                return;
-            }
-
-            const payload = {
-                mode: splitMode,
-                amount_cents: amountCents,
-                tip_cents: tipCents,
-                card_nonce: 'cnon:mock-square-token-' + Math.random().toString(36).substring(7),
-                idempotency_key: currentIdempotencyKey
-            };
-
-            const btn = document.getElementById('btn-pay-main');
-            btn.disabled = true;
-            btn.innerText = 'Processing payment...';
-            errorMessage = null;
-
-            try {
-                const res = await fetch(`${API_BASE}/api/checks/${currentCheck.square_order_id}/pay`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                
-                if (!res.ok) {
-                    if (res.status === 402) {
-                        throw new Error('Card declined — please try another card.');
-                    } else if (res.status === 409) {
-                        if (data.error === 'idempotency_key_reused') {
-                            currentIdempotencyKey = generateUUIDv4(); // backend says start fresh — allow retry
-                            throw new Error('That payment key was already used — a new one was started, please try again.');
-                        }
-                        throw new Error(data.message || 'Please check with staff — do NOT pay again.');
-                    }
-                    throw new Error(data.message || 'Payment failed validation.');
-                }
-
-                currentIdempotencyKey = generateUUIDv4();
-                selectedItemsMap = {};
-                await fetchBill();
-            } catch (err) {
-                errorMessage = err.message;
-                btn.disabled = false;
-                renderApp();
-            }
-        }
-
-        function renderSuccessState() {
-            return `
-                <div class="success-box">
-                    <div class="success-icon">✓</div>
-                    <h2>Payment Successful!</h2>
-                    <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:20px;">Thank you for dining with us. Your payment has been securely processed.</p>
-                    
-                    <div class="card" style="text-align:left;">
-                        <h2>Receipt Summary</h2>
-                        ${currentCheck.items.map(i => `
-                            <div class="item-row">
-                                <span>${i.quantity} × ${escapeHtml(i.name)}</span>
-                                <span class="tabular">${formatMoney(i.amount_cents, currentCheck.currency)}</span>
-                            </div>
-                        `).join('')}
-                        <div class="totals-box">
-                            <div class="total-line"><span>Total Settled</span><span class="tabular">${formatMoney(currentCheck.total_cents, currentCheck.currency)}</span></div>
-                        </div>
-                    </div>
-
-                    <div class="card" style="text-align:left;">
-                        <h2>Leave Private Feedback</h2>
-                        <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:8px;">Only the restaurant manager sees this.</p>
-                        <div class="star-rating" id="star-rating">
-                            <span onclick="setRating(1)">★</span><span onclick="setRating(2)">★</span><span onclick="setRating(3)">★</span><span onclick="setRating(4)">★</span><span onclick="setRating(5)">★</span>
-                        </div>
-                        <textarea id="feedback-comment" placeholder="Tell us about your experience..."></textarea>
-                        <button class="btn-primary" onclick="submitFeedback()" style="padding:12px; font-size:0.95rem;">Send Feedback</button>
-                    </div>
-                </div>
-            `;
-        }
-
-        let currentRating = 5;
-        function setRating(r) {
-            currentRating = r;
-            const stars = document.querySelectorAll('#star-rating span');
-            stars.forEach((s, idx) => {
-                s.style.color = idx < r ? 'var(--amber)' : '#CBD5E1';
-            });
-        }
-
-        function submitFeedback() {
-            alert('Thank you! Your feedback has been sent to management.');
-            window.location.reload();
-        }
-
-        function escapeHtml(str) {
-            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-        }
-
-        setInterval(fetchBill, 5000);
-        fetchBill();
     </script>
 </body>
 </html>
