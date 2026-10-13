@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Table — Staff Dashboard</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --txt:#f1f5f9; --mut:#94a3b8; --acc:#38bdf8; --ok:#34d399; --warn:#fbbf24; --busy:#f87171; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--txt); }
+  .wrap { max-width:1100px; margin:0 auto; padding:20px 16px 40px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; }
+  .tcard { background:var(--card); border-radius:14px; padding:14px; border-left:6px solid #475569; }
+  .tcard.FREE{border-color:#475569}.tcard.SEATED{border-color:var(--acc)}
+  .tcard.PAYING{border-color:var(--warn)}.tcard.PAID{border-color:var(--ok)}
+  .tcard h3{margin:0 0 6px;font-size:20px}
+  .mut{color:var(--mut);font-size:13px}
+  .card{background:var(--card);border-radius:14px;padding:16px;margin:14px 0}
+  button{background:var(--acc);color:#06202e;border:none;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer;margin:4px 4px 0 0}
+  button.ghost{background:#334155;color:var(--txt)}
+  input,select{padding:10px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:var(--txt);font-size:14px;margin:4px 4px 0 0}
+  .call{background:#7c2d12;border-radius:10px;padding:10px 14px;margin:6px 0;display:flex;justify-content:space-between;align-items:center}
+  h2{margin:6px 0 10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Smart Table — Live floor</h1>
+  <p class="mut">Auto-refreshes every 5s · <span id="clock"></span></p>
+  <div class="grid" id="tables"></div>
+
+  <div class="card"><h2>Link a check to a table</h2>
+    <p class="mut">Pick the open Square order (from the POS) and the table the guests sit at.</p>
+    <select id="linkTable"></select>
+    <input id="orderId" placeholder="Square order id">
+    <button id="linkBtn">Link check</button>
+    <button class="ghost" id="refreshOrders">Show open Square orders</button>
+    <div id="orders" class="mut" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card"><h2>Waiter calls</h2><div id="calls"><p class="mut">None right now.</p></div></div>
+
+  <div class="card"><h2>Service metrics (7 days)</h2><div id="metrics" class="mut">Loading…</div></div>
+
+  <div class="card"><h2>Add a table</h2>
+    <input id="newName" placeholder="Table name (e.g. T5)">
+    <button id="addBtn">Add + get QR</button>
+    <div id="qr" style="margin-top:10px"></div>
+  </div>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(p,o={}){const r=await fetch(p,{headers:{'Content-Type':'application/json'},...o});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j;}
+
+async function refresh(){
+  try{
+    const d=await api('/api/dashboard/overview');
+    $('#clock').textContent=new Date().toLocaleTimeString();
+    $('#tables').innerHTML=d.tables.map(t=>`
+      <div class="tcard ${t.state}"><h3>${esc(t.name)}</h3>
+        <div class="mut">${t.state}${t.open_order_id?' · <span title="'+esc(t.open_order_id)+'">bill open</span>':''}</div>
+        <div style="margin-top:8px">
+          ${t.state!=='FREE'?`<button class="ghost" data-free="${t.id}">Free table</button>`:''}
+          <a href="/t/${t.qr_token}" target="_blank" style="color:var(--acc);font-size:13px;margin-left:8px">guest link</a>
+        </div></div>`).join('')||'<p class="mut">No tables yet — add one below.</p>';
+    $('#linkTable').innerHTML=d.tables.map(t=>`<option value="${t.id}">${esc(t.name)} (${t.state})</option>`).join('');
+    document.querySelectorAll('[data-free]').forEach(b=>b.onclick=async()=>{await api('/api/tables/'+b.dataset.free+'/free',{method:'POST'});refresh();});
+    const m=await api('/api/dashboard/metrics');
+    $('#metrics').innerHTML=`
+      Avg settlement time: <b>${m.avg_settlement_secs==null?'—':m.avg_settlement_secs+'s'}</b> (${m.settled_checks} checks) ·
+      Avg waiter response: <b>${m.avg_waiter_response_secs==null?'—':m.avg_waiter_response_secs+'s'}</b> ·
+      Open calls: <b>${m.open_calls}</b>`;
+    const c=d.waiter_calls;
+    $('#calls').innerHTML=c.length?c.map(x=>`
+      <div class="call"><span>🔔 Table <b>${esc(x.table_name)}</b> · ${new Date(x.created_at).toLocaleTimeString()}</span>
+      <button data-ack="${x.table_id}">Acknowledge</button></div>`).join(''):'<p class="mut">None right now.</p>';
+    document.querySelectorAll('[data-ack]').forEach(b=>b.onclick=async()=>{await api('/api/tables/'+b.dataset.ack+'/ack-call',{method:'POST'});refresh();});
+  }catch(e){console.error(e);}
+}
+$('#linkBtn').onclick=async()=>{
+  try{await api('/api/tables/'+$('#linkTable').value+'/link-check',{method:'POST',body:JSON.stringify({square_order_id:$('#orderId').value.trim()})});$('#orderId').value='';refresh();}
+  catch(e){alert(e.message);}
+};
+$('#refreshOrders').onclick=async()=>{
+  try{const d=await api('/api/square-open-orders');$('#orders').innerHTML=d.orders.map(o=>`<div>${esc(o.id)} — $${(o.total_money.amount/100).toFixed(2)}</div>`).join('')||'No open orders.';}
+  catch(e){$('#orders').textContent=e.message;}
+};
+$('#addBtn').onclick=async()=>{
+  try{
+    const locs=await api('/api/locations');
+    if(!locs.locations.length){alert('No locations yet — run npm run seed first.');return;}
+    const t=await api('/api/tables',{method:'POST',body:JSON.stringify({location_id:locs.locations[0].id,name:$('#newName').value.trim()||'New table'})});
+    $('#qr').innerHTML=`<p>QR: <a href="${t.qr_url}" target="_blank" style="color:var(--acc)">${t.qr_url}</a></p><img src="/api/tables/${t.id}/qr" width="180">`;
+    $('#newName').value='';refresh();}catch(e){alert(e.message);}
+};
+refresh(); setInterval(refresh,5000);
+</script>
+</body>
+</html>

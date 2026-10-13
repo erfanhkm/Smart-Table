@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Table — Your Bill</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --txt:#f1f5f9; --mut:#94a3b8; --acc:#38bdf8; --ok:#34d399; --warn:#fbbf24; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--txt); }
+  .wrap { max-width:480px; margin:0 auto; padding:20px 16px 40px; }
+  .card { background:var(--card); border-radius:14px; padding:16px; margin-bottom:12px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .mut { color:var(--mut); font-size:14px; }
+  .row { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #334155; font-size:15px; }
+  .row:last-child { border-bottom:none; }
+  .total { font-size:20px; font-weight:700; }
+  .remaining { color:var(--warn); font-weight:700; }
+  .paid { color:var(--ok); font-weight:700; }
+  .btns { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0; }
+  button, .chip { font-size:15px; }
+  button { background:var(--acc); color:#06202e; border:none; border-radius:10px; padding:12px 16px; font-weight:700; cursor:pointer; }
+  button.ghost { background:#334155; color:var(--txt); }
+  button:disabled { opacity:.45; cursor:default; }
+  .chip { background:#334155; color:var(--txt); border:2px solid transparent; border-radius:999px; padding:8px 14px; cursor:pointer; }
+  .chip.on { border-color:var(--acc); background:#0c4a6e; }
+  input[type=number], input[type=text] { width:100%; padding:12px; border-radius:10px; border:1px solid #334155; background:#0f172a; color:var(--txt); font-size:16px; }
+  .big-pay { width:100%; font-size:18px; padding:16px; margin-top:8px; background:var(--ok); color:#052e22; }
+  .center { text-align:center; }
+  .ok-banner { background:#064e3b; border-radius:14px; padding:24px; text-align:center; }
+  .err { color:#f87171; margin-top:8px; font-size:14px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><p class="mut center">Loading your bill…</p></div>
+<script>
+const token = location.pathname.split('/')[2];
+const $ = (s) => document.querySelector(s);
+const fmt = (c, cur='USD') => (c/100).toFixed(2) + ' ' + cur;
+let S = { mode:'full', parts:2, custom:0, tipPct:15, tipCustom:null, table:null, check:null };
+
+async function api(path, opts={}) {
+  const r = await fetch(path, { headers:{'Content-Type':'application/json'}, ...opts });
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(j.error || ('HTTP '+r.status));
+  return j;
+}
+
+async function load() {
+  const app = $('#app');
+  try {
+    const d = await api('/api/t/' + token);
+    S.table = d.table; S.check = d.check;
+    render();
+  } catch(e) { app.innerHTML = `<div class="card"><h1>Oops</h1><p class="mut">${e.message}</p></div>`; }
+}
+
+function tipCents(base) {
+  if (S.tipCustom != null) return Math.round(S.tipCustom*100);
+  return Math.round(base * S.tipPct / 100);
+}
+function payAmount() {
+  const rem = S.check.remaining_cents;
+  if (S.mode === 'full') return rem;
+  if (S.mode === 'equal') return Math.ceil(rem / S.parts);
+  return Math.round(S.custom*100);
+}
+
+function render() {
+  const app = $('#app');
+  const { table, check } = S;
+  if (!check) {
+    app.innerHTML = `<div class="card"><h1>Table ${table.name}</h1>
+      <p class="mut">No open bill on this table yet. Your server will link your check here.</p>
+      <button class="ghost" id="waiter">Call waiter</button></div>`;
+    $('#waiter').onclick = callWaiter;
+    return;
+  }
+  if (check.remaining_cents <= 0) {
+    app.innerHTML = `<div class="ok-banner"><h1>Paid ✓</h1>
+      <p class="mut">Thanks for dining with us. Show this screen to your server.</p>
+      <p class="mut">Receipt #${check.square_order_id.slice(-8)}</p></div>`;
+    return;
+  }
+  const amt = payAmount(), tip = tipCents(amt);
+  app.innerHTML = `
+    <div class="card"><h1>Table ${table.name}</h1><p class="mut">Your bill</p></div>
+    <div class="card">
+      ${check.items.map(i=>`<div class="row"><span>${i.quantity}× ${i.name}</span><span>${fmt(i.amount_cents, check.currency)}</span></div>`).join('')}
+      <div class="row total"><span>Total</span><span>${fmt(check.total_cents, check.currency)}</span></div>
+      ${check.tenders.length?`<div class="row"><span class="paid">Paid so far</span><span class="paid">${fmt(check.tenders.reduce((s,t)=>s+t.amount_cents,0), check.currency)}</span></div>`:''}
+      <div class="row"><span class="remaining">Remaining</span><span class="remaining">${fmt(check.remaining_cents, check.currency)}</span></div>
+    </div>
+    <div class="card"><p class="mut">How do you want to pay?</p>
+      <div class="btns">
+        <button class="chip ${S.mode==='full'?'on':''}" data-m="full">Full bill</button>
+        <button class="chip ${S.mode==='equal'?'on':''}" data-m="equal">Split equally</button>
+        <button class="chip ${S.mode==='custom'?'on':''}" data-m="custom">Custom amount</button>
+      </div>
+      <div id="modeExtra"></div>
+    </div>
+    <div class="card"><p class="mut">Tip</p>
+      <div class="btns">${[0,10,15,20].map(p=>`<button class="chip ${S.tipPct===p&&S.tipCustom==null?'on':''}" data-t="${p}">${p}%</button>`).join('')}
+      <input type="number" id="tipCustom" placeholder="Custom $" style="max-width:130px" value="${S.tipCustom??''}"></div>
+    </div>
+    <div class="card">
+      <div class="row"><span>Paying</span><span>${fmt(amt, check.currency)}</span></div>
+      <div class="row"><span>Tip</span><span>${fmt(tip, check.currency)}</span></div>
+      <div class="row total"><span>Charge</span><span>${fmt(amt+tip, check.currency)}</span></div>
+      <button class="big-pay" id="pay">Pay ${fmt(amt+tip, check.currency)}</button>
+      <div class="err" id="err"></div>
+      <p class="mut center" style="margin-top:10px">Sandbox demo — payment is recorded as an external payment.</p>
+    </div>
+    <div class="card center"><button class="ghost" id="waiter">Call waiter</button></div>`;
+
+  document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{S.mode=b.dataset.m;render();});
+  document.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{S.tipPct=+b.dataset.t;S.tipCustom=null;render();});
+  const extra = $('#modeExtra');
+  if (S.mode==='equal') extra.innerHTML = `<input type="number" id="parts" min="2" max="12" value="${S.parts}"><p class="mut">ways — you pay ${fmt(Math.ceil(check.remaining_cents/S.parts), check.currency)}</p>`;
+  if (S.mode==='custom') extra.innerHTML = `<input type="number" id="custom" min="1" step="0.01" placeholder="Amount in ${check.currency}" value="${S.custom||''}">`;
+  const parts=$('#parts'); if(parts) parts.oninput=()=>{S.parts=Math.max(2,+parts.value||2);};
+  const cust=$('#custom'); if(cust) cust.oninput=()=>{S.custom=+cust.value||0;};
+  $('#tipCustom').oninput=(e)=>{S.tipCustom=e.target.value===''?null:+e.target.value;};
+  $('#pay').onclick = doPay;
+  $('#waiter').onclick = callWaiter;
+}
+
+async function doPay() {
+  const err = $('#err'); err.textContent='';
+  $('#pay').disabled = true;
+  try {
+    const r = await api('/api/checks/'+S.check.square_order_id+'/pay', { method:'POST',
+      body: JSON.stringify({ mode:S.mode, amount_cents:payAmount(), tip_cents:tipCents(payAmount()) }) });
+    await load();
+    if (r.checkState === 'COMPLETED') { /* render shows receipt */ }
+  } catch(e){ err.textContent = e.message; $('#pay').disabled=false; }
+}
+
+async function callWaiter() {
+  try { await api('/api/tables/'+S.table.id+'/call-waiter',{method:'POST'}); alert('Your waiter is on the way!'); }
+  catch(e){ alert(e.message); }
+}
+load();
+</script>
+</body>
+</html>
