@@ -1,138 +1,441 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Smart Table — Staff Dashboard</title>
-<style>
-  :root { --bg:#0f172a; --card:#1e293b; --txt:#f1f5f9; --mut:#94a3b8; --acc:#38bdf8; --ok:#34d399; --warn:#fbbf24; --busy:#f87171; }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--txt); }
-  .wrap { max-width:1100px; margin:0 auto; padding:20px 16px 40px; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; }
-  .tcard { background:var(--card); border-radius:14px; padding:14px; border-left:6px solid #475569; }
-  .tcard.FREE{border-color:#475569}.tcard.SEATED{border-color:var(--acc)}
-  .tcard.PAYING{border-color:var(--warn)}.tcard.PAID{border-color:var(--ok)}
-  .tcard h3{margin:0 0 6px;font-size:20px}
-  .mut{color:var(--mut);font-size:13px}
-  .card{background:var(--card);border-radius:14px;padding:16px;margin:14px 0}
-  button{background:var(--acc);color:#06202e;border:none;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer;margin:4px 4px 0 0}
-  button.ghost{background:#334155;color:var(--txt)}
-  input,select{padding:10px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:var(--txt);font-size:14px;margin:4px 4px 0 0}
-  .call{background:#7c2d12;border-radius:10px;padding:10px 14px;margin:6px 0;display:flex;justify-content:space-between;align-items:center}
-  .banner{background:#7f1d1d;border-radius:10px;padding:10px 14px;margin:10px 0;display:none}
-  h2{margin:6px 0 10px}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Table Staff Dashboard</title>
+    <style>
+        :root {
+            --navy: #0E1B2C;
+            --paper: #F8FAFC;
+            --card-bg: #FFFFFF;
+            --text-main: #1E293B;
+            --text-muted: #64748B;
+            --border: #E2E8F0;
+            --blue: #2F80ED;
+            --amber: #F59E0B;
+            --green: #16A34A;
+            --red: #DC2626;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, system-ui, sans-serif; }
+        body { background: var(--paper); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
+
+        aside { width: 260px; background: var(--navy); color: white; display: flex; flex-direction: column; padding: 20px; }
+        .brand { font-size: 1.2rem; font-weight: 700; margin-bottom: 30px; letter-spacing: -0.025em; display: flex; align-items: center; justify-content: space-between; }
+        .brand span { color: var(--amber); }
+        .nav-item { padding: 12px 16px; border-radius: 10px; color: #94A3B8; font-weight: 600; font-size: 0.95rem; cursor: pointer; margin-bottom: 6px; }
+        .nav-item.active, .nav-item:hover { background: rgba(255,255,255,0.1); color: white; }
+
+        main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        header { background: white; border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .header-left { display: flex; align-items: center; gap: 20px; }
+        select { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; background: white; font-weight: 600; }
+        .clock { font-size: 0.95rem; font-weight: 600; color: var(--text-muted); }
+
+        .dashboard-body { flex: 1; padding: 24px; overflow-y: auto; display: grid; grid-template-columns: 1fr 340px; gap: 24px; }
+        @media (max-width: 1024px) { .dashboard-body { grid-template-columns: 1fr; } }
+
+        .metrics-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+        .metric-card { background: white; border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+        .metric-title { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px; }
+        .metric-value { font-size: 1.4rem; font-weight: 700; color: var(--navy); font-variant-numeric: tabular-nums; }
+
+        .floor-section { display: flex; flex-direction: column; }
+        .section-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+        .tables-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; }
+        
+        .table-card { background: white; border: 2px solid var(--border); border-radius: 14px; padding: 16px; cursor: pointer; position: relative; transition: all 0.2s; display: flex; flex-direction: column; justify-content: space-between; height: 110px; }
+        .table-card.FREE { border-color: var(--border); background: #F8FAFC; }
+        .table-card.SEATED { border-color: var(--blue); background: #EFF6FF; }
+        .table-card.PAYING { border-color: var(--amber); background: #FEF3C7; }
+        .table-card.PAID { border-color: var(--green); background: #F0FDF4; }
+        .table-name { font-size: 1.1rem; font-weight: 700; color: var(--navy); }
+        .table-state { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+
+        .pulse-badge { position: absolute; top: -8px; right: -8px; background: var(--red); color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); } }
+
+        .sidebar-panel { background: white; border: 1px solid var(--border); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; height: fit-content; }
+        .call-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
+        .call-item:last-child { border-bottom: none; }
+        .btn-ack { background: var(--navy); color: white; border: none; padding: 6px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+
+        .drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; justify-content: flex-end; z-index: 100; }
+        .drawer { width: 420px; background: white; height: 100%; padding: 24px; display: flex; flex-direction: column; overflow-y: auto; box-shadow: -10px 0 25px rgba(0,0,0,0.1); }
+        .drawer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .btn-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-muted); }
+
+        .btn-action { background: var(--navy); color: white; border: none; border-radius: 10px; padding: 12px; font-weight: 600; width: 100%; cursor: pointer; margin-bottom: 12px; }
+        .btn-secondary { background: white; color: var(--navy); border: 1px solid var(--border); border-radius: 10px; padding: 12px; font-weight: 600; width: 100%; cursor: pointer; margin-bottom: 12px; }
+        .btn-danger { background: #FEF2F2; color: var(--red); border: 1px solid #FCA5A5; border-radius: 10px; padding: 12px; font-weight: 600; width: 100%; cursor: pointer; }
+
+        .auth-modal { position: fixed; inset: 0; background: var(--navy); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+        .auth-box { background: white; padding: 30px; border-radius: 20px; width: 100%; max-width: 400px; box-shadow: 0 20px 25px rgba(0,0,0,0.2); }
+        .auth-box h2 { margin-bottom: 16px; color: var(--navy); }
+        .auth-box input { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px; font-size: 1rem; }
+    </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>Smart Table — Live floor</h1>
-  <p class="mut">Auto-refreshes every 5s · <span id="clock"></span></p>
-  <div class="banner" id="banner"></div>
-  <div class="grid" id="tables"></div>
+    <div class="auth-modal" id="auth-modal" style="display: none;">
+        <div class="auth-box">
+            <h2>Staff Authentication</h2>
+            <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:16px;">Enter your staff API token to access the floor dashboard.</p>
+            <input type="password" id="staff-token-input" placeholder="Enter bearer token...">
+            <button class="btn-action" onclick="saveToken()">Authenticate</button>
+        </div>
+    </div>
 
-  <div class="card"><h2>Link a check to a table</h2>
-    <p class="mut">Pick the open Square order (from the POS) and the table the guests sit at. The order must belong to this table's Square location.</p>
-    <select id="linkTable"></select>
-    <input id="orderId" placeholder="Square order id">
-    <button id="linkBtn">Link check</button>
-    <button class="ghost" id="refreshOrders">Show open Square orders</button>
-    <div id="orders" class="mut" style="margin-top:8px"></div>
-  </div>
+    <aside>
+        <div class="brand">Smart Table <span>Staff</span></div>
+        <div class="nav-item active">Floor Map</div>
+        <div class="nav-item" onclick="alert('Analytics available in reports view.')">Reports & Sales</div>
+    </aside>
 
-  <div class="card"><h2>Waiter calls</h2><div id="calls"><p class="mut">None right now.</p></div></div>
+    <main>
+        <header>
+            <div class="header-left">
+                <select id="location-select" onchange="loadDashboardData()"></select>
+                <div class="clock" id="live-clock">--:--:--</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px;">
+                <span style="font-size:0.85rem; font-weight:600; color:var(--green);">● Live Connected</span>
+                <button onclick="logout()" style="background:none; border:none; color:var(--text-muted); font-size:0.85rem; cursor:pointer; font-weight:600;">Logout</button>
+            </div>
+        </header>
 
-  <div class="card"><h2>Service metrics (7 days)</h2><div id="metrics" class="mut">Loading…</div></div>
+        <div class="dashboard-body">
+            <div class="floor-section">
+                <div class="metrics-strip">
+                    <div class="metric-card">
+                        <div class="metric-title">Settled Checks</div>
+                        <div class="metric-value" id="m-settled">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-title">Avg Settlement</div>
+                        <div class="metric-value" id="m-settle-time">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-title">Waiter Response</div>
+                        <div class="metric-value" id="m-response-time">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-title">Sales + Tips</div>
+                        <div class="metric-value" id="m-sales">-</div>
+                    </div>
+                </div>
 
-  <div class="card"><h2>Add a table</h2>
-    <input id="newName" placeholder="Table name (e.g. T5)">
-    <button id="addBtn">Add + get QR</button>
-    <div id="qr" style="margin-top:10px"></div>
-  </div>
-</div>
-<script>
-const $=s=>document.querySelector(s);
-const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+                <div class="section-title">
+                    <span>Floor Map</span>
+                    <button class="btn-action" style="width:auto; padding:8px 16px; margin:0; font-size:0.85rem;" onclick="openAddTableModal()">+ Add Table</button>
+                </div>
+                <div class="tables-grid" id="tables-grid"></div>
+            </div>
 
-// ---- staff auth: bearer token kept in sessionStorage (cleared when the tab closes) ----
-const TOKEN_KEY='st_staff_token';
-let authFailed=false, timer=null;
-function staffToken(){
-  let t=''; try{t=sessionStorage.getItem(TOKEN_KEY)||'';}catch{}
-  if(!t){ t=(prompt('Staff access token')||'').trim(); if(t){ try{sessionStorage.setItem(TOKEN_KEY,t);}catch{} } }
-  return t;
-}
-function lockOut(msg){
-  authFailed=true; if(timer) clearInterval(timer);
-  try{sessionStorage.removeItem(TOKEN_KEY);}catch{}
-  const b=$('#banner'); b.textContent=msg+' Reload the page to enter the staff token again.'; b.style.display='block';
-}
-async function api(p,o={}){
-  const t=staffToken();
-  if(!t){ lockOut('No staff token.'); throw new Error('no staff token'); }
-  const r=await fetch(p,{...o,headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,...(o.headers||{})}});
-  if(r.status===401){ lockOut('Unauthorized.'); throw new Error('unauthorized'); }
-  const j=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error(j.error||r.status);
-  return j;
-}
+            <div class="sidebar-panel">
+                <div class="section-title" style="margin-bottom:12px;">Waiter Calls</div>
+                <div id="waiter-calls-list">
+                    <p style="font-size:0.9rem; color:var(--text-muted);">No active waiter calls.</p>
+                </div>
+            </div>
+        </div>
+    </main>
 
-// Everything is scoped to ONE location (the first one; a location picker comes with multi-restaurant support).
-let LOC=null;
-async function ensureLoc(){
-  if(LOC) return LOC;
-  const l=await api('/api/locations');
-  LOC=(l.locations[0]||{}).id||null;
-  return LOC;
-}
-const q=()=>'location_id='+encodeURIComponent(LOC);
+    <div class="drawer-backdrop" id="drawer-backdrop" onclick="closeDrawer(event)">
+        <div class="drawer" id="table-drawer"></div>
+    </div>
 
-async function refresh(){
-  if(authFailed) return;
-  try{
-    if(!(await ensureLoc())){ $('#tables').innerHTML='<p class="mut">No locations yet — run npm run seed first.</p>'; return; }
-    const d=await api('/api/dashboard/overview?'+q());
-    $('#clock').textContent=new Date().toLocaleTimeString();
-    $('#tables').innerHTML=d.tables.map(t=>`
-      <div class="tcard ${esc(t.state)}"><h3>${esc(t.name)}</h3>
-        <div class="mut">${esc(t.state)}${t.open_order_id?' · <span title="'+esc(t.open_order_id)+'">bill open</span>':''}</div>
-        <div style="margin-top:8px">
-          ${t.state!=='FREE'?`<button class="ghost" data-free="${esc(t.id)}">Free table</button>`:''}
-          <a href="/t/${esc(t.qr_token)}" target="_blank" style="color:var(--acc);font-size:13px;margin-left:8px">guest link</a>
-        </div></div>`).join('')||'<p class="mut">No tables yet — add one below.</p>';
-    $('#linkTable').innerHTML=d.tables.map(t=>`<option value="${esc(t.id)}">${esc(t.name)} (${esc(t.state)})</option>`).join('');
-    document.querySelectorAll('[data-free]').forEach(b=>b.onclick=async()=>{await api('/api/tables/'+encodeURIComponent(b.dataset.free)+'/free',{method:'POST'});refresh();});
-    const m=await api('/api/dashboard/metrics?'+q());
-    $('#metrics').innerHTML=`
-      Avg settlement time: <b>${m.avg_settlement_secs==null?'—':m.avg_settlement_secs+'s'}</b> (${m.settled_checks} checks) ·
-      Avg waiter response: <b>${m.avg_waiter_response_secs==null?'—':m.avg_waiter_response_secs+'s'}</b> ·
-      Open calls: <b>${m.open_calls}</b>`;
-    const c=d.waiter_calls;
-    $('#calls').innerHTML=c.length?c.map(x=>`
-      <div class="call"><span>🔔 Table <b>${esc(x.table_name)}</b> · ${new Date(x.created_at).toLocaleTimeString()}</span>
-      <button data-ack="${esc(x.table_id)}">Acknowledge</button></div>`).join(''):'<p class="mut">None right now.</p>';
-    document.querySelectorAll('[data-ack]').forEach(b=>b.onclick=async()=>{await api('/api/tables/'+encodeURIComponent(b.dataset.ack)+'/ack-call',{method:'POST'});refresh();});
-  }catch(e){console.error(e);}
-}
-$('#linkBtn').onclick=async()=>{
-  try{await api('/api/tables/'+encodeURIComponent($('#linkTable').value)+'/link-check',{method:'POST',body:JSON.stringify({square_order_id:$('#orderId').value.trim()})});$('#orderId').value='';refresh();}
-  catch(e){alert(e.message);}
-};
-$('#refreshOrders').onclick=async()=>{
-  try{await ensureLoc();const d=await api('/api/square-open-orders?'+q());$('#orders').innerHTML=d.orders.map(o=>`<div>${esc(o.id)} — $${(o.total_money.amount/100).toFixed(2)}</div>`).join('')||'No open orders.';}
-  catch(e){$('#orders').textContent=e.message;}
-};
-$('#addBtn').onclick=async()=>{
-  try{
-    if(!(await ensureLoc())){alert('No locations yet — run npm run seed first.');return;}
-    const t=await api('/api/tables',{method:'POST',body:JSON.stringify({location_id:LOC,name:$('#newName').value.trim()||'New table'})});
-    $('#qr').innerHTML=`<p>QR: <a href="${esc(t.qr_url)}" target="_blank" style="color:var(--acc)">${esc(t.qr_url)}</a></p><img id="qrImg" width="180" alt="table QR">`;
-    // The QR PNG endpoint is staff-only, so it is fetched with the bearer token and shown from a blob URL.
-    const r=await fetch('/api/tables/'+encodeURIComponent(t.id)+'/qr',{headers:{Authorization:'Bearer '+staffToken()}});
-    if(r.ok) $('#qrImg').src=URL.createObjectURL(await r.blob());
-    $('#newName').value='';refresh();}catch(e){alert(e.message);}
-};
-refresh(); timer=setInterval(refresh,5000);
-</script>
+    <script>
+        const API_BASE = '';
+        let staffToken = sessionStorage.getItem('smart_table_staff_token');
+        let locations = [];
+        let dashboardData = { tables: [], waiter_calls: [] };
+        let selectedTable = null;
+        let openSquareOrders = [];
+
+        window.onload = async () => {
+            if (!staffToken) {
+                document.getElementById('auth-modal').style.display = 'flex';
+                return;
+            }
+            setInterval(updateClock, 1000);
+            await initDashboard();
+            setInterval(pollDashboard, 5000);
+        };
+
+        function saveToken() {
+            const val = document.getElementById('staff-token-input').value.trim();
+            if (!val) return;
+            sessionStorage.setItem('smart_table_staff_token', val);
+            staffToken = val;
+            document.getElementById('auth-modal').style.display = 'none';
+            initDashboard();
+        }
+
+        function logout() {
+            sessionStorage.removeItem('smart_table_staff_token');
+            window.location.reload();
+        }
+
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('live-clock').innerText = now.toLocaleTimeString();
+        }
+
+        async function apiCall(path, options = {}) {
+            const headers = {
+                'Authorization': `Bearer ${staffToken}`,
+                'Content-Type': 'application/json',
+                ...(options.headers || {})
+            };
+            const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+            if (res.status === 401) {
+                sessionStorage.removeItem('smart_table_staff_token');
+                document.getElementById('auth-modal').style.display = 'flex';
+                throw new Error('Unauthorized');
+            }
+            return res;
+        }
+
+        async function initDashboard() {
+            try {
+                const res = await apiCall('/api/locations');
+                if (!res.ok) throw new Error('Failed to fetch locations');
+                locations = await res.json();
+                
+                const locSelect = document.getElementById('location-select');
+                locSelect.innerHTML = locations.map(l => `<option value="${l.id}">${escapeHtml(l.name)}</option>`).join('');
+                
+                await loadDashboardData();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function loadDashboardData() {
+            const locId = document.getElementById('location-select').value;
+            if (!locId) return;
+
+            try {
+                const [dashRes, metricsRes] = await Promise.all([
+                    apiCall(`/api/dashboard/overview?location_id=${locId}`),
+                    apiCall(`/api/dashboard/metrics?location_id=${locId}&days=7`)
+                ]);
+
+                if (dashRes.ok) dashboardData = await dashRes.json();
+                if (metricsRes.ok) {
+                    const metrics = await metricsRes.json();
+                    renderMetrics(metrics);
+                }
+                renderFloor();
+                renderWaiterCalls();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function pollDashboard() {
+            const locId = document.getElementById('location-select').value;
+            if (!locId) return;
+            try {
+                const res = await apiCall(`/api/dashboard/overview?location_id=${locId}`);
+                if (res.ok) {
+                    dashboardData = await res.json();
+                    renderFloor();
+                    renderWaiterCalls();
+                }
+            } catch(e) {}
+        }
+
+        function renderMetrics(m) {
+            document.getElementById('m-settled').innerText = m.settled_checks ?? 0;
+            document.getElementById('m-settle-time').innerText = m.avg_settlement_secs ? `${Math.round(m.avg_settlement_secs)}s` : '0s';
+            document.getElementById('m-response-time').innerText = m.avg_waiter_response_secs ? `${Math.round(m.avg_waiter_response_secs)}s` : '0s';
+            const sales = (m.sales_cents || 0) + (m.tips_cents || 0);
+            document.getElementById('m-sales').innerText = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(sales / 100);
+        }
+
+        function renderFloor() {
+            const grid = document.getElementById('tables-grid');
+            if (!dashboardData.tables || dashboardData.tables.length === 0) {
+                grid.innerHTML = `<p style="color:var(--text-muted)">No tables found for this location.</p>`;
+                return;
+            }
+
+            const activeCallsTableIds = new Set(dashboardData.waiter_calls.map(c => c.table_id));
+
+            grid.innerHTML = dashboardData.tables.map(t => {
+                const hasCall = activeCallsTableIds.has(t.id);
+                return `
+                    <div class="table-card ${t.state}" onclick="openTableDrawer('${t.id}')">
+                        ${hasCall ? `<div class="pulse-badge">!</div>` : ''}
+                        <div>
+                            <div class="table-name">Table ${escapeHtml(t.name)}</div>
+                        </div>
+                        <div class="table-state">${t.state}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderWaiterCalls() {
+            const container = document.getElementById('waiter-calls-list');
+            const calls = dashboardData.waiter_calls || [];
+            if (calls.length === 0) {
+                container.innerHTML = `<p style="font-size:0.9rem; color:var(--text-muted);">No active waiter calls.</p>`;
+                return;
+            }
+
+            container.innerHTML = calls.map(c => `
+                <div class="call-item">
+                    <div>
+                        <div style="font-weight:700; font-size:0.95rem;">Table ${escapeHtml(c.table_name || 'T')}</div>
+                        <div style="font-size:0.75rem; color:var(--text-muted);">${Math.round((Date.now() - new Date(c.created_at)) / 1000)}s ago</div>
+                    </div>
+                    <button class="btn-ack" onclick="ackCall('${c.table_id}')">Acknowledge</button>
+                </div>
+            `).join('');
+        }
+
+        async function ackCall(tableId) {
+            await apiCall(`/api/tables/${tableId}/ack-call`, { method: 'POST' });
+            loadDashboardData();
+        }
+
+        async function openTableDrawer(tableId) {
+            selectedTable = dashboardData.tables.find(t => t.id === tableId);
+            if (!selectedTable) return;
+
+            const locId = document.getElementById('location-select').value;
+            const ordersRes = await apiCall(`/api/square-open-orders?location_id=${locId}`);
+            if (ordersRes.ok) openSquareOrders = await ordersRes.json();
+
+            renderDrawerContent();
+            document.getElementById('drawer-backdrop').style.display = 'flex';
+        }
+
+        function closeDrawer(e) {
+            if (e.target.id === 'drawer-backdrop') {
+                document.getElementById('drawer-backdrop').style.display = 'none';
+            }
+        }
+
+        function renderDrawerContent() {
+            const drawer = document.getElementById('table-drawer');
+            drawer.innerHTML = `
+                <div class="drawer-header">
+                    <h2>Table ${escapeHtml(selectedTable.name)}</h2>
+                    <button class="btn-close" onclick="document.getElementById('drawer-backdrop').style.display='none'">&times;</button>
+                </div>
+
+                <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:16px;">Current State: <strong style="color:var(--navy);">${selectedTable.state}</strong></p>
+
+                <div style="margin-bottom:20px;">
+                    <label style="font-size:0.85rem; font-weight:600; color:var(--text-muted); display:block; margin-bottom:8px;">Link Square Order</label>
+                    <select id="link-order-select" style="width:100%; margin-bottom:8px;">
+                        <option value="">Select open order...</option>
+                        ${openSquareOrders.map(o => `<option value="${o.id}">Order #${o.id.substring(0,6)} (${o.items})</option>`).join('')}
+                    </select>
+                    <button class="btn-action" onclick="linkCheckToTable()">Link Order to Table</button>
+                </div>
+
+                <div style="margin-bottom:20px;">
+                    <label style="font-size:0.85rem; font-weight:600; color:var(--text-muted); display:block; margin-bottom:8px;">Record Cash Payment</label>
+                    <input type="number" step="0.01" id="cash-amount" placeholder="Amount in CAD ($)..." style="width:100%; padding:10px; border:1px solid var(--border); border-radius:8px; margin-bottom:8px;">
+                    <button class="btn-secondary" onclick="recordCash()">Record Cash Payment</button>
+                </div>
+
+                <div style="margin-bottom:20px;">
+                    <button class="btn-secondary" onclick="fetchAndShowQR()">View Table QR Code</button>
+                </div>
+
+                <div style="margin-top:auto;">
+                    <button class="btn-danger" onclick="freeTable()">Reset / Free Table</button>
+                </div>
+            `;
+        }
+
+        async function linkCheckToTable() {
+            const orderId = document.getElementById('link-order-select').value;
+            if (!orderId) return alert('Select an order first.');
+            const res = await apiCall(`/api/tables/${selectedTable.id}/link-check`, {
+                method: 'POST',
+                body: JSON.stringify({ square_order_id: orderId })
+            });
+            if (res.ok) {
+                alert('Order successfully linked!');
+                document.getElementById('drawer-backdrop').style.display = 'none';
+                loadDashboardData();
+            } else {
+                const err = await res.json();
+                alert(err.message || 'Failed to link order.');
+            }
+        }
+
+        async function recordCash() {
+            const amt = parseFloat(document.getElementById('cash-amount').value || 0);
+            if (amt <= 0) return alert('Enter a valid cash amount.');
+            const cents = Math.round(amt * 100);
+
+            const res = await apiCall(`/api/t/${selectedTable.qr_token}`);
+            const data = await res.json();
+            if (!data.check) return alert('No active check linked to this table.');
+
+            const payRes = await apiCall(`/api/checks/${data.check.square_order_id}/record-external-payment`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    mode: 'custom',
+                    amount_cents: cents,
+                    tip_cents: 0,
+                    idempotency_key: generateUUIDv4()
+                })
+            });
+
+            if (payRes.ok) {
+                alert('Cash payment recorded successfully.');
+                document.getElementById('drawer-backdrop').style.display = 'none';
+                loadDashboardData();
+            } else {
+                alert('Failed to record cash payment.');
+            }
+        }
+
+        async function freeTable() {
+            if (!confirm('Are you sure you want to reset and free this table?')) return;
+            await apiCall(`/api/tables/${selectedTable.id}/free`, { method: 'POST' });
+            document.getElementById('drawer-backdrop').style.display = 'none';
+            loadDashboardData();
+        }
+
+        async function fetchAndShowQR() {
+            const res = await apiCall(`/api/tables/${selectedTable.id}/qr`);
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const w = window.open('');
+            w.document.write(`<html><body style="text-align:center; padding:40px;"><img src="${url}" style="width:300px;"/><br/><h2>Table ${escapeHtml(selectedTable.name)}</h2><button onclick="window.print()" style="padding:10px 20px; font-size:1rem; margin-top:20px;">Print QR</button></body></html>`);
+        }
+
+        async function openAddTableModal() {
+            const name = prompt('Enter table name (e.g. T12):');
+            if (!name) return;
+            const locId = document.getElementById('location-select').value;
+            const res = await apiCall('/api/tables', {
+                method: 'POST',
+                body: JSON.stringify({ name, location_id: locId })
+            });
+            if (res.ok) loadDashboardData();
+            else alert('Failed to create table.');
+        }
+
+        function escapeHtml(str) {
+            return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+        function generateUUIDv4() {
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+    </script>
 </body>
 </html>

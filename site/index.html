@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Table — The bill, without the wait.</title>
+    <style>
+        :root {
+            --navy: #0E1B2C;
+            --paper: #FAF8F4;
+            --card-bg: #FFFFFF;
+            --text-main: #1E293B;
+            --text-muted: #64748B;
+            --border: #E2E8F0;
+            --blue: #2F80ED;
+            --amber: #F59E0B;
+            --green: #16A34A;
+            --gold: #D97706;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, system-ui, sans-serif; }
+        body { background: var(--paper); color: var(--text-main); line-height: 1.6; }
+
+        header { background: var(--navy); color: white; padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
+        .brand { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.025em; display: flex; align-items: center; gap: 6px; }
+        .brand span { color: var(--gold); }
+        .nav-cta { background: var(--gold); color: white; padding: 10px 20px; border-radius: 10px; font-weight: 600; text-decoration: none; font-size: 0.95rem; }
+
+        .hero { background: var(--navy); color: white; padding: 100px 20px 120px; text-align: center; }
+        .hero h1 { font-size: 3.5rem; font-weight: 800; max-width: 800px; margin: 0 auto 20px; letter-spacing: -0.03em; line-height: 1.1; }
+        .hero h1 span { color: var(--amber); }
+        .hero p { font-size: 1.25rem; color: #94A3B8; max-width: 600px; margin: 0 auto 40px; }
+        .btn-hero { background: var(--gold); color: white; padding: 16px 32px; border-radius: 14px; font-size: 1.1rem; font-weight: 700; text-decoration: none; display: inline-block; box-shadow: 0 10px 25px rgba(217, 119, 6, 0.3); }
+
+        section { padding: 80px 20px; max-width: 1100px; margin: 0 auto; }
+        .section-header { text-align: center; max-width: 700px; margin: 0 auto 60px; }
+        .section-header h2 { font-size: 2.5rem; font-weight: 800; color: var(--navy); margin-bottom: 16px; letter-spacing: -0.02em; }
+        .section-header p { font-size: 1.1rem; color: var(--text-muted); }
+
+        .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 30px; }
+        .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 20px; padding: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
+        .card h3 { font-size: 1.25rem; font-weight: 700; color: var(--navy); margin-bottom: 12px; }
+        .card p { color: var(--text-muted); font-size: 0.95rem; }
+
+        .steps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 30px; }
+        .step-card { background: white; border: 1px solid var(--border); border-radius: 20px; padding: 40px 30px; position: relative; }
+        .step-num { font-size: 3rem; font-weight: 900; color: #E2E8F0; position: absolute; top: 20px; right: 25px; }
+
+        .pilot-form-box { background: var(--navy); color: white; border-radius: 24px; padding: 60px 40px; max-width: 700px; margin: 0 auto; text-align: center; }
+        .pilot-form-box h2 { font-size: 2.2rem; margin-bottom: 12px; }
+        .pilot-form-box p { color: #94A3B8; margin-bottom: 30px; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+        @media(max-width:600px) { .form-grid { grid-template-columns: 1fr; } }
+        .pilot-form-box input { width: 100%; padding: 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: white; font-size: 1rem; margin-bottom: 16px; }
+        .pilot-form-box input::placeholder { color: #94A3B8; }
+
+        .faq-list { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+        .faq-item { background: white; border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+        .faq-item h3 { font-size: 1.1rem; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
+        .faq-item p { color: var(--text-muted); font-size: 0.95rem; }
+
+        footer { background: var(--navy); color: #94A3B8; padding: 40px 20px; text-align: center; font-size: 0.9rem; border-top: 1px solid rgba(255,255,255,0.1); }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="brand">Smart Table<span>.</span></div>
+        <a href="#pilot" class="nav-cta">Join the Pilot</a>
+    </header>
+
+    <div class="hero">
+        <h1>The bill, <span>without the wait.</span></h1>
+        <p>Technology removes the WAIT, not the waiter. Give your guests lightning-fast phone payments and splitting, while your staff keep total control.</p>
+        <a href="#pilot" class="btn-hero">Join the Metro Vancouver Pilot</a>
+    </div>
+
+    <section>
+        <div class="section-header">
+            <h2>The Problem with Dining Out</h2>
+            <p>Guests hate waiting 10+ minutes just to pay their check. Staff hate running cards back and forth across a packed floor.</p>
+        </div>
+        <div class="grid-3">
+            <div class="card">
+                <h3>Dead Wait Time</h3>
+                <p>When the meal is over, momentum dies. Guests sit twiddling their thumbs waiting for paper bills and card machines.</p>
+            </div>
+            <div class="card">
+                <h3>Split Check Friction</h3>
+                <p>Calculators, card sorting, and math at the table waste valuable time during high-turnover dinner rushes.</p>
+            </div>
+            <div class="card">
+                <h3>Overworked Floor Staff</h3>
+                <p>Servers spend 30% of their shift processing transactions instead of taking orders and building hospitality.</p>
+            </div>
+        </div>
+    </section>
+
+    <section style="background: white;">
+        <div style="max-width: 1100px; margin: 0 auto;">
+            <div class="section-header">
+                <h2>How It Works</h2>
+                <p>Three simple steps. No apps to download, no accounts to create.</p>
+            </div>
+            <div class="steps-grid">
+                <div class="step-card">
+                    <div class="step-num">01</div>
+                    <h3>Guest Scans QR</h3>
+                    <p>Every table features a discreet QR code. Guests scan with their phone camera to instantly view their itemized bill.</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-num">02</div>
+                    <h3>Splits & Pays Instantly</h3>
+                    <p>Split equally, by items, or custom amounts. Pay in under 30 seconds via Apple Pay, Google Pay, or credit card.</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-num">03</div>
+                    <h3>Table Frees Up</h3>
+                    <p>Staff dashboard updates live instantly as bills settle, turning tables faster and increasing daily revenue.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <div class="section-header">
+            <h2>Built for Independents, Not Chains</h2>
+            <p>Designed specifically for independent restaurants and cafés across Metro Vancouver.</p>
+        </div>
+        <div class="grid-3">
+            <div class="card">
+                <h3>Square POS Native</h3>
+                <p>Sits seamlessly on top of your existing Square POS integration. No redundant hardware or dual-entry.</p>
+            </div>
+            <div class="card">
+                <h3>Private Guest Feedback</h3>
+                <p>Catch guest friction before it hits public review sites with direct manager-only feedback ratings.</p>
+            </div>
+            <div class="card">
+                <h3>Sales & Tip Analytics</h3>
+                <p>Track settlement speeds, waiter response times, and daily tip distributions in one clean dashboard.</p>
+            </div>
+        </div>
+    </section>
+
+    <section id="pilot">
+        <div class="pilot-form-box">
+            <h2>Join the Pilot Phase</h2>
+            <p>We are currently onboarding select independent restaurants in Metro Vancouver, BC.</p>
+            <form onsubmit="event.preventDefault(); alert('Thank you! Our Vancouver team will reach out within 24 hours.');">
+                <div class="form-grid">
+                    <input type="text" placeholder="Your Name" required>
+                    <input type="text" placeholder="Restaurant / Café Name" required>
+                </div>
+                <div class="form-grid">
+                    <input type="text" placeholder="City (e.g. Vancouver, Burnaby)" required>
+                    <input type="email" placeholder="Work Email" required>
+                </div>
+                <button type="submit" class="btn-hero" style="width:100%; border:none; cursor:pointer;">Request Pilot Access</button>
+            </form>
+        </div>
+    </section>
+
+    <section style="background: white;">
+        <div class="section-header">
+            <h2>Frequently Asked Questions</h2>
+        </div>
+        <div class="faq-list">
+            <div class="faq-item">
+                <h3>Does it replace our POS?</h3>
+                <p>No. Smart Table sits directly on top of your existing Square POS system, linking checks and orders seamlessly without replacing your hardware workflow.</p>
+            </div>
+            <div class="faq-item">
+                <h3>Do guests need to download an app?</h3>
+                <p>Zero friction. Guests simply point their phone camera at the tabletop QR code and pay directly in their mobile browser in under 30 seconds.</p>
+            </div>
+            <div class="faq-item">
+                <h3>Who handles cash payments?</h3>
+                <p>Staff handle cash as usual. Cash payments are recorded instantly in the staff dashboard with a single tap so floor records stay synchronized.</p>
+            </div>
+            <div class="faq-item">
+                <h3>What does it cost?</h3>
+                <p>During our current pilot phase, pricing is custom-tailored for independent venues. Contact us to discuss pilot terms.</p>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <p>&copy; 2026 Smart Table Technologies Inc. Vancouver, BC, Canada. All rights reserved. <br>Contact: <a href="mailto:pilot@smarttable.ca" style="color:var(--amber); text-decoration:none;">pilot@smarttable.ca</a></p>
+    </footer>
+</body>
+</html>
