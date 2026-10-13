@@ -61,10 +61,13 @@ export async function webhookRoutes(app: FastifyInstance) {
     if (!eventId) return { ok: true, skipped: 'no event_id' };
 
     const ins = await query(
-      `INSERT INTO webhook_events(square_event_id, type) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+      `INSERT INTO webhook_events(square_event_id, type) VALUES ($1,$2)
+       ON CONFLICT DO NOTHING RETURNING square_event_id`,
       [eventId, evt.type ?? null],
     );
-    if (ins.rowCount === 0) return { ok: true, deduped: true };
+    // rows.length, not rowCount: pg-mem misreports rowCount for ON CONFLICT DO NOTHING
+    // on UNIQUE targets; RETURNING is portable on both pg-mem and real Postgres.
+    if (ins.rows.length === 0) return { ok: true, deduped: true };
 
     if (evt.type === 'order.updated') {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
