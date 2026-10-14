@@ -1,12 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- CONFIG:
+         FORMSPREE_ENDPOINT = "https://formspree.io/f/YOUR_FORM_ID"
+         CONTACT_EMAIL = "erfanbillion@gmail.com"
+    -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart Table — The bill, without the wait.</title>
     <style>
         :root {
             --navy: #0E1B2C;
+            --navy-dark: #08101C;
             --paper: #FAF8F4;
             --card-bg: #FFFFFF;
             --text-main: #1E293B;
@@ -16,175 +21,525 @@
             --amber: #F59E0B;
             --green: #16A34A;
             --gold: #D97706;
+            --gold-hover: #B45309;
         }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, system-ui, sans-serif; }
-        body { background: var(--paper); color: var(--text-main); line-height: 1.6; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, system-ui, -apple-system, sans-serif; }
+        html { scroll-behavior: smooth; }
+        body { background: var(--paper); color: var(--text-main); line-height: 1.6; font-size: 1rem; }
 
-        header { background: var(--navy); color: white; padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
-        .brand { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.025em; display: flex; align-items: center; gap: 6px; }
-        .brand span { color: var(--gold); }
-        .nav-cta { background: var(--gold); color: white; padding: 10px 20px; border-radius: 10px; font-weight: 600; text-decoration: none; font-size: 0.95rem; }
+        /* Navigation */
+        header { background: var(--navy); color: white; padding: 18px 40px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(255,255,255,0.08); }
+        .brand { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.025em; display: flex; align-items: center; gap: 6px; text-decoration: none; color: white; }
+        .brand span { color: var(--amber); }
+        .nav-links { display: flex; align-items: center; gap: 30px; }
+        .nav-links a { color: #94A3B8; text-decoration: none; font-size: 0.95rem; font-weight: 500; transition: color 0.2s; }
+        .nav-links a:hover { color: white; }
+        .nav-actions { display: flex; align-items: center; gap: 14px; }
+        .nav-portal { color: white; text-decoration: none; font-size: 0.9rem; font-weight: 600; padding: 8px 16px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; transition: background 0.2s; }
+        .nav-portal:hover { background: rgba(255,255,255,0.08); }
+        .nav-cta { background: var(--gold); color: white; padding: 10px 20px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 0.95rem; transition: background 0.2s; }
+        .nav-cta:hover { background: var(--gold-hover); }
 
-        .hero { background: var(--navy); color: white; padding: 100px 20px 120px; text-align: center; }
+        @media(max-width: 900px) {
+            .nav-links { display: none; }
+        }
+
+        /* Hero */
+        .hero { background: var(--navy); color: white; padding: 90px 20px 80px; text-align: center; }
         .hero h1 { font-size: 3.5rem; font-weight: 800; max-width: 800px; margin: 0 auto 20px; letter-spacing: -0.03em; line-height: 1.1; }
-        .hero h1 span { color: var(--amber); }
-        .hero p { font-size: 1.25rem; color: #94A3B8; max-width: 600px; margin: 0 auto 40px; }
-        .btn-hero { background: var(--gold); color: white; padding: 16px 32px; border-radius: 14px; font-size: 1.1rem; font-weight: 700; text-decoration: none; display: inline-block; box-shadow: 0 10px 25px rgba(217, 119, 6, 0.3); }
+        .hero p { font-size: 1.2rem; color: #94A3B8; max-width: 700px; margin: 0 auto 30px; line-height: 1.5; }
+        .hero-cta-group { display: flex; justify-content: center; gap: 16px; margin-bottom: 30px; flex-wrap: wrap; }
+        .btn-primary { background: var(--gold); color: white; padding: 14px 28px; border-radius: 10px; font-size: 1.05rem; font-weight: 700; text-decoration: none; display: inline-block; box-shadow: 0 4px 14px rgba(217, 119, 6, 0.3); transition: background 0.2s; }
+        .btn-primary:hover { background: var(--gold-hover); }
+        .btn-secondary { background: rgba(255,255,255,0.08); color: white; border: 1px solid rgba(255,255,255,0.2); padding: 14px 28px; border-radius: 10px; font-size: 1.05rem; font-weight: 600; text-decoration: none; display: inline-block; transition: background 0.2s; }
+        .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+        .hero-framing { font-size: 0.9rem; color: var(--amber); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
 
-        section { padding: 80px 20px; max-width: 1100px; margin: 0 auto; }
+        /* Product Visual / Device Mockup Showcase in Hero */
+        .hero-visual { max-width: 850px; margin: 50px auto 0; background: linear-gradient(180deg, #132238 0%, #0A1320 100%); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 30px; box-shadow: 0 20px 40px rgba(0,0,0,0.4); }
+        .device-showcase { display: flex; align-items: center; justify-content: space-around; gap: 30px; flex-wrap: wrap; }
+        .device-svg-wrap { width: 220px; height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
+        .dashboard-mock { flex: 1; min-width: 300px; background: #0A1320; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; text-align: left; font-size: 0.85rem; color: #94A3B8; }
+        .dashboard-mock h4 { color: white; font-size: 0.95rem; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+        .status-pill { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .status-pill.blue { background: var(--blue); }
+        .status-pill.amber { background: var(--amber); }
+        .status-pill.green { background: var(--green); }
+        .table-row-mock { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06); font-variant-numeric: tabular-nums; }
+        .table-row-mock:last-child { border-bottom: none; }
+
+        /* Sections */
+        section { padding: 90px 20px; max-width: 1100px; margin: 0 auto; }
         .section-header { text-align: center; max-width: 700px; margin: 0 auto 60px; }
-        .section-header h2 { font-size: 2.5rem; font-weight: 800; color: var(--navy); margin-bottom: 16px; letter-spacing: -0.02em; }
+        .section-header h2 { font-size: 2.4rem; font-weight: 800; color: var(--navy); margin-bottom: 16px; letter-spacing: -0.02em; }
         .section-header p { font-size: 1.1rem; color: var(--text-muted); }
 
-        .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 30px; }
-        .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 20px; padding: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
-        .card h3 { font-size: 1.25rem; font-weight: 700; color: var(--navy); margin-bottom: 12px; }
+        /* Grids and Cards */
+        .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 30px; }
+        .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; padding: 36px 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); transition: transform 0.2s, box-shadow 0.2s; }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
+        .card h3 { font-size: 1.2rem; font-weight: 700; color: var(--navy); margin-bottom: 12px; }
         .card p { color: var(--text-muted); font-size: 0.95rem; }
 
-        .steps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 30px; }
-        .step-card { background: white; border: 1px solid var(--border); border-radius: 20px; padding: 40px 30px; position: relative; }
-        .step-num { font-size: 3rem; font-weight: 900; color: #E2E8F0; position: absolute; top: 20px; right: 25px; }
+        /* Steps */
+        .steps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 30px; }
+        .step-card { background: white; border: 1px solid var(--border); border-radius: 16px; padding: 40px 30px; position: relative; }
+        .step-num { font-size: 2.8rem; font-weight: 900; color: #E2E8F0; position: absolute; top: 20px; right: 25px; }
+        .step-card h3 { font-size: 1.2rem; font-weight: 700; color: var(--navy); margin-bottom: 12px; }
+        .step-card p { color: var(--text-muted); font-size: 0.95rem; }
 
-        .pilot-form-box { background: var(--navy); color: white; border-radius: 24px; padding: 60px 40px; max-width: 700px; margin: 0 auto; text-align: center; }
-        .pilot-form-box h2 { font-size: 2.2rem; margin-bottom: 12px; }
-        .pilot-form-box p { color: #94A3B8; margin-bottom: 30px; }
-        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-        @media(max-width:600px) { .form-grid { grid-template-columns: 1fr; } }
-        .pilot-form-box input { width: 100%; padding: 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: white; font-size: 1rem; margin-bottom: 16px; }
-        .pilot-form-box input::placeholder { color: #94A3B8; }
+        /* Device Section */
+        .device-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 50px; align-items: center; }
+        @media(max-width: 768px) { .device-layout { grid-template-columns: 1fr; } }
+        .device-specs { display: flex; flex-direction: column; gap: 20px; }
+        .spec-item { display: flex; gap: 16px; align-items: flex-start; }
+        .spec-icon { background: #FEF3C7; color: var(--gold); width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; }
+        .spec-text h4 { font-size: 1rem; color: var(--navy); margin-bottom: 4px; font-weight: 700; }
+        .spec-text p { font-size: 0.9rem; color: var(--text-muted); }
 
-        .faq-list { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
-        .faq-item { background: white; border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
-        .faq-item h3 { font-size: 1.1rem; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
+        /* Owner Dashboard Section */
+        .dashboard-preview { background: var(--navy); color: white; border-radius: 24px; padding: 50px; box-shadow: 0 20px 40px rgba(14,27,44,0.15); }
+        .dashboard-preview h3 { font-size: 1.8rem; font-weight: 700; margin-bottom: 16px; }
+        .dashboard-preview p { color: #94A3B8; margin-bottom: 30px; max-width: 600px; }
+
+        /* Pricing Section */
+        .pricing-box { background: white; border: 1px solid var(--border); border-radius: 24px; padding: 50px; text-align: center; max-width: 750px; margin: 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.03); }
+        .pricing-box h3 { font-size: 2rem; color: var(--navy); font-weight: 800; margin-bottom: 16px; }
+        .pricing-box p { color: var(--text-muted); font-size: 1.05rem; margin-bottom: 30px; }
+        .pricing-badge { display: inline-block; background: #FEF3C7; color: var(--gold); padding: 6px 16px; border-radius: 20px; font-weight: 700; font-size: 0.85rem; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+        /* Partner Section */
+        .partner-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; margin-bottom: 50px; }
+        .partner-card { background: white; border: 1px solid var(--border); border-radius: 16px; padding: 30px; }
+        .partner-card h3 { font-size: 1.1rem; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
+        .partner-card p { font-size: 0.9rem; color: var(--text-muted); }
+
+        .form-container { background: white; border: 1px solid var(--border); border-radius: 20px; padding: 45px; max-width: 750px; margin: 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.02); }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+        @media(max-width:650px) { .form-grid { grid-template-columns: 1fr; } }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; font-size: 0.9rem; font-weight: 600; color: var(--navy); margin-bottom: 6px; }
+        .form-control { width: 100%; padding: 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--paper); color: var(--text-main); font-size: 0.95rem; }
+        .form-control:focus { outline: none; border-color: var(--blue); background: white; }
+        select.form-control { appearance: none; background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2364748B%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E"); background-repeat: no-repeat; background-position: right 14px center; background-size: 10px; }
+        .form-microcopy { text-align: center; font-size: 0.85rem; color: var(--text-muted); margin-top: 14px; }
+
+        /* FAQ */
+        .faq-list { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+        .faq-item { background: white; border: 1px solid var(--border); border-radius: 14px; padding: 24px; }
+        .faq-item h3 { font-size: 1.05rem; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
         .faq-item p { color: var(--text-muted); font-size: 0.95rem; }
 
-        footer { background: var(--navy); color: #94A3B8; padding: 40px 20px; text-align: center; font-size: 0.9rem; border-top: 1px solid rgba(255,255,255,0.1); }
+        /* Final Contact Form Section */
+        .contact-section { background: var(--navy); color: white; border-radius: 24px; padding: 60px 40px; max-width: 850px; margin: 0 auto; text-align: center; }
+        .contact-section h2 { font-size: 2.2rem; font-weight: 800; margin-bottom: 12px; }
+        .contact-section p { color: #94A3B8; margin-bottom: 30px; }
+        .contact-section .form-control { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.2); color: white; }
+        .contact-section .form-control::placeholder { color: #94A3B8; }
+        .contact-section label { color: #E2E8F0; text-align: left; }
+
+        /* Footer */
+        footer { background: var(--navy-dark); color: #94A3B8; padding: 50px 20px; text-align: center; font-size: 0.9rem; border-top: 1px solid rgba(255,255,255,0.08); }
+        .footer-content { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; align-items: center; }
+        .footer-contact-block { font-weight: 500; color: white; }
+        .footer-contact-block a { color: var(--amber); text-decoration: none; }
     </style>
 </head>
 <body>
+
+    <!-- 1. Sticky Navigation -->
     <header>
-        <div class="brand">Smart Table<span>.</span></div>
-        <a href="#pilot" class="nav-cta">Join the Pilot</a>
+        <a href="#" class="brand">Smart Table<span>.</span></a>
+        <nav class="nav-links">
+            <a href="#product">Product</a>
+            <a href="#device">Device</a>
+            <a href="#pricing">Pricing</a>
+            <a href="#partner">Partner with us</a>
+            <a href="#faq">FAQ</a>
+        </nav>
+        <div class="nav-actions">
+            <a href="/portal/" class="nav-portal">Restaurant login</a>
+            <a href="#contact" class="nav-cta">Get Smart Table</a>
+        </div>
     </header>
 
+    <!-- 2. Hero Section -->
     <div class="hero">
-        <h1>The bill, <span>without the wait.</span></h1>
-        <p>Technology removes the WAIT, not the waiter. Give your guests lightning-fast phone payments and splitting, while your staff keep total control.</p>
-        <a href="#pilot" class="btn-hero">Join the Metro Vancouver Pilot</a>
+        <div class="hero-framing">Now onboarding founding restaurants across Metro Vancouver.</div>
+        <h1 style="margin-top: 16px;">The bill, without the wait.</h1>
+        <p>Smart Table lets guests split and pay from their phone in seconds — while your staff see every table live. No app download. No waiting for the card machine.</p>
+        <div class="hero-cta-group">
+            <a href="#contact" class="btn-primary">Get Smart Table</a>
+            <a href="#product" class="btn-secondary">See how it works</a>
+        </div>
+
+        <!-- Product Visual / Mockup -->
+        <div class="hero-visual">
+            <div class="device-showcase">
+                <div class="device-svg-wrap">
+                    <!-- Stylized SVG Device Illustration -->
+                    <svg width="180" height="220" viewBox="0 0 180 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="20" y="20" width="140" height="180" rx="16" fill="#1E293B" stroke="#334155" stroke-width="2"/>
+                        <rect x="35" y="35" width="110" height="110" rx="8" fill="#0F172A" stroke="#475569" stroke-width="1"/>
+                        <rect x="45" y="45" width="35" height="35" fill="#E2E8F0"/>
+                        <rect x="100" y="45" width="35" height="35" fill="#E2E8F0"/>
+                        <rect x="45" y="100" width="35" height="35" fill="#E2E8F0"/>
+                        <rect x="90" y="90" width="15" height="15" fill="#3B82F6"/>
+                        <circle cx="90" cy="165" r="6" fill="#16A34A"/>
+                        <circle cx="90" cy="190" r="10" fill="#334155" stroke="#64748B" stroke-width="2"/>
+                    </svg>
+                    <div style="font-size: 0.8rem; color: #94A3B8; margin-top: 8px;">Tabletop Device</div>
+                </div>
+                <div class="dashboard-mock">
+                    <h4>Live Floor Status <span style="font-size: 0.75rem; color: var(--green);">● Live</span></h4>
+                    <div class="table-row-mock">
+                        <span><span class="status-pill blue"></span> Table 04 (Seated)</span>
+                        <span>$142.50</span>
+                    </div>
+                    <div class="table-row-mock">
+                        <span><span class="status-pill amber"></span> Table 09 (Paying)</span>
+                        <span>$88.00</span>
+                    </div>
+                    <div class="table-row-mock">
+                        <span><span class="status-pill green"></span> Table 12 (Paid)</span>
+                        <span>$210.30</span>
+                    </div>
+                    <div style="margin-top: 12px; font-size: 0.8rem; color: #64748B; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
+                        Waiter call queue: 0 active calls
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <section>
+    <!-- 3. Problem Section -->
+    <section id="product">
         <div class="section-header">
-            <h2>The Problem with Dining Out</h2>
-            <p>Guests hate waiting 10+ minutes just to pay their check. Staff hate running cards back and forth across a packed floor.</p>
+            <h2>The most expensive minutes in your restaurant</h2>
+            <p>Every service faces the same friction at check settlement.</p>
         </div>
         <div class="grid-3">
             <div class="card">
-                <h3>Dead Wait Time</h3>
-                <p>When the meal is over, momentum dies. Guests sit twiddling their thumbs waiting for paper bills and card machines.</p>
+                <h3>Guests Waiting to Pay</h3>
+                <p>When the meal ends, momentum stops. Guests sit waiting for paper checks and portable card machines.</p>
             </div>
             <div class="card">
-                <h3>Split Check Friction</h3>
-                <p>Calculators, card sorting, and math at the table waste valuable time during high-turnover dinner rushes.</p>
+                <h3>Tables Sitting Occupied</h3>
+                <p>Turnover slows right when it matters most. Tables stay blocked long after dining is finished.</p>
             </div>
             <div class="card">
-                <h3>Overworked Floor Staff</h3>
-                <p>Servers spend 30% of their shift processing transactions instead of taking orders and building hospitality.</p>
+                <h3>Staff Running Cards</h3>
+                <p>Servers burn shift time walking between tables and POS terminals instead of hosting guests.</p>
             </div>
         </div>
     </section>
 
+    <!-- 4. How It Works Section -->
     <section style="background: white;">
         <div style="max-width: 1100px; margin: 0 auto;">
             <div class="section-header">
-                <h2>How It Works</h2>
-                <p>Three simple steps. No apps to download, no accounts to create.</p>
+                <h2>How Smart Table Works</h2>
+                <p>Designed for speed from the moment guests sit down.</p>
             </div>
             <div class="steps-grid">
                 <div class="step-card">
                     <div class="step-num">01</div>
-                    <h3>Guest Scans QR</h3>
-                    <p>Every table features a discreet QR code. Guests scan with their phone camera to instantly view their itemized bill.</p>
+                    <h3>Guest Scans the QR</h3>
+                    <p>Each table features a tabletop device. Guests scan the QR code with their phone camera to instantly view their itemized bill.</p>
                 </div>
                 <div class="step-card">
                     <div class="step-num">02</div>
-                    <h3>Splits & Pays Instantly</h3>
-                    <p>Split equally, by items, or custom amounts. Pay in under 30 seconds by card, right in the phone browser — no app download.</p>
+                    <h3>Splits &amp; Pays in Seconds</h3>
+                    <p>Guests pay by card in their phone browser — equal splits, split by items, or custom amounts, with tip.</p>
                 </div>
                 <div class="step-card">
                     <div class="step-num">03</div>
-                    <h3>Table Frees Up</h3>
-                    <p>Staff dashboard updates live instantly as bills settle, turning tables faster and increasing daily revenue.</p>
+                    <h3>Table Frees Up Live</h3>
+                    <p>Staff see the status update live on the dashboard the second payment is confirmed.</p>
                 </div>
             </div>
         </div>
     </section>
 
-    <section>
+    <!-- 5. The Device Section -->
+    <section id="device">
         <div class="section-header">
-            <h2>Built for Independents, Not Chains</h2>
-            <p>Designed specifically for independent restaurants and cafés across Metro Vancouver.</p>
+            <h2>The Smart Table Device</h2>
+            <p>One discreet device per table — the physical anchor of the whole system.</p>
         </div>
-        <div class="grid-3">
-            <div class="card">
-                <h3>Square POS Native</h3>
-                <p>Sits seamlessly on top of your existing Square POS integration. No redundant hardware or dual-entry.</p>
+        <div class="device-layout">
+            <div style="display: flex; justify-content: center; align-items: center; background: white; border: 1px solid var(--border); border-radius: 20px; padding: 40px;">
+                <svg width="220" height="280" viewBox="0 0 220 280" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M70 240H150L160 260H60L70 240Z" fill="#CBD5E1"/>
+                    <rect x="35" y="20" width="150" height="220" rx="18" fill="#0E1B2C" stroke="#334155" stroke-width="3"/>
+                    <rect x="52" y="38" width="116" height="130" rx="10" fill="#1E293B" stroke="#475569" stroke-width="1"/>
+                    <rect x="64" y="50" width="40" height="40" rx="4" fill="#E2E8F0"/>
+                    <rect x="116" y="50" width="40" height="40" rx="4" fill="#E2E8F0"/>
+                    <rect x="64" y="102" width="40" height="40" rx="4" fill="#E2E8F0"/>
+                    <rect x="110" y="102" width="20" height="20" fill="#2F80ED"/>
+                    <circle cx="85" cy="195" r="6" fill="#16A34A"/>
+                    <text x="102" y="199" fill="#94A3B8" font-size="12" font-family="Inter">Status LED</text>
+                    <circle cx="110" cy="225" r="14" fill="#334155" stroke="#64748B" stroke-width="2"/>
+                    <circle cx="110" cy="225" r="8" fill="#F59E0B"/>
+                </svg>
             </div>
-            <div class="card">
-                <h3>Live Table States</h3>
-                <p>See every table at a glance — free, seated, paying or paid — and catch waiter calls the second they happen.</p>
-            </div>
-            <div class="card">
-                <h3>Sales & Tip Reporting</h3>
-                <p>Track settlement speeds, waiter response times, and daily tip distributions in one clean dashboard.</p>
+            <div class="device-specs">
+                <div class="spec-item">
+                    <div class="spec-icon">QR</div>
+                    <div class="spec-text">
+                        <h4>Per-Table QR Code</h4>
+                        <p>Secure, per-table QR codes generated specifically for your floor plan.</p>
+                    </div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-icon">LED</div>
+                    <div class="spec-text">
+                        <h4>Status Indicator LED</h4>
+                        <p>Blue = Seated, Amber = Paying, Green = Paid. Instant visual clarity across the dining room.</p>
+                    </div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-icon">🔔</div>
+                    <div class="spec-text">
+                        <h4>Physical Waiter-Call Button</h4>
+                        <p>Guests request assistance discreetly without flagging down busy floor staff.</p>
+                    </div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-icon">⚡</div>
+                    <div class="spec-text">
+                        <h4>Rechargeable USB-C</h4>
+                        <p>Battery built for full service shifts, recharged over USB-C.</p>
+                    </div>
+                </div>
             </div>
         </div>
     </section>
 
-    <section id="pilot">
-        <div class="pilot-form-box">
-            <h2>Join the Pilot Phase</h2>
-            <p>We are currently onboarding select independent restaurants in Metro Vancouver, BC.</p>
-            <form onsubmit="event.preventDefault(); alert('Thank you! Our Vancouver team will reach out within 24 hours.');">
+    <!-- 6. Features Grid -->
+    <section style="background: white;">
+        <div style="max-width: 1100px; margin: 0 auto;">
+            <div class="section-header">
+                <h2>Built for Purpose</h2>
+                <p>Everything you need for seamless table payments — exactly what V1 delivers.</p>
+            </div>
+            <div class="grid-3">
+                <div class="card">
+                    <h3>Pay at the table</h3>
+                    <p>Guests complete payment from their phone browser — no waiting for paper bills or handheld terminals.</p>
+                </div>
+                <div class="card">
+                    <h3>Split bills (equal / by items / custom)</h3>
+                    <p>Equal shares, itemized selection, or custom amounts — with tip.</p>
+                </div>
+                <div class="card">
+                    <h3>Live table states</h3>
+                    <p>Every table's real-time state — free, seated, paying, paid — on one floor view.</p>
+                </div>
+                <div class="card">
+                    <h3>Sales &amp; tip reporting</h3>
+                    <p>Settlement times, waiter response times, daily sales and tip distribution.</p>
+                </div>
+                <div class="card">
+                    <h3>Waiter-call button</h3>
+                    <p>A physical button on every table alerts staff the second help is needed.</p>
+                </div>
+                <div class="card">
+                    <h3>No app download</h3>
+                    <p>Guests pay in their phone browser. Nothing to install, no account needed.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 7. For Owners: Live Dashboard -->
+    <section>
+        <div class="dashboard-preview">
+            <h3>Designed for Owners</h3>
+            <p>Complete visibility over your floor with a live dashboard.</p>
+            <div class="grid-3" style="margin-top: 20px;">
+                <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 24px;">
+                    <h4 style="color: white; margin-bottom: 8px; font-size: 1.1rem;">Floor Map with Table States</h4>
+                    <p style="color: #94A3B8; font-size: 0.9rem;">Every table's real-time state at a glance.</p>
+                </div>
+                <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 24px;">
+                    <h4 style="color: white; margin-bottom: 8px; font-size: 1.1rem;">Waiter-Call Queue</h4>
+                    <p style="color: #94A3B8; font-size: 0.9rem;">Timestamped service requests, acknowledged in one tap.</p>
+                </div>
+                <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 24px;">
+                    <h4 style="color: white; margin-bottom: 8px; font-size: 1.1rem;">Settlement &amp; Response Metrics</h4>
+                    <p style="color: #94A3B8; font-size: 0.9rem;">Average settlement times, response speeds, sales and tips — live.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 8. Pricing Section -->
+    <section id="pricing" style="background: white;">
+        <div style="max-width: 1100px; margin: 0 auto;">
+            <div class="section-header">
+                <h2>Pricing</h2>
+                <p>Straightforward costs for independent restaurants.</p>
+            </div>
+            <div class="pricing-box">
+                <div class="pricing-badge">Founding Restaurant Program</div>
+                <h3>One device per table. One simple subscription.</h3>
+                <p>Device purchase + monthly plan. Full Square POS integration, real-time staff dashboard, and ongoing updates included.</p>
+                <div style="font-size: 1.1rem; font-weight: 600; color: var(--navy); margin-bottom: 30px;">
+                    Founding restaurants lock in early pricing.
+                </div>
+                <a href="#partner" class="btn-primary">Get Smart Table</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Partner With Us Section -->
+    <section id="partner">
+        <div class="section-header">
+            <h2>Become a founding restaurant.</h2>
+            <p>Join the first wave of partner venues across Metro Vancouver.</p>
+        </div>
+        <div class="partner-grid">
+            <div class="partner-card">
+                <h3>Early pricing, locked</h3>
+                <p>Founding rates on hardware and subscription — locked in as we grow.</p>
+            </div>
+            <div class="partner-card">
+                <h3>White-glove onboarding</h3>
+                <p>Setup, staff training, and floor configuration handled with you directly.</p>
+            </div>
+            <div class="partner-card">
+                <h3>Shape the roadmap</h3>
+                <p>Founding restaurants guide what we build next.</p>
+            </div>
+        </div>
+
+        <!-- Application Form -->
+        <div class="form-container">
+            <h3 style="font-size: 1.5rem; font-weight: 800; color: var(--navy); margin-bottom: 8px; text-align: center;">Founding Application</h3>
+            <p style="color: var(--text-muted); text-align: center; margin-bottom: 30px; font-size: 0.95rem;">Tell us about your restaurant to claim your spot.</p>
+
+            <form action="https://formspree.io/f/YOUR_FORM_ID" method="POST">
                 <div class="form-grid">
-                    <input type="text" placeholder="Your Name" required>
-                    <input type="text" placeholder="Restaurant / Café Name" required>
+                    <div class="form-group">
+                        <label>Restaurant Name</label>
+                        <input type="text" name="restaurant_name" class="form-control" placeholder="e.g. Gastown Bistro" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Your Name</label>
+                        <input type="text" name="name" class="form-control" placeholder="e.g. Sarah Jenkins" required>
+                    </div>
                 </div>
                 <div class="form-grid">
-                    <input type="text" placeholder="City (e.g. Vancouver, Burnaby)" required>
-                    <input type="email" placeholder="Work Email" required>
+                    <div class="form-group">
+                        <label>Work Email</label>
+                        <input type="email" name="email" class="form-control" placeholder="sarah@gastownbistro.ca" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Phone Number</label>
+                        <input type="tel" name="phone" class="form-control" placeholder="(604) 555-0199" required>
+                    </div>
                 </div>
-                <button type="submit" class="btn-hero" style="width:100%; border:none; cursor:pointer;">Request Pilot Access</button>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>City</label>
+                        <input type="text" name="city" class="form-control" placeholder="Vancouver, Burnaby, Richmond..." required>
+                    </div>
+                    <div class="form-group">
+                        <label>Number of Tables</label>
+                        <input type="number" name="tables" class="form-control" placeholder="e.g. 24" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Current POS System</label>
+                    <select name="pos_system" class="form-control" required>
+                        <option value="" disabled selected>Select your POS</option>
+                        <option value="Square">Square</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Message</label>
+                    <textarea name="message" class="form-control" rows="4" placeholder="Tell us about your service style or current pain points..."></textarea>
+                </div>
+                <button type="submit" class="btn-primary" style="width: 100%; border: none; cursor: pointer; margin-top: 10px;">Submit Application</button>
+                <div class="form-microcopy">We reply within 2 business days.</div>
             </form>
         </div>
     </section>
 
-    <section style="background: white;">
+    <!-- 9. FAQ Section -->
+    <section id="faq" style="background: white;">
         <div class="section-header">
             <h2>Frequently Asked Questions</h2>
+            <p>Clear answers about integration and availability.</p>
         </div>
         <div class="faq-list">
             <div class="faq-item">
                 <h3>Does it replace our POS?</h3>
-                <p>No. Smart Table sits directly on top of your existing Square POS system, linking checks and orders seamlessly without replacing your hardware workflow.</p>
+                <p>No — v1 is built on Square; it reads your open checks and records payments back.</p>
             </div>
             <div class="faq-item">
-                <h3>Do guests need to download an app?</h3>
-                <p>Zero friction. Guests simply point their phone camera at the tabletop QR code and pay directly in their mobile browser in under 30 seconds.</p>
+                <h3>Do guests need an app?</h3>
+                <p>No — everything happens in the phone browser.</p>
             </div>
             <div class="faq-item">
-                <h3>Who handles cash payments?</h3>
-                <p>Staff handle cash as usual. Cash payments are recorded instantly in the staff dashboard with a single tap so floor records stay synchronized.</p>
+                <h3>What about cash?</h3>
+                <p>Staff record cash payments in one tap on the dashboard.</p>
             </div>
             <div class="faq-item">
                 <h3>What does it cost?</h3>
-                <p>During our current pilot phase, pricing is custom-tailored for independent venues. Contact us to discuss pilot terms.</p>
+                <p>Device + subscription; talk to us for founding pricing.</p>
+            </div>
+            <div class="faq-item">
+                <h3>When is it available?</h3>
+                <p>Now onboarding Metro Vancouver restaurants.</p>
             </div>
         </div>
     </section>
 
+    <!-- 10. Final CTA & Contact Section -->
+    <section id="contact" style="padding-top: 0;">
+        <div class="contact-section">
+            <h2>Get Smart Table</h2>
+            <p>Ready to remove the wait from the bill? Talk to us.</p>
+
+            <form action="https://formspree.io/f/YOUR_FORM_ID" method="POST">
+                <div class="form-grid">
+                    <div class="form-group" style="text-align: left;">
+                        <label>Name</label>
+                        <input type="text" name="name" class="form-control" placeholder="Alex Mercer" required>
+                    </div>
+                    <div class="form-group" style="text-align: left;">
+                        <label>Restaurant</label>
+                        <input type="text" name="restaurant" class="form-control" placeholder="Pacific Grill" required>
+                    </div>
+                </div>
+                <div class="form-group" style="text-align: left;">
+                    <label>Email</label>
+                    <input type="email" name="email" class="form-control" placeholder="alex@pacificgrill.ca" required>
+                </div>
+                <div class="form-group" style="text-align: left;">
+                    <label>Message</label>
+                    <textarea name="message" class="form-control" rows="4" placeholder="How can we help your dining room?" required></textarea>
+                </div>
+                <button type="submit" class="btn-primary" style="width: 100%; border: none; cursor: pointer; margin-top: 10px;">Get Smart Table</button>
+            </form>
+            <div style="margin-top: 20px; font-size: 0.9rem; color: #94A3B8;">
+                Or email us directly at <a href="mailto:erfanbillion@gmail.com" style="color: var(--amber); text-decoration: none;">erfanbillion@gmail.com</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- 11. Footer -->
     <footer>
-        <p>&copy; 2026 Smart Table Technologies Inc. Vancouver, BC, Canada. All rights reserved. <br>Contact: <a href="mailto:pilot@smarttable.ca" style="color:var(--amber); text-decoration:none;">pilot@smarttable.ca</a></p>
+        <div class="footer-content">
+            <div class="footer-contact-block">
+                Metro Vancouver, BC &nbsp;·&nbsp; <a href="mailto:erfanbillion@gmail.com">erfanbillion@gmail.com</a>
+            </div>
+            <p>&copy; 2026 smarttablepay · Metro Vancouver, BC · erfanbillion@gmail.com</p>
+        </div>
     </footer>
+
 </body>
 </html>
