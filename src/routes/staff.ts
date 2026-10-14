@@ -8,7 +8,16 @@ import { parsePaymentBody, payCheck } from '../services/payments.js';
 import { staffOnly } from '../auth.js';
 
 export async function staffRoutes(app: FastifyInstance) {
-  app.get('/api/locations', staffOnly, async () => {
+  app.get('/api/locations', staffOnly, async (req) => {
+    // Portal users only ever see their own location: without this, a second
+    // restaurant's owner could operate on the first location in the list.
+    const u = req.portalUser;
+    if (u) {
+      const r = await query(`SELECT id, square_location_id, name, currency FROM locations WHERE id = $1`, [
+        u.location_id,
+      ]);
+      return { locations: r.rows };
+    }
     const r = await query(`SELECT id, square_location_id, name, currency FROM locations ORDER BY name`);
     return { locations: r.rows };
   });

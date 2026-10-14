@@ -5,7 +5,14 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from './config.js';
-import { isValidPortalToken } from './routes/portal.js';
+import { getPortalUser, type PortalIdentity } from './routes/portal.js';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    /** Set when the caller authenticated with a per-user portal token. */
+    portalUser?: PortalIdentity;
+  }
+}
 
 // Hash both sides so timingSafeEqual always gets equal-length buffers
 // (and the token length is not leaked through an early length check).
@@ -21,11 +28,18 @@ export function extractBearer(header: string | undefined): string | null {
   return m ? m[1] : null;
 }
 
-/** Fastify onRequest hook: 401 JSON unless a valid staff bearer token or portal token is presented. */
+/** Fastify onRequest hook: 401 JSON unless a valid staff bearer token or portal token is presented.
+ * On a portal token the user's identity is attached to the request for per-user scoping. */
 export async function requireStaff(req: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | undefined> {
   const token = extractBearer(req.headers.authorization);
   if (token && isValidStaffToken(token)) return undefined;
-  if (token && (await isValidPortalToken(token))) return undefined;
+  if (token) {
+    const user = await getPortalUser(token);
+    if (user) {
+      req.portalUser = user;
+      return undefined;
+    }
+  }
   req.log.warn({ url: req.url, ip: req.ip }, 'staff auth failed');
   return reply.code(401).header('WWW-Authenticate', 'Bearer').send({ error: 'unauthorized' });
 }

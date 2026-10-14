@@ -8,26 +8,33 @@ import { config } from '../config.js';
 import { encryptSecret } from '../crypto.js';
 import { exchangeOAuthCode, getMerchantProfile, listLocations, squareAuthorizeUrl } from '../square.js';
 import { badRequest } from '../http.js';
+import { staffOnly } from '../auth.js';
 
-// Short-lived OAuth state tokens (CSRF protection).
-const states = new Map<string, number>();
+// Short-lived OAuth state tokens (CSRF protection), bound to the staff user
+// who started the flow so the callback can tie the merchant to them.
+const states = new Map<string, { created: number; userId?: string; locationId?: string }>();
 setInterval(() => {
   const now = Date.now();
-  for (const [k, v] of states) if (now - v > 10 * 60 * 1000) states.delete(k);
+  for (const [k, v] of states) if (now - v.created > 10 * 60 * 1000) states.delete(k);
 }, 60 * 1000).unref();
 
 export async function oauthRoutes(app: FastifyInstance) {
-  app.get('/api/oauth/start', async (_req, reply) => {
+  // Starts Square OAuth for the logged-in staff user. Returns the Square
+  // authorize URL; the portal navigates there. (A plain redirect cannot carry
+  // the bearer header, and a public GET starter could be triggered by anyone.)
+  app.post('/api/oauth/start', staffOnly, async (req) => {
     const state = randomUUID();
-    states.set(state, Date.now());
-    return reply.redirect(squareAuthorizeUrl(state));
+    const u = req.portalUser;
+    states.set(state, { created: Date.now(), userId: u?.id, locationId: u?.location_id });
+    return { url: squareAuthorizeUrl(state) };
   });
 
   app.get('/api/oauth/callback', async (req) => {
     const { code, state } = req.query as { code?: string; state?: string };
     if (!code) throw badRequest('missing authorization code');
-    if (!state || !states.has(state)) throw badRequest('invalid or expired oauth state');
-    states.delete(state);
+    const st = state ? states.get(state) : undefined;
+    if (!st) throw badRequest('invalid or expired oauth state');
+    states.delete(state!);
 
     const tok = await exchangeOAuthCode(code);
     const accessToken: string = tok.access_token;
@@ -64,6 +71,7 @@ export async function oauthRoutes(app: FastifyInstance) {
       merchant: merchant.business_name ?? merchantId,
       locations_connected: n,
       dashboard: `${config.appUrl}/dashboard`,
+      started_by_location_id: st.locationId ?? null,
     };
   });
 }

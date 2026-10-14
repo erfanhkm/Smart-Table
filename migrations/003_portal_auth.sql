@@ -19,6 +19,6 @@ CREATE TABLE IF NOT EXISTS portal_tokens (
   token_hash TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '30 days'
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '7 days'
 );
 CREATE INDEX IF NOT EXISTS idx_portal_tokens_user ON portal_tokens(user_id);

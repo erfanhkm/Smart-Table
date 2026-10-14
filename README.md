@@ -46,7 +46,7 @@ Then: `npm run seed` → prints guest QR links + dashboard URL.
 | Access | Method & path | Purpose |
 |---|---|---|
 | Public | `GET /healthz` | Health check |
-| Public | `GET /api/oauth/start` → `GET /api/oauth/callback` | Square OAuth restaurant onboarding (stores encrypted tokens) |
+| Staff | `POST /api/oauth/start` → `GET /api/oauth/callback` (public) | Square OAuth restaurant onboarding (stores encrypted tokens) |
 | Staff | `GET /api/tables?location_id=`, `POST /api/tables`, `GET /api/tables/:id/qr` | Table list / create / printable QR PNG |
 | Staff | `POST /api/tables/:id/link-check` | Link a POS order to a table (order is fetched from Square; must be OPEN and in the table's Square location) |
 | Staff | `POST /api/tables/:id/free`, `/ack-call` | Reset table / ack waiter call |

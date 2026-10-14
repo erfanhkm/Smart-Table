@@ -55,7 +55,22 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // Pretty URLs for the two frontends.
   app.get('/t/:token', async (_req, reply) => reply.sendFile('t/index.html'));
   app.get('/dashboard', async (_req, reply) => reply.sendFile('dashboard/index.html'));
-  app.get('/portal', async (_req, reply) => reply.sendFile('portal/index.html'));
+  // Restaurant portal: strict CSP (the page's script is external, no inline
+  // script/style), not framable — it has Record Cash / Free Table buttons.
+  app.get('/portal', async (_req, reply) =>
+    reply
+      .header(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+      )
+      .header('X-Frame-Options', 'DENY')
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Referrer-Policy', 'no-referrer')
+      .sendFile('portal/index.html'),
+  );
+  app.get('/portal/app.js', async (_req, reply) =>
+    reply.header('X-Content-Type-Options', 'nosniff').type('text/javascript').sendFile('portal/app.js'),
+  );
 
   await app.register(tableRoutes);
   await app.register(customerRoutes);
