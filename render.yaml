@@ -1,0 +1,35 @@
+# Render blueprint for the Smart Table backend (Node 24 + Fastify + Postgres).
+# Apply from the Render dashboard (Blueprints → New Blueprint Instance) after
+# pushing this repo to GitHub, or create the web service manually with the
+# same build/start commands and env vars.
+services:
+  - type: web
+    name: smart-table
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/index.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # --- paste from Neon (project → Connection Details) ---
+      - key: DATABASE_URL
+        sync: false
+      # --- generated once (see hidden_files/deploy-secrets.env); keep private ---
+      - key: STAFF_API_TOKEN
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      # --- from 1Password/Vault: Square sandbox credentials ---
+      - key: SQUARE_WEBHOOK_SIGNATURE_KEY
+        sync: false
+      - key: SQUARE_ACCESS_TOKEN
+        sync: false
+      - key: SQUARE_LOCATION_ID
+        sync: false
+      - key: SQUARE_ENV
+        value: sandbox
+      # --- set AFTER the first deploy, to the Render service URL ---
+      - key: APP_URL
+        sync: false
