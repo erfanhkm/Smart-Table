@@ -11,6 +11,7 @@ import { dashboardRoutes } from './routes/dashboard.js';
 import { oauthRoutes } from './routes/oauth.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { staffRoutes } from './routes/staff.js';
+import { portalRoutes } from './routes/portal.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -54,6 +55,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // Pretty URLs for the two frontends.
   app.get('/t/:token', async (_req, reply) => reply.sendFile('t/index.html'));
   app.get('/dashboard', async (_req, reply) => reply.sendFile('dashboard/index.html'));
+  app.get('/portal', async (_req, reply) => reply.sendFile('portal/index.html'));
 
   await app.register(tableRoutes);
   await app.register(customerRoutes);
@@ -61,6 +63,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(oauthRoutes);
   await app.register(webhookRoutes);
   await app.register(staffRoutes);
+  await app.register(portalRoutes);
   return app;
 }
 

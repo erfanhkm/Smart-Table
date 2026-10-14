@@ -1,9 +1,11 @@
-// Staff authentication: a single bearer token from STAFF_API_TOKEN.
-// (Full per-user auth / RBAC is a later batch; this closes the "anyone can call
+// Staff authentication: a single bearer token from STAFF_API_TOKEN,
+// or a per-user portal token issued by POST /api/portal/login.
+// (Full RBAC is a later batch; this closes the "anyone can call
 // the staff API" hole.) Fail-closed: if STAFF_API_TOKEN is unset nothing passes.
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from './config.js';
+import { isValidPortalToken } from './routes/portal.js';
 
 // Hash both sides so timingSafeEqual always gets equal-length buffers
 // (and the token length is not leaked through an early length check).
@@ -19,10 +21,11 @@ export function extractBearer(header: string | undefined): string | null {
   return m ? m[1] : null;
 }
 
-/** Fastify onRequest hook: 401 JSON unless a valid staff bearer token is presented. */
+/** Fastify onRequest hook: 401 JSON unless a valid staff bearer token or portal token is presented. */
 export async function requireStaff(req: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | undefined> {
   const token = extractBearer(req.headers.authorization);
   if (token && isValidStaffToken(token)) return undefined;
+  if (token && (await isValidPortalToken(token))) return undefined;
   req.log.warn({ url: req.url, ip: req.ip }, 'staff auth failed');
   return reply.code(401).header('WWW-Authenticate', 'Bearer').send({ error: 'unauthorized' });
 }

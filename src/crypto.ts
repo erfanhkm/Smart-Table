@@ -34,3 +34,26 @@ export function verifySquareWebhook(rawBody: string, signature: string, notifica
   const b = Buffer.from(signature);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+// ---- Portal user password hashing (scrypt) ----
+// Stored format: "scrypt$<salt-hex>$<hash-hex>" (salt 16 bytes, hash 64 bytes).
+import { scrypt as scryptCb } from 'node:crypto';
+import { promisify } from 'node:util';
+
+const scryptAsync = promisify(scryptCb);
+
+export async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(16);
+  const hash = (await scryptAsync(password, salt, 64)) as Buffer;
+  return `scrypt$${salt.toString('hex')}$${hash.toString('hex')}`;
+}
+
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  const parts = stored.split('$');
+  if (parts.length !== 3 || parts[0] !== 'scrypt') return false;
+  const salt = Buffer.from(parts[1], 'hex');
+  const expected = Buffer.from(parts[2], 'hex');
+  if (salt.length !== 16 || expected.length !== 64) return false;
+  const actual = (await scryptAsync(password, salt, 64)) as Buffer;
+  return timingSafeEqual(actual, expected);
+}
