@@ -183,8 +183,7 @@ const PortalAPI = {
   async setQrOrdering(locationId, enabled) {
     const res = await request(`/api/locations/${encodeURIComponent(locationId)}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ qr_ordering_enabled: !!enabled }),
+      body: { qr_ordering_enabled: !!enabled },
     });
     const data = await readJson(res);
     if (!res.ok) throw new Error((data && data.error) || 'Could not save setting.');
@@ -1119,12 +1118,11 @@ async function renderSettings() {
       try {
         const res = await request(`/api/locations/${encodeURIComponent(loc0.id)}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          body: {
             loyalty_enabled: $('loyalty-toggle').checked,
             loyalty_visits_required: Number($('loyalty-visits').value),
             loyalty_reward_text: $('loyalty-reward').value,
-          }),
+          },
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Could not save.');
@@ -1138,8 +1136,7 @@ async function renderSettings() {
       try {
         const res = await request(`/api/locations/${encodeURIComponent(loc0.id)}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ google_review_url: $('review-url').value }),
+          body: { google_review_url: $('review-url').value },
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Could not save.');
