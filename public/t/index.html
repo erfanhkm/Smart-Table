@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Table — The bill, without the wait</title>
+    <style>
+        :root {
+            --navy: #0E1B2C;
+            --paper: #FAF8F4;
+            --card-bg: #FFFFFF;
+            --text-main: #1E293B;
+            --text-muted: #64748B;
+            --border: #E2E8F0;
+            --blue: #2F80ED;
+            --amber: #F59E0B;
+            --green: #16A34A;
+            --red: #DC2626;
+            --gold: #D97706;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, system-ui, -apple-system, sans-serif; }
+        body { background-color: var(--navy); color: var(--text-main); min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 0; }
+        .app-container { width: 100%; max-width: 480px; background: var(--paper); min-height: 100vh; display: flex; flex-direction: column; position: relative; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); }
+        @media (min-width: 481px) { .app-container { min-height: 850px; border-radius: 24px; overflow: hidden; margin: 20px 0; } }
+
+        header { background: var(--navy); color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 1.1rem; letter-spacing: -0.025em; }
+        .brand span.dot { color: var(--gold); }
+        .table-badge { background: rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; }
+
+        .content { flex: 1; padding: 20px; overflow-y: auto; padding-bottom: 100px; }
+        
+        .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        
+        h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 12px; color: var(--navy); }
+        
+        .item-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.95rem; }
+        .item-row:last-child { border-bottom: none; }
+        .tabular { font-variant-numeric: tabular-nums; }
+        
+        .totals-box { background: #F8FAFC; border-radius: 12px; padding: 16px; margin-top: 16px; }
+        .total-line { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.9rem; color: var(--text-muted); }
+        .hero-total-line { display: flex; justify-content: space-between; font-size: 1.25rem; font-weight: 700; color: var(--navy); border-top: 2px dashed var(--border); padding-top: 12px; margin-top: 8px; }
+
+        .split-tabs { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--border); padding: 4px; border-radius: 12px; margin-bottom: 16px; gap: 4px; }
+        .split-tab { background: transparent; border: none; padding: 10px 4px; font-size: 0.85rem; font-weight: 600; border-radius: 8px; cursor: pointer; color: var(--text-muted); text-align: center; }
+        .split-tab.active { background: white; color: var(--navy); box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+
+        .tip-chips { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 16px; }
+        .tip-chip { background: white; border: 1px solid var(--border); border-radius: 10px; padding: 10px 0; font-size: 0.85rem; font-weight: 600; text-align: center; cursor: pointer; color: var(--text-main); }
+        .tip-chip.active { background: var(--navy); color: white; border-color: var(--navy); }
+
+        .stepper { display: flex; align-items: center; justify-content: space-between; background: white; border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 16px; }
+        .stepper button { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border); background: var(--paper); font-size: 1.2rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .stepper span { font-size: 1.1rem; font-weight: 700; }
+
+        /* QR ordering menu (Gemini UI) */
+        .menu-header { margin-bottom: 18px; padding: 0 2px; }
+        .menu-header h2 { font-size: 1.35rem; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+        .menu-header p { font-size: 0.9rem; color: var(--text-muted); line-height: 1.4; }
+        .menu-item-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; gap: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); transition: border-color 0.2s, box-shadow 0.2s; }
+        .menu-item-card:hover { border-color: #CBD5E1; box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
+        .menu-item-info { flex: 1; min-width: 0; }
+        .menu-item-title { font-weight: 700; font-size: 1.05rem; color: var(--text-main); margin-bottom: 4px; }
+        .menu-item-desc { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .menu-item-price { font-weight: 700; font-size: 1rem; color: var(--navy); }
+        .menu-stepper { display: flex; align-items: center; background: #F8FAFC; border: 1px solid var(--border); border-radius: 12px; padding: 4px; gap: 8px; flex-shrink: 0; }
+        .menu-stepper button { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--border); background: white; color: var(--navy); font-size: 1.2rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.15s, transform 0.1s; }
+        .menu-stepper button:active { background: var(--border); transform: scale(0.95); }
+        .menu-stepper span { font-size: 1rem; font-weight: 700; min-width: 24px; text-align: center; color: var(--navy); }
+        .cart-sticky-bar { background: var(--navy); color: white; border-radius: 18px; padding: 16px 20px; position: sticky; bottom: 16px; margin-top: 24px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 10px 30px rgba(14, 27, 44, 0.3); z-index: 10; border: 1px solid rgba(255,255,255,0.1); }
+        .cart-sticky-info { display: flex; flex-direction: column; gap: 2px; }
+        .cart-sticky-count { font-size: 0.75rem; color: #94A3B8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .cart-sticky-total { font-size: 1.25rem; font-weight: 800; color: white; }
+        .cart-sticky-btn { background: var(--gold); color: white; border: none; border-radius: 12px; padding: 12px 22px; font-size: 1rem; font-weight: 700; cursor: pointer; transition: background 0.2s, transform 0.1s; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 12px rgba(217, 119, 6, 0.3); }
+        .cart-sticky-btn:hover { background: #b45309; }
+        .cart-sticky-btn:active { transform: scale(0.98); }
+        .cart-sticky-btn:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
+
+        .input-group { margin-bottom: 16px; }
+        .input-group label { display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+        .input-group input { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 12px; font-size: 1.1rem; font-variant-numeric: tabular-nums; background: white; }
+
+        .items-select-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; max-height: 200px; overflow-y: auto; }
+        .item-checkbox { display: flex; align-items: center; gap: 12px; padding: 10px; background: white; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+        .item-checkbox input { width: 18px; height: 18px; accent-color: var(--navy); }
+
+        .pay-footer { position: fixed; bottom: 0; left: 0; right: 0; max-width: 480px; margin: 0 auto; background: white; padding: 16px 20px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; box-shadow: 0 -4px 12px rgba(0,0,0,0.05); }
+        .btn-primary { background: var(--navy); color: white; border: none; border-radius: 14px; padding: 16px; font-size: 1.05rem; font-weight: 600; cursor: pointer; text-align: center; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        .floating-waiter { position: fixed; bottom: 85px; right: 20px; background: white; border: 1px solid var(--border); color: var(--navy); padding: 10px 16px; border-radius: 30px; font-size: 0.85rem; font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,0.1); cursor: pointer; display: flex; align-items: center; gap: 6px; z-index: 10; }
+        
+        .trust-badge { text-align: center; font-size: 0.75rem; color: var(--text-muted); padding: 4px 0; }
+
+        .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+        .empty-state h3 { color: var(--navy); font-size: 1.25rem; margin-bottom: 8px; }
+
+        .alert-box { background: #FEF2F2; border: 1px solid #FCA5A5; color: var(--red); padding: 12px; border-radius: 10px; font-size: 0.9rem; margin-bottom: 16px; }
+        .success-box { text-align: center; padding: 40px 20px; }
+        .success-icon { width: 64px; height: 64px; background: #DCFCE7; color: var(--green); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 0 auto 16px; }
+
+        .star-rating { display: flex; justify-content: center; gap: 8px; font-size: 1.8rem; margin: 16px 0; cursor: pointer; color: #CBD5E1; }
+
+        textarea { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 10px; resize: none; height: 80px; font-family: inherit; font-size: 0.9rem; margin-bottom: 16px; }
+
+        /* Print receipt: only the receipt card prints */
+        @media print {
+            body { background: white; }
+            .app-container { box-shadow: none; max-width: 100%; }
+            header, .floating-waiter, .pay-footer, .success-icon, [data-action="print"], [data-action="email-toggle"], #email-receipt-box { display: none !important; }
+            .content { padding: 0; overflow: visible; }
+            .card { box-shadow: none; break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <div class="brand">Smart Table<span class="dot">.</span></div>
+            <div class="table-badge" id="table-badge-label">Table —</div>
+        </header>
+
+        <div class="content" id="main-content">
+            <div class="empty-state">
+                <h3>Loading your bill...</h3>
+                <p>Connecting securely to the restaurant.</p>
+            </div>
+        </div>
+
+        <button class="floating-waiter" id="btn-call-waiter" data-action="waiter">
+            🔔 Call Waiter
+        </button>
+
+        <div class="pay-footer" id="pay-footer" style="display: none;">
+            <div id="card-container"></div>
+            <div class="trust-badge">🔒 Secure payment · No app needed · No account needed</div>
+            <button class="btn-primary" id="btn-pay-main" data-action="pay">Pay $0.00</button>
+        </div>
+    </div>
+
+    <script>
+'use strict';
+// ---------------------------------------------------------------------------
+// Smart Table — guest app. API contract (backend v0.2):
+//   GET  /api/t/:token                      -> { table:{id,name,state}, check:null|{square_order_id,total_cents,currency,remaining_cents,items[],tenders[]} }
+//   POST /api/checks/:squareOrderId/pay     <- { mode, amount_cents, tip_cents, card_nonce, idempotency_key }
+//                                           -> { paymentId, remainingCents, checkState, currency, replayed }
+//   errors: { error:<message>, code?:<machine code> }   (read `code`, never match on `error`)
+//   POST /api/tables/:tableId/call-waiter
+// ---------------------------------------------------------------------------
+
+// TODO(card-pilot): serve these (public) identifiers from the backend; location = the Square location of this table.
+const SQUARE_APP_ID = 'sandbox-sq0idp-PLACEHOLDER';
+const SQUARE_LOCATION_ID = 'LOC-PLACEHOLDER';
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function uuid() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+    const h = Array.from(b, (x) => x.toString(16).padStart(2, '0'));
+    return `${h.slice(0, 4).join('')}-${h.slice(4, 6).join('')}-${h.slice(6, 8).join('')}-${h.slice(8, 10).join('')}-${h.slice(10).join('')}`;
+}
+
+function formatMoney(cents, currency) {
+    try { return new Intl.NumberFormat('en-CA', { style: 'currency', currency: currency || 'CAD' }).format(cents / 100); }
+    catch { return (cents / 100).toFixed(2) + ' ' + esc(currency || ''); }
+}
+
+function getTableToken() {
+    const parts = location.pathname.split('/').filter(Boolean);
+    const i = parts.indexOf('t');
+    if (i === -1 || !parts[i + 1]) return null;
+    try { return decodeURIComponent(parts[i + 1]); } catch { return null; }
+}
+const tableToken = getTableToken();
+
+// ---- state ----------------------------------------------------------------
+let table = null;
+let check = null;
+let receipt = null;          // sticky success snapshot (GET /api/t/:token no longer returns a completed check)
+let loadFailed = false;
+let mode = 'full', people = 2, customCents = 0, items = {}, tipPct = 15;
+let paying = false;
+let notice = null;           // { text, kind: 'err' | 'ok' }
+let lastRenderKey = '';
+let renderDeferred = false;
+// QR ordering state
+let orderingEnabled = false;
+let view = 'bill';           // 'bill' | 'menu'
+let menuItems = [];
+let menuLoaded = false;
+let cart = {};               // menuItemId -> quantity
+let ordering = false;
+// Review + loyalty state
+let loyaltyEnabled = false;
+let rated = 0;               // 0 = not rated yet
+let ratingDone = false;
+let ratingResult = null;     // { google_review_url } after submit
+let loyaltyPhone = '';
+let loyaltyResult = null;    // progress after submit
+let loyaltySubmitting = false;
+
+const setNotice = (text, kind = 'err') => { notice = text ? { text, kind } : null; };
+
+// ---- payment attempts (idempotency) ----------------------------------------
+// ONE attempt = one idempotency key + frozen {mode, amount, tip}. It is persisted (sessionStorage, with an in-memory
+// fallback) so a reload cannot lose an unconfirmed attempt. The key is rotated ONLY after the server confirmed that
+// nothing was charged (400, 402, 409 payment_failed|payment_cancelled) or after success. It is NEVER rotated on a
+// network error, timeout, 5xx, 429, unparseable response, or 409 idempotency_key_reused / payment_state_unknown /
+// payment_needs_reconciliation: those may have charged the card.
+const memAttempts = new Map();
+const attemptStoreKey = (orderId) => 'st_attempt_' + orderId;
+function loadAttempt(orderId) {
+    let a = memAttempts.get(orderId) || null;
+    if (!a) {
+        try { a = JSON.parse(sessionStorage.getItem(attemptStoreKey(orderId)) || 'null'); } catch { a = null; }
+    }
+    return a && typeof a.key === 'string' ? a : null;
+}
+function saveAttempt(a) {
+    memAttempts.set(a.orderId, a);
+    try { sessionStorage.setItem(attemptStoreKey(a.orderId), JSON.stringify(a)); } catch { /* private mode: memory copy only */ }
+}
+function clearAttempt(orderId) {
+    memAttempts.delete(orderId);
+    try { sessionStorage.removeItem(attemptStoreKey(orderId)); } catch { /* ignore */ }
+}
+const currentAttempt = () => (check ? loadAttempt(check.square_order_id) : null);
+
+// If the bill moved since the unconfirmed attempt, the attempt may have gone through (or someone else paid):
+// drop it and make the guest look at "Already paid" before paying again.
+function reconcileAttempt() {
+    const a = currentAttempt();
+    if (a && check && check.remaining_cents !== a.remainingBefore) {
+        clearAttempt(a.orderId);
+        setNotice('Your bill changed since your last payment attempt. If that payment went through you will see it under "Already paid". Please review the balance before paying again.', 'err');
+    }
+}
+
+// ---- amounts ----------------------------------------------------------------
+function payCents() {
+    if (!check) return 0;
+    const r = check.remaining_cents;
+    if (mode === 'full') return r;
+    if (mode === 'equal') return Math.min(r, Math.ceil(r / people));
+    if (mode === 'custom') return Math.min(r, Math.max(0, customCents));
+    // My Items: sum of checked items (each phone = one person).
+    let sum = 0;
+    check.items.forEach((it, idx) => { if (items[idx]) sum += it.amount_cents; });
+    return Math.min(r, sum);
+}
+const tipCentsFor = (pay) => (tipPct === 0 ? 0 : Math.round(pay * (tipPct / 100)));
+
+// ---- card token (per-POS provider SDK) --------------------------------------
+// The backend tells us which card provider this location uses:
+//   GET /api/checks/:ref/card-config -> { provider, publishableKey, extra }
+// Then we tokenize with that provider's browser flow. Card data never touches
+// our server: Square/Clover tokenize directly with the processor, Helcim uses
+// its hosted modal (HelcimPay.js).
+let cardConfigCache = {};
+async function getCardConfig(checkRef) {
+    if (!cardConfigCache[checkRef]) {
+        const res = await fetch(`/api/checks/${encodeURIComponent(checkRef)}/card-config`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Card payments are not available at this location.');
+        cardConfigCache[checkRef] = data;
+    }
+    return cardConfigCache[checkRef];
+}
+
+function loadScript(src) {
+    return new Promise((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) return resolve();
+        const s = document.createElement('script');
+        s.src = src; s.async = true;
+        s.onload = resolve; s.onerror = () => reject(new Error('Could not load payment library.'));
+        document.head.appendChild(s);
+    });
+}
+
+// Square: Web Payments SDK card iframe mounted in #card-container.
+let squareCard = null;
+async function squareTokenize(cfg) {
+    const env = cfg.extra?.environment === 'production' ? '' : 'sandbox.';
+    await loadScript(`https://${env}web.squarecdn.com/v1/square.js`);
+    if (!window.Square) throw new Error('Square payments library failed to load.');
+    if (!squareCard) {
+        const payments = window.Square.payments(cfg.publishableKey, cfg.extra.locationId);
+        squareCard = await payments.card();
+        await squareCard.attach('#card-container');
+    }
+    const r = await squareCard.tokenize();
+    if (r.status !== 'OK') throw new Error(r.errors?.[0]?.message || 'Please check your card details.');
+    return r.token; // "cnon:..."
+}
+
+// Clover: card details go DIRECTLY from the browser to Clover's token endpoint
+// (apikey = Ecommerce public token). Our server never sees the PAN.
+function cloverCardForm() {
+    return new Promise((resolve, reject) => {
+        const c = $('card-container');
+        c.innerHTML = `
+            <div style="display:grid;gap:8px">
+                <input id="cc-num" inputmode="numeric" placeholder="Card number" autocomplete="cc-number"
+                    style="padding:10px;border:1px solid var(--border);border-radius:8px;font-size:16px">
+                <div style="display:flex;gap:8px">
+                    <input id="cc-exp" placeholder="MM / YY" autocomplete="cc-exp"
+                        style="flex:1;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:16px">
+                    <input id="cc-cvv" inputmode="numeric" placeholder="CVV" autocomplete="cc-csc"
+                        style="flex:1;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:16px">
+                </div>
+                <button id="cc-tokenize" class="btn-primary">Pay</button>
+            </div>`;
+        $('cc-tokenize').onclick = () => {
+            const num = $('cc-num').value.replace(/\D/g, '');
+            const exp = $('cc-exp').value.replace(/\D/g, '');
+            const cvv = $('cc-cvv').value.replace(/\D/g, '');
+            if (num.length < 13 || exp.length !== 4 || cvv.length < 3) {
+                reject(new Error('Please check your card details.')); return;
+            }
+            resolve({
+                number: num,
+                exp_month: exp.slice(0, 2),
+                exp_year: '20' + exp.slice(2),
+                cvv,
+            });
+        };
+    });
+}
+async function cloverTokenize(cfg) {
+    const card = await cloverCardForm();
+    const res = await fetch(`${cfg.extra.tokenHost}/v1/tokens`, {
+        method: 'POST',
+        headers: { 'apikey': cfg.publishableKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ card }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.id) throw new Error(data.message || 'Card could not be tokenized. Please try again.');
+    return data.id; // "clv_..."
+}
+
+// Helcim: hosted modal (HelcimPay.js). The checkoutToken comes from our backend
+// (it initialized the session). The modal returns a cardToken.
+async function helcimTokenize(cfg) {
+    await loadScript(cfg.extra.helcimPayJs);
+    return new Promise((resolve, reject) => {
+        try {
+            const onMsg = (ev) => {
+                let msg = null;
+                try { msg = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data; } catch { return; }
+                if (!msg || msg.eventName !== `helcim-pay-js-${cfg.publishableKey}`) return;
+                window.removeEventListener('message', onMsg);
+                if (msg.eventStatus === 'SUCCESS' && msg.eventMessage) {
+                    try {
+                        const payload = JSON.parse(msg.eventMessage);
+                        // verify mode returns the cardToken in data.cardToken
+                        const token = payload?.data?.cardToken || payload?.cardToken;
+                        if (token) return resolve(token);
+                    } catch { /* fall through */ }
+                }
+                reject(new Error(msg.eventStatus === 'ABORTED' ? 'Payment cancelled.' : 'Card could not be processed.'));
+            };
+            window.addEventListener('message', onMsg);
+            window.appendHelcimPayIframe(cfg.publishableKey);
+        } catch (e) { reject(new Error('Could not start the payment form.')); }
+    });
+}
+
+async function getCardToken(checkRef) {
+    const cfg = await getCardConfig(checkRef);
+    if (cfg.provider === 'square') return squareTokenize(cfg);
+    if (cfg.provider === 'clover') return cloverTokenize(cfg);
+    if (cfg.provider === 'helcim') return helcimTokenize(cfg);
+    throw new Error('Card payments are not available at this location.');
+}
+
+// ---- data -------------------------------------------------------------------
+async function fetchBill() {
+    if (receipt || !tableToken) return;
+    try {
+        const res = await fetch(`/api/t/${encodeURIComponent(tableToken)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Failed to load table info');
+        table = data.table; check = data.check; loadFailed = false;
+        orderingEnabled = !!data.ordering_enabled;
+        loyaltyEnabled = !!data.loyalty_enabled;
+        reconcileAttempt();
+    } catch (err) {
+        if (!table) loadFailed = true; // keep showing the last good bill on transient errors
+    }
+    render();
+}
+
+// ---- Review capture (one tap, no login) ---------------------------------------
+async function submitRating(stars, comment = null) {
+    rated = stars;
+    try {
+        const res = await fetch(`/api/t/${encodeURIComponent(tableToken)}/feedback`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rating: stars, comment }),
+        });
+        const data = await res.json().catch(() => ({}));
+        ratingResult = { google_review_url: data.google_review_url || null };
+    } catch { ratingResult = { google_review_url: null }; }
+    ratingDone = true;
+    render(true);
+}
+
+function renderRating() {
+    if (ratingDone) {
+        if (rated >= 4 && ratingResult?.google_review_url) {
+            return `<div class="card" style="text-align:center;">
+                <h2>Thanks! 🎉</h2>
+                <p style="font-size:0.9rem;color:var(--text-muted);margin-bottom:12px;">Glad you loved it — a quick Google review helps us a lot.</p>
+                <a href="${esc(ratingResult.google_review_url)}" target="_blank" rel="noopener" class="btn-primary" style="text-decoration:none;">⭐ Leave a Google Review</a>
+            </div>`;
+        }
+        if (rated >= 4) {
+            return `<div class="card" style="text-align:center;"><h2>Thanks! 🎉</h2><p style="font-size:0.9rem;color:var(--text-muted);">Glad you loved it.</p></div>`;
+        }
+        return `<div class="card" style="text-align:center;"><h2>Thanks for the feedback</h2><p style="font-size:0.9rem;color:var(--text-muted);">We'll work on it.</p></div>`;
+    }
+    return `<div class="card" style="text-align:center;">
+        <h2>How was it?</h2>
+        <div class="star-rating" style="font-size:2.2rem;">
+            ${[1, 2, 3, 4, 5].map((s) => `<span data-action="rate" data-v="${s}" style="cursor:pointer;${s <= rated ? '' : 'opacity:0.35;'}">⭐</span>`).join('')}
+        </div>
+        ${rated > 0 && rated < 4 ? `<textarea id="rating-comment" placeholder="What could be better? (optional)" style="margin-top:8px;"></textarea>
+        <button class="btn-primary" data-action="rate-submit" style="margin-top:8px;">Send Feedback</button>` : ''}
+    </div>`;
+}
+
+// ---- Loyalty (phone only, no login) --------------------------------------------
+async function submitLoyalty() {
+    const phone = loyaltyPhone.replace(/\D/g, '');
+    if (phone.length < 7 || phone.length > 15) { setNotice('Please enter a valid phone number.'); render(true); return; }
+    loyaltySubmitting = true; setNotice(null); render(true);
+    try {
+        const res = await fetch(`/api/t/${encodeURIComponent(tableToken)}/loyalty`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not join.');
+        loyaltyResult = data;
+    } catch (err) {
+        setNotice(err.message || 'Could not join. Please try again.');
+    } finally {
+        loyaltySubmitting = false; render(true);
+    }
+}
+
+function renderLoyalty() {
+    if (!loyaltyEnabled) return '';
+    if (loyaltyResult) {
+        const r = loyaltyResult;
+        if (r.reward_earned) {
+            return `<div class="card" style="text-align:center;border:2px solid var(--gold);">
+                <h2>🎉 Reward Unlocked!</h2>
+                <p style="font-size:1.1rem;font-weight:700;">${esc(r.reward_text)}</p>
+                <p style="font-size:0.85rem;color:var(--text-muted);">Show this screen to your server.</p>
+            </div>`;
+        }
+        return `<div class="card" style="text-align:center;">
+            <h2>Loyalty</h2>
+            <p style="font-size:0.9rem;color:var(--text-muted);">${r.visits_remaining} more visit${r.visits_remaining > 1 ? 's' : ''} for <strong>${esc(r.reward_text)}</strong></p>
+            <div style="background:var(--border);border-radius:8px;height:8px;margin-top:8px;overflow:hidden;">
+                <div style="background:var(--gold);height:100%;width:${Math.round((r.visits / r.visits_required) * 100)}%;"></div>
+            </div>
+        </div>`;
+    }
+    return `<div class="card" style="text-align:center;">
+        <h2>Join Loyalty 🎁</h2>
+        <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">Earn rewards — just your phone number, no account.</p>
+        <input id="loyalty-phone" type="tel" inputmode="tel" placeholder="Phone number"
+            value="${esc(loyaltyPhone)}"
+            style="width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;font-size:1rem;margin-bottom:10px;">
+        <button class="btn-primary" data-action="loyalty" ${loyaltySubmitting ? 'disabled' : ''}>${loyaltySubmitting ? 'Joining...' : 'Count My Visit'}</button>
+    </div>`;
+}
+
+// ---- QR ordering ------------------------------------------------------------
+async function loadMenu() {
+    if (menuLoaded || !tableToken) return;
+    try {
+        const res = await fetch(`/api/t/${encodeURIComponent(tableToken)}/menu`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not load menu');
+        menuItems = data.items || [];
+        menuLoaded = true;
+    } catch (err) {
+        setNotice(err.message || 'Could not load menu.');
+    }
+    render(true);
+}
+
+function cartCount() { return Object.values(cart).reduce((a, b) => a + b, 0); }
+function cartTotal() {
+    const byId = Object.fromEntries(menuItems.map((m) => [m.id, m]));
+    return Object.entries(cart).reduce((sum, [id, qty]) => sum + (byId[id]?.priceCents || 0) * qty, 0);
+}
+function menuCurrency() { return menuItems[0]?.currency || check?.currency || 'CAD'; }
+
+async function submitOrder() {
+    if (ordering || cartCount() === 0) return;
+    ordering = true; setNotice(null); render(true);
+    // H3 fix: keep one idempotency key per cart in sessionStorage until the
+    // server confirms. A retry after a timeout reuses the key, so the kitchen
+    // never gets a duplicate order.
+    const cartKey = 'st_order_key_' + tableToken;
+    let orderKey = sessionStorage.getItem(cartKey);
+    if (!orderKey) {
+        orderKey = uuid();
+        sessionStorage.setItem(cartKey, orderKey);
+    }
+    try {
+        const res = await fetch(`/api/t/${encodeURIComponent(tableToken)}/order`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                items: Object.entries(cart).map(([id, quantity]) => ({ menu_item_id: id, quantity })),
+                idempotency_key: orderKey,
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            // 409 "already being processed": keep the key, let the guest retry.
+            // Any other error: drop the key so a fresh attempt gets a new one.
+            if (res.status !== 409) sessionStorage.removeItem(cartKey);
+            throw new Error(data.error || 'Order could not be placed.');
+        }
+        sessionStorage.removeItem(cartKey);
+        cart = {}; menuLoaded = false;
+        check = data.check;
+        view = 'bill';
+        setNotice(data.duplicate ? 'Order already placed ✓' : 'Order sent to the kitchen ✓', 'ok');
+    } catch (err) {
+        setNotice(err.message || 'Order could not be placed. Please try again.');
+    } finally {
+        ordering = false; render(true);
+    }
+}
+
+function renderMenu() {
+    if (!menuLoaded) {
+        return `<div class="empty-state"><h3>Loading menu...</h3><p>Please wait a moment.</p></div>`;
+    }
+    if (!menuItems.length) {
+        return `<div class="empty-state"><h3>No menu available</h3><p>Please ask your server.</p></div>`;
+    }
+    const itemsHtml = menuItems.map((m) => {
+        const qty = cart[m.id] || 0;
+        return `<div class="menu-item-card">
+            <div class="menu-item-info">
+                <div class="menu-item-title">${esc(m.name)}</div>
+                ${m.description ? `<div class="menu-item-desc">${esc(m.description)}</div>` : ''}
+                <div class="menu-item-price tabular">${formatMoney(m.priceCents, m.currency)}</div>
+            </div>
+            <div class="menu-stepper">
+                <button data-action="cart" data-v="${esc(m.id)}|-1" aria-label="Decrease quantity">−</button>
+                <span class="tabular">${qty}</span>
+                <button data-action="cart" data-v="${esc(m.id)}|1" aria-label="Increase quantity">+</button>
+            </div>
+        </div>`;
+    }).join('');
+    const total = cartTotal();
+    const count = cartCount();
+    return `
+        ${noticeHtml()}
+        <div class="menu-header">
+            <h2>Menu</h2>
+            <p>Tap + to add items, then send your order directly to the kitchen.</p>
+        </div>
+        ${itemsHtml}
+        ${count > 0 ? `
+            <div class="cart-sticky-bar">
+                <div class="cart-sticky-info">
+                    <span class="cart-sticky-count">${count} item${count > 1 ? 's' : ''} in cart</span>
+                    <span class="cart-sticky-total tabular">${formatMoney(total, menuCurrency())}</span>
+                </div>
+                <button class="cart-sticky-btn" data-action="order" ${ordering ? 'disabled' : ''}>
+                    ${ordering ? 'Sending...' : 'Send Order →'}
+                </button>
+            </div>
+        ` : ''}`;
+}
+
+function renderViewTabs() {
+    if (!orderingEnabled) return '';
+    return `<div class="split-tabs" style="margin-bottom:12px;">
+        <button class="split-tab ${view === 'menu' ? 'active' : ''}" data-action="view" data-v="menu">🍽️ Menu</button>
+        <button class="split-tab ${view === 'bill' ? 'active' : ''}" data-action="view" data-v="bill">💳 Pay Your Bill</button>
+    </div>`;
+}
+
+async function callWaiter() {
+    if (!table) return;
+    const btn = $('btn-call-waiter');
+    try {
+        const res = await fetch(`/api/tables/${encodeURIComponent(table.id)}/call-waiter`, { method: 'POST' });
+        if (!res.ok) throw new Error('call failed');
+        btn.textContent = '✓ Waiter on the way';
+        btn.style.background = '#DCFCE7'; btn.style.color = '#16A34A';
+        setTimeout(() => { btn.textContent = '🔔 Call Waiter'; btn.style.background = 'white'; btn.style.color = 'var(--navy)'; }, 5000);
+    } catch { alert('Could not call the waiter right now. Please wave to your server.'); }
+}
+
+// ---- pay ---------------------------------------------------------------------
+const UNCONFIRMED = 'We could not confirm whether your payment went through. Tap "Retry payment" — it is safe: the same request is re-sent and you will not be charged twice.';
+const ASK_STAFF = 'We could not confirm your payment. Please ask your server — do NOT pay again.';
+
+async function processPayment() {
+    if (paying || !check || receipt) return;
+    const orderId = check.square_order_id;
+    let a = loadAttempt(orderId);
+    if (a && a.blocked) return;
+
+    const base = a ? { mode: a.mode, amount: a.amount, tip: a.tip } : (() => { const p = payCents(); return { mode, amount: p, tip: tipCentsFor(p) }; })();
+    if (!Number.isInteger(base.amount) || base.amount <= 0 || !Number.isInteger(base.tip) || base.tip < 0 || base.tip > base.amount) {
+        setNotice('Please select a valid amount to pay.'); render(true); return;
+    }
+
+    paying = true; setNotice(null); render(true);
+    try {
+        let nonce;
+        try { nonce = await getCardToken(orderId); }
+        catch (e) { setNotice(e.message || 'Card entry failed — please try again.'); return; } // no attempt exists yet: nothing to resolve
+
+        if (!a) {
+            a = { orderId, key: uuid(), mode: base.mode, amount: base.amount, tip: base.tip, remainingBefore: check.remaining_cents, blocked: false, ts: Date.now() };
+            saveAttempt(a); // persisted BEFORE the request: a reload / lost response keeps the key
+        }
+
+        let res;
+        try {
+            res = await fetch(`/api/checks/${encodeURIComponent(orderId)}/pay`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: a.mode, amount_cents: a.amount, tip_cents: a.tip, card_nonce: nonce, idempotency_key: a.key }),
+            });
+        } catch { setNotice(UNCONFIRMED); return; } // network error: outcome unknown -> keep the attempt
+
+        const data = await res.json().catch(() => ({}));
+        const code = data.code;
+
+        if (res.ok) {
+            clearAttempt(orderId);
+            if (data.checkState === 'COMPLETED') {
+                // Receipt shows what THIS person paid: their items in My Items
+                // mode, otherwise the full check.
+                const paidItems = a.mode === 'items'
+                    ? check.items.filter((_, idx) => items[idx])
+                    : check.items;
+                receipt = {
+                    items: paidItems.length ? paidItems : check.items,
+                    total_cents: a.amount + a.tip,
+                    currency: check.currency,
+                };
+            } else {
+                setNotice(`Payment received ✓ Remaining balance: ${formatMoney(data.remainingCents ?? 0, check.currency)}`, 'ok');
+            }
+            return;
+        }
+        if (res.status === 400) { clearAttempt(orderId); setNotice(data.error || 'Payment could not be processed.'); return; }
+        if (res.status === 402) { clearAttempt(orderId); setNotice('Card declined or could not be charged — you were not charged. Please try another card.'); return; }
+        if (res.status === 409 && (code === 'payment_failed' || code === 'payment_cancelled')) {
+            clearAttempt(orderId); setNotice('That attempt did not go through and you were not charged. Please try again or use another card.'); return;
+        }
+        if (res.status === 409) { // payment_state_unknown | payment_needs_reconciliation | idempotency_key_reused | anything else
+            a.blocked = true; saveAttempt(a); setNotice(ASK_STAFF); return;
+        }
+        setNotice(UNCONFIRMED); // 5xx / 429 / unexpected: unknown outcome -> keep the attempt
+    } finally {
+        paying = false;
+        render(true);
+        if (!receipt) fetchBill();
+    }
+}
+
+// ---- render -------------------------------------------------------------------
+function noticeHtml() {
+    if (!notice) return '';
+    if (notice.kind === 'ok') return `<div class="alert-box" style="background:#DCFCE7;color:#166534;border-color:#86EFAC;">${esc(notice.text)}</div>`;
+    return `<div class="alert-box">${esc(notice.text)}</div>`;
+}
+
+function updatePayButton() {
+    const btn = $('btn-pay-main');
+    const footer = $('pay-footer');
+    if (!check || receipt || check.remaining_cents <= 0) { footer.style.display = 'none'; return; }
+    footer.style.display = 'flex';
+    const a = currentAttempt();
+    if (a && a.blocked) { btn.disabled = true; btn.textContent = 'Ask your server'; return; }
+    if (a) { btn.disabled = paying; btn.textContent = paying ? 'Processing payment...' : `Retry payment · ${formatMoney(a.amount + a.tip, check.currency)}`; return; }
+    const p = payCents();
+    btn.disabled = paying;
+    btn.textContent = paying ? 'Processing payment...' : `Pay ${formatMoney(p + tipCentsFor(p), check.currency)}`;
+}
+
+function render(force = false) {
+    const active = document.activeElement;
+    const typing = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+    const key = JSON.stringify([table, check, loadFailed, !!receipt, notice, paying, mode, people, items, tipPct, currentAttempt(), view, cart, menuLoaded, orderingEnabled, loyaltyEnabled, rated, ratingDone, ratingResult, loyaltyResult, loyaltySubmitting]);
+    if (!force && key === lastRenderKey) return;            // poll with no change: leave the DOM (and focus) alone
+    if (!force && typing) { renderDeferred = true; return; } // never rebuild the DOM under a focused input
+    lastRenderKey = key; renderDeferred = false;
+
+    $('table-badge-label').textContent = table ? `Table ${table.name}` : 'Table';
+    const container = $('main-content');
+
+    if (!tableToken) { $('pay-footer').style.display = 'none'; container.innerHTML = '<div class="empty-state"><h3>Invalid link</h3><p>Please scan the QR code on your table again.</p></div>'; return; }
+    if (loadFailed) { $('pay-footer').style.display = 'none'; container.innerHTML = '<div class="empty-state"><h3>Could not load your bill</h3><p>Retrying… If this continues, please ask your server.</p></div>'; return; }
+    if (receipt) { $('pay-footer').style.display = 'none'; container.innerHTML = noticeHtml() + renderSuccessState(); return; }
+
+    // QR ordering: menu view (guest can browse + order even without a check yet).
+    if (orderingEnabled && view === 'menu') {
+        $('pay-footer').style.display = 'none';
+        container.innerHTML = renderViewTabs() + renderMenu();
+        return;
+    }
+
+    if (!check) {
+        $('pay-footer').style.display = 'none';
+        const menuCta = orderingEnabled
+            ? `<div class="card" style="text-align:center;"><h2>Hungry?</h2><p style="font-size:0.9rem;color:var(--text-muted);">Browse the menu and order from your table.</p><button class="btn-primary" data-action="view" data-v="menu">🍽️ View Menu</button></div>`
+            : '';
+        container.innerHTML = `${noticeHtml()}${renderViewTabs()}<div class="empty-state"><h3>${table ? 'Your bill will appear here soon' : 'Loading your bill...'}</h3><p>${table ? 'Your bill will appear here as soon as your order is fired by your server.' : 'Connecting securely to the restaurant.'}</p></div>${menuCta}`;
+        return;
+    }
+    if (check.state === 'COMPLETED' || check.remaining_cents <= 0) { $('pay-footer').style.display = 'none'; container.innerHTML = renderSuccessState(); return; }
+
+    const a = currentAttempt();
+    updatePayButton();
+
+    const itemsHtml = check.items.map((i) => `
+        <div class="item-row"><span>${esc(i.quantity)} × ${esc(i.name)}</span><span class="tabular">${formatMoney(i.amount_cents, check.currency)}</span></div>`).join('');
+    const tendersHtml = check.tenders && check.tenders.length ? `
+        <div style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--border);">
+            <div style="font-size:0.8rem;font-weight:600;color:var(--text-muted);margin-bottom:6px;">ALREADY PAID</div>
+            ${check.tenders.map((t) => `<div class="item-row" style="color:var(--green);"><span>Payment (${esc(t.type || 'Card')})</span><span class="tabular">-${formatMoney(t.amount_cents, check.currency)}</span></div>`).join('')}
+        </div>` : '';
+
+    let controls = '';
+    if (a) {
+        controls = `<div class="card"><h2>${a.blocked ? 'Payment needs attention' : 'Unconfirmed payment'}</h2>
+            <p style="font-size:0.9rem;color:var(--text-muted);">${a.blocked ? 'Please ask your server before paying again.' : `Your last attempt (${formatMoney(a.amount, check.currency)} + ${formatMoney(a.tip, check.currency)} tip) was not confirmed. Retrying re-sends exactly that payment and cannot charge you twice.`}</p></div>`;
+    } else {
+        controls = `
+            <div class="card"><h2>Split Payment</h2>
+                <div class="split-tabs">
+                    ${[['full', 'Full'], ['equal', 'Equal'], ['custom', 'Custom'], ['items', 'My Items']].map(([m, label]) => `<button class="split-tab ${mode === m ? 'active' : ''}" data-action="mode" data-v="${m}">${label}</button>`).join('')}
+                </div>
+                ${renderSplitUI()}
+            </div>
+            <div class="card"><h2>Add Tip</h2>
+                <div class="tip-chips">
+                    ${[15, 18, 20, 25, 0].map((p) => `<div class="tip-chip ${tipPct === p ? 'active' : ''}" data-action="tip" data-v="${p}">${p === 0 ? 'None' : p + '%'}</div>`).join('')}
+                </div>
+            </div>`;
+    }
+
+    container.innerHTML = `
+        ${noticeHtml()}
+        ${renderViewTabs()}
+        <div class="card"><h2>Itemized Bill</h2>
+            <div id="items-list">${itemsHtml}</div>
+            ${tendersHtml}
+            <div class="totals-box">
+                <div class="total-line"><span>Total Bill</span><span class="tabular">${formatMoney(check.total_cents, check.currency)}</span></div>
+                <div class="hero-total-line"><span>Remaining Due</span><span class="tabular">${formatMoney(check.remaining_cents, check.currency)}</span></div>
+            </div>
+        </div>
+        ${controls}`;
+}
+
+function renderSplitUI() {
+    const cur = check.currency;
+    if (mode === 'full') return `<p style="font-size:0.9rem;color:var(--text-muted);">Paying the full remaining balance of <strong>${formatMoney(check.remaining_cents, cur)}</strong>.</p>`;
+    if (mode === 'equal') {
+        const share = Math.min(check.remaining_cents, Math.ceil(check.remaining_cents / people));
+        return `<div class="stepper"><button data-action="equal" data-v="-1">-</button><span>Split among ${people} people</span><button data-action="equal" data-v="1">+</button></div>
+            <p style="font-size:0.9rem;color:var(--text-muted);text-align:center;">Your share: <strong class="tabular">${formatMoney(share, cur)}</strong></p>`;
+    }
+    if (mode === 'custom') {
+        return `<div class="input-group"><label>Custom Amount</label>
+            <input type="number" inputmode="decimal" step="0.01" min="0" max="${check.remaining_cents / 100}" value="${customCents ? (customCents / 100).toFixed(2) : ''}" data-input="custom" placeholder="0.00"></div>`;
+    }
+    // My Items: each phone = one person. Tap what YOU had, pay your share. No
+    // headcount, no assignment — the scan itself identifies you.
+    const myTotal = check.items.reduce((sum, it, idx) => sum + (items[idx] ? it.amount_cents : 0), 0);
+    return `
+        <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">Tap the items <strong>you</strong> had. Everyone at the table does this on their own phone.</p>
+        <div class="items-select-list">
+            ${check.items.map((it, idx) => `<label class="item-checkbox" style="${items[idx] ? 'border-color:var(--navy);border-width:2px;' : ''}"><input type="checkbox" ${items[idx] ? 'checked' : ''} data-item="${idx}">
+                <div style="flex:1;display:flex;justify-content:space-between;"><span>${esc(it.quantity)} × ${esc(it.name)}</span><span class="tabular">${formatMoney(it.amount_cents, cur)}</span></div></label>`).join('')}
+        </div>
+        ${myTotal > 0 ? `<p style="font-size:0.95rem;text-align:center;margin-top:8px;">Your share: <strong class="tabular">${formatMoney(Math.min(check.remaining_cents, myTotal), cur)}</strong></p>` : ''}`;
+}
+
+function renderSuccessState() {
+    const src = receipt || check;
+    return `<div class="success-box"><div class="success-icon">✓</div>
+        <h2>Payment Successful!</h2>
+        <p style="color:var(--text-muted);font-size:0.9rem;margin-bottom:20px;">Thank you for dining with us. Your payment has been processed.</p>
+        <div class="card" style="text-align:left;"><h2>Receipt Summary</h2>
+            ${src.items.map((i) => `<div class="item-row"><span>${esc(i.quantity)} × ${esc(i.name)}</span><span class="tabular">${formatMoney(i.amount_cents, src.currency)}</span></div>`).join('')}
+            <div class="totals-box"><div class="total-line"><span>Total Settled</span><span class="tabular">${formatMoney(src.total_cents, src.currency)}</span></div></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:16px;">
+            <button class="btn-primary" data-action="print" style="flex:1;">🖨️ Print Receipt</button>
+            <button class="btn-primary" data-action="email-toggle" style="flex:1;background:var(--blue);">✉️ Email Receipt</button>
+        </div>
+        <div id="email-receipt-box" style="display:none;" class="card">
+            <input id="receipt-email" type="email" placeholder="your@email.com"
+                style="width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;font-size:1rem;margin-bottom:10px;">
+            <button class="btn-primary" data-action="email-send">Send Receipt</button>
+        </div></div>
+        ${renderRating()}
+        ${renderLoyalty()}`;
+}
+
+function printReceipt() {
+    window.print();
+}
+
+async function sendReceiptEmail() {
+    const input = document.getElementById('receipt-email');
+    const email = input ? input.value.trim() : '';
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        setNotice('Please enter a valid email address.');
+        render(true);
+        return;
+    }
+    setNotice(null);
+    try {
+        const res = await fetch(`/api/t/${encodeURIComponent(tableToken)}/receipt-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not send receipt.');
+        setNotice('Receipt sent to ' + email + ' ✓', 'ok');
+    } catch (err) {
+        setNotice(err.message || 'Could not send receipt. Please try again.');
+    }
+    render(true);
+}
+
+// ---- events (no inline handlers: CSP-friendly) ---------------------------------
+document.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    switch (el.dataset.action) {
+        case 'mode': mode = el.dataset.v; setNotice(null); render(true); break;
+        case 'equal': people = Math.min(12, Math.max(2, people + Number(el.dataset.v))); render(true); break;
+        case 'tip': tipPct = Number(el.dataset.v); render(true); break;
+        case 'pay': processPayment(); break;
+        case 'waiter': callWaiter(); break;
+        case 'view':
+            view = el.dataset.v;
+            if (view === 'menu') loadMenu();
+            else render(true);
+            break;
+        case 'cart': {
+            const [id, d] = el.dataset.v.split('|');
+            const q = Math.max(0, Math.min(20, (cart[id] || 0) + Number(d)));
+            if (q === 0) delete cart[id]; else cart[id] = q;
+            render(true);
+            break;
+        }
+        case 'order': submitOrder(); break;
+        case 'rate': {
+            const s = Number(el.dataset.v);
+            if (s >= 4) submitRating(s);
+            else { rated = s; render(true); }
+            break;
+        }
+        case 'rate-submit': {
+            const ta = document.getElementById('rating-comment');
+            submitRating(rated, ta ? ta.value : null);
+            break;
+        }
+        case 'loyalty': submitLoyalty(); break;
+        case 'print': printReceipt(); break;
+        case 'email-toggle': {
+            const box = document.getElementById('email-receipt-box');
+            if (box) box.style.display = box.style.display === 'none' ? 'block' : 'none';
+            break;
+        }
+        case 'email-send': sendReceiptEmail(); break;
+    }
+});
+document.addEventListener('input', (e) => {
+    if (e.target.matches && e.target.matches('[data-input="custom"]')) {
+        const v = parseFloat(e.target.value);
+        customCents = Number.isFinite(v) && v > 0 ? Math.round(v * 100) : 0;
+        updatePayButton(); // label only: do not rebuild the DOM while typing
+    }
+    if (e.target.matches && e.target.id === 'loyalty-phone') {
+        loyaltyPhone = e.target.value;
+    }
+    if (e.target.matches && e.target.id === 'rating-comment') {
+        // don't re-render while typing the comment
+    }
+});
+document.addEventListener('change', (e) => {
+    if (e.target.matches && e.target.matches('[data-item]')) { items[e.target.dataset.item] = e.target.checked; render(true); }
+});
+document.addEventListener('focusout', () => { if (renderDeferred) setTimeout(() => render(true), 0); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) fetchBill(); });
+
+setInterval(() => { if (!document.hidden && !paying) fetchBill(); }, 5000);
+render(true);
+fetchBill();
+
+    </script>
+</body>
+</html>

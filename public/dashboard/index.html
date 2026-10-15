@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Table Staff Dashboard</title>
+    <style>
+        :root {
+            --navy: #0E1B2C;
+            --paper: #F8FAFC;
+            --card-bg: #FFFFFF;
+            --text-main: #1E293B;
+            --text-muted: #64748B;
+            --border: #E2E8F0;
+            --blue: #2F80ED;
+            --amber: #F59E0B;
+            --green: #16A34A;
+            --red: #DC2626;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, system-ui, sans-serif; }
+        body { background: var(--paper); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
+
+        aside { width: 260px; background: var(--navy); color: white; display: flex; flex-direction: column; padding: 20px; }
+        .brand { font-size: 1.2rem; font-weight: 700; margin-bottom: 30px; letter-spacing: -0.025em; display: flex; align-items: center; justify-content: space-between; }
+        .brand span { color: var(--amber); }
+        .nav-item { padding: 12px 16px; border-radius: 10px; color: #94A3B8; font-weight: 600; font-size: 0.95rem; cursor: pointer; margin-bottom: 6px; }
+        .nav-item.active, .nav-item:hover { background: rgba(255,255,255,0.1); color: white; }
+
+        main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        header { background: white; border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .header-left { display: flex; align-items: center; gap: 20px; }
+        select { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; background: white; font-weight: 600; }
+        .clock { font-size: 0.95rem; font-weight: 600; color: var(--text-muted); }
+
+        .dashboard-body { flex: 1; padding: 24px; overflow-y: auto; display: grid; grid-template-columns: 1fr 340px; gap: 24px; }
+        @media (max-width: 1024px) { .dashboard-body { grid-template-columns: 1fr; } }
+
+        .metrics-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+        .metric-card { background: white; border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+        .metric-title { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px; }
+        .metric-value { font-size: 1.4rem; font-weight: 700; color: var(--navy); font-variant-numeric: tabular-nums; }
+
+        .floor-section { display: flex; flex-direction: column; }
+        .section-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+        .tables-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; }
+        
+        .table-card { background: white; border: 2px solid var(--border); border-radius: 14px; padding: 16px; cursor: pointer; position: relative; transition: all 0.2s; display: flex; flex-direction: column; justify-content: space-between; height: 110px; }
+        .table-card.FREE { border-color: var(--border); background: #F8FAFC; }
+        .table-card.SEATED { border-color: var(--blue); background: #EFF6FF; }
+        .table-card.PAYING { border-color: var(--amber); background: #FEF3C7; }
+        .table-card.PAID { border-color: var(--green); background: #F0FDF4; }
+        .table-name { font-size: 1.1rem; font-weight: 700; color: var(--navy); }
+        .table-state { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+
+        .pulse-badge { position: absolute; top: -8px; right: -8px; background: var(--red); color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); } }
+
+        .sidebar-panel { background: white; border: 1px solid var(--border); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; height: fit-content; }
+        .call-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
+        .call-item:last-child { border-bottom: none; }
+        .btn-ack { background: var(--navy); color: white; border: none; padding: 6px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+
+        .drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; justify-content: flex-end; z-index: 100; }
+        .drawer { width: 420px; background: white; height: 100%; padding: 24px; display: flex; flex-direction: column; overflow-y: auto; box-shadow: -10px 0 25px rgba(0,0,0,0.1); }
+        .drawer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .btn-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-muted); }
+
+        .btn-action { background: var(--navy); color: white; border: none; border-radius: 10px; padding: 12px; font-weight: 600; width: 100%; cursor: pointer; margin-bottom: 12px; }
+        .btn-secondary { background: white; color: var(--navy); border: 1px solid var(--border); border-radius: 10px; padding: 12px; font-weight: 600; width: 100%; cursor: pointer; margin-bottom: 12px; }
+        .btn-danger { background: #FEF2F2; color: var(--red); border: 1px solid #FCA5A5; border-radius: 10px; padding: 12px; font-weight: 600; width: 100%; cursor: pointer; }
+
+        .auth-modal { position: fixed; inset: 0; background: var(--navy); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+        .auth-box { background: white; padding: 30px; border-radius: 20px; width: 100%; max-width: 400px; box-shadow: 0 20px 25px rgba(0,0,0,0.2); }
+        .auth-box h2 { margin-bottom: 16px; color: var(--navy); }
+        .auth-box input { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px; font-size: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="auth-modal" id="auth-modal" style="display: none;">
+        <div class="auth-box">
+            <h2>Staff Authentication</h2>
+            <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:16px;">Enter your staff API token to access the floor dashboard.</p>
+            <input type="password" id="staff-token-input" placeholder="Enter bearer token...">
+            <div id="auth-error" role="alert" style="color:#dc2626;font-size:0.85rem;margin-bottom:10px;display:none;"></div>
+            <button class="btn-action" data-action="save-token">Authenticate</button>
+        </div>
+    </div>
+
+    <aside>
+        <div class="brand">Smart Table <span>Staff</span></div>
+        <div class="nav-item active">Floor Map</div>
+        <div class="nav-item" data-action="reports">Reports & Sales</div>
+    </aside>
+
+    <main>
+        <header>
+            <div class="header-left">
+                <select id="location-select"></select>
+                <div class="clock" id="live-clock">--:--:--</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px;">
+                <span style="font-size:0.85rem; font-weight:600; color:var(--green);">● Live Connected</span>
+                <button data-action="logout" style="background:none; border:none; color:var(--text-muted); font-size:0.85rem; cursor:pointer; font-weight:600;">Logout</button>
+            </div>
+        </header>
+
+        <div class="dashboard-body">
+            <div class="floor-section">
+                <div class="metrics-strip">
+                    <div class="metric-card">
+                        <div class="metric-title">Settled Checks</div>
+                        <div class="metric-value" id="m-settled">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-title">Avg Settlement</div>
+                        <div class="metric-value" id="m-settle-time">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-title">Waiter Response</div>
+                        <div class="metric-value" id="m-response-time">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-title">Open Waiter Calls</div>
+                        <div class="metric-value" id="m-open-calls">-</div>
+                    </div>
+                </div>
+
+                <div class="section-title">
+                    <span>Floor Map</span>
+                    <button class="btn-action" style="width:auto; padding:8px 16px; margin:0; font-size:0.85rem;" data-action="add-table">+ Add Table</button>
+                </div>
+                <div class="tables-grid" id="tables-grid"></div>
+            </div>
+
+            <div class="sidebar-panel">
+                <div class="section-title" style="margin-bottom:12px;">Waiter Calls</div>
+                <div id="waiter-calls-list">
+                    <p style="font-size:0.9rem; color:var(--text-muted);">No active waiter calls.</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div class="drawer-backdrop" id="drawer-backdrop">
+        <div class="drawer" id="table-drawer"></div>
+    </div>
+
+    <script>
+'use strict';
+// ---------------------------------------------------------------------------
+// Smart Table — staff dashboard. API contract (backend v0.2), all staff calls need `Authorization: Bearer <STAFF_API_TOKEN>`:
+//   GET  /api/locations                          -> { locations:[{id,square_location_id,name,currency}] }
+//   GET  /api/dashboard/overview?location_id=    -> { tables:[{id,name,state,qr_token,open_order_id,paid_cents}], waiter_calls:[{id,table_id,table_name,created_at}] }
+//   GET  /api/dashboard/metrics?location_id=&days= -> { settled_checks, avg_settlement_secs|null, avg_waiter_response_secs|null, answered_calls, open_calls }
+//   GET  /api/square-open-orders?location_id=    -> { orders:[{id,total_money:{amount,currency},state,created_at,items:string}] }
+//   POST /api/tables | /:id/link-check {square_order_id} | /:id/free | /:id/ack-call ; GET /api/tables/:id/qr (PNG)
+//   POST /api/checks/:squareOrderId/record-external-payment <- { mode, amount_cents, tip_cents, idempotency_key(UUID v4) }
+//   public: GET /api/t/:qr_token -> bill of the table's open check
+//   errors: { error:<message>, code?:<machine code> }
+// ---------------------------------------------------------------------------
+const TOKEN_KEY = 'smart_table_staff_token';
+const CASH_KEY = 'st_cash_attempt';
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const money = (cents, cur) => {
+    try { return new Intl.NumberFormat('en-CA', { style: 'currency', currency: cur || 'CAD' }).format(cents / 100); }
+    catch { return (cents / 100).toFixed(2) + ' ' + esc(cur || ''); }
+};
+function uuid() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+    const h = Array.from(b, (x) => x.toString(16).padStart(2, '0'));
+    return `${h.slice(0, 4).join('')}-${h.slice(4, 6).join('')}-${h.slice(6, 8).join('')}-${h.slice(8, 10).join('')}-${h.slice(10).join('')}`;
+}
+
+let staffToken = null;
+try { staffToken = sessionStorage.getItem(TOKEN_KEY); } catch { /* ignore */ }
+let locations = [];
+let dashboardData = { tables: [], waiter_calls: [] };
+let selectedTable = null;
+let openSquareOrders = [];
+let drawerBill = null;
+let pollTimer = null;
+let clockTimer = null;
+let cashBusy = false;
+let memCash = null;
+
+// ---- auth -------------------------------------------------------------------
+function showAuth(msg) {
+    $('auth-error').textContent = msg || '';
+    $('auth-modal').style.display = 'flex';
+    $('staff-token-input').focus();
+}
+function stopTimers() { clearInterval(pollTimer); clearInterval(clockTimer); pollTimer = clockTimer = null; }
+function lockOut(msg) {
+    stopTimers();
+    staffToken = null;
+    try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+    showAuth(msg);
+}
+function saveToken() {
+    const val = $('staff-token-input').value.trim();
+    if (!val) return;
+    staffToken = val;
+    try { sessionStorage.setItem(TOKEN_KEY, val); } catch { /* ignore */ }
+    $('staff-token-input').value = '';
+    $('auth-modal').style.display = 'none';
+    start();
+}
+function logout() { lockOut(''); location.reload(); }
+
+class AuthError extends Error { constructor() { super('Unauthorized'); this.isAuth = true; } }
+
+async function apiCall(path, options = {}) {
+    if (!staffToken) { showAuth(''); throw new AuthError(); }
+    const res = await fetch(path, {
+        ...options,
+        headers: { 'Content-Type': 'application/json', ...(options.headers || {}), Authorization: `Bearer ${staffToken}` },
+    });
+    if (res.status === 401) { lockOut('Invalid or expired token. Please enter it again.'); throw new AuthError(); }
+    return res;
+}
+async function readError(res) {
+    const j = await res.json().catch(() => ({}));
+    return { message: j.error || `Request failed (HTTP ${res.status})`, code: j.code };
+}
+
+// ---- bootstrap ----------------------------------------------------------------
+async function start() {
+    if (!staffToken) { showAuth(''); return; }
+    stopTimers();
+    clockTimer = setInterval(() => { $('live-clock').textContent = new Date().toLocaleTimeString(); }, 1000);
+    await initDashboard();
+    if (staffToken) pollTimer = setInterval(pollDashboard, 5000); // also starts after a first-time login
+}
+
+async function initDashboard() {
+    try {
+        const res = await apiCall('/api/locations');
+        if (!res.ok) throw new Error((await readError(res)).message);
+        locations = (await res.json()).locations || [];
+        $('location-select').innerHTML = locations.map((l) => `<option value="${esc(l.id)}">${esc(l.name || l.id)}</option>`).join('');
+        if (!locations.length) { $('tables-grid').innerHTML = '<p style="color:var(--text-muted)">No locations yet — run the seed / onboarding first.</p>'; return; }
+        await loadDashboardData();
+    } catch (err) {
+        if (!err.isAuth) $('tables-grid').innerHTML = `<p style="color:var(--text-muted)">Could not load: ${esc(err.message)}</p>`;
+    }
+}
+
+const locId = () => $('location-select').value;
+
+async function loadDashboardData() {
+    const id = locId();
+    if (!id) return;
+    try {
+        const q = `location_id=${encodeURIComponent(id)}`;
+        const [dashRes, metricsRes] = await Promise.all([apiCall(`/api/dashboard/overview?${q}`), apiCall(`/api/dashboard/metrics?${q}&days=7`)]);
+        if (dashRes.ok) dashboardData = await dashRes.json();
+        if (metricsRes.ok) renderMetrics(await metricsRes.json());
+        renderFloor(); renderWaiterCalls();
+    } catch (err) { if (!err.isAuth) console.error(err); }
+}
+
+async function pollDashboard() {
+    if (document.hidden || !locId()) return;
+    try {
+        const res = await apiCall(`/api/dashboard/overview?location_id=${encodeURIComponent(locId())}`);
+        if (res.ok) { dashboardData = await res.json(); renderFloor(); renderWaiterCalls(); }
+    } catch { /* AuthError already handled; transient errors retry on the next tick */ }
+}
+
+// ---- render -------------------------------------------------------------------
+function renderMetrics(m) {
+    const secs = (v) => (v == null ? '—' : `${Math.round(v)}s`);
+    $('m-settled').textContent = m.settled_checks ?? 0;
+    $('m-settle-time').textContent = secs(m.avg_settlement_secs);
+    $('m-response-time').textContent = secs(m.avg_waiter_response_secs);
+    $('m-open-calls').textContent = m.open_calls ?? 0;
+}
+
+function renderFloor() {
+    const grid = $('tables-grid');
+    if (!dashboardData.tables || dashboardData.tables.length === 0) { grid.innerHTML = '<p style="color:var(--text-muted)">No tables found for this location.</p>'; return; }
+    const calling = new Set((dashboardData.waiter_calls || []).map((c) => c.table_id));
+    grid.innerHTML = dashboardData.tables.map((t) => `
+        <div class="table-card ${esc(t.state)}" data-action="open-table" data-id="${esc(t.id)}">
+            ${calling.has(t.id) ? '<div class="pulse-badge">!</div>' : ''}
+            <div><div class="table-name">Table ${esc(t.name)}</div></div>
+            <div class="table-state">${esc(t.state)}</div>
+        </div>`).join('');
+}
+
+function renderWaiterCalls() {
+    const calls = dashboardData.waiter_calls || [];
+    $('waiter-calls-list').innerHTML = calls.length ? calls.map((c) => `
+        <div class="call-item">
+            <div><div style="font-weight:700;font-size:0.95rem;">Table ${esc(c.table_name || '?')}</div>
+            <div style="font-size:0.75rem;color:var(--text-muted);">${Math.max(0, Math.round((Date.now() - new Date(c.created_at)) / 1000))}s ago</div></div>
+            <button class="btn-ack" data-action="ack" data-id="${esc(c.table_id)}">Acknowledge</button>
+        </div>`).join('') : '<p style="font-size:0.9rem;color:var(--text-muted);">No active waiter calls.</p>';
+}
+
+// ---- drawer -------------------------------------------------------------------
+async function fetchTableBill(t) { // public endpoint: no staff token needed
+    const res = await fetch(`/api/t/${encodeURIComponent(t.qr_token)}`);
+    if (!res.ok) throw new Error((await readError(res)).message);
+    return (await res.json()).check || null;
+}
+
+async function openTableDrawer(tableId) {
+    selectedTable = dashboardData.tables.find((t) => t.id === tableId);
+    if (!selectedTable) return;
+    openSquareOrders = []; drawerBill = null;
+    try {
+        const [ordersRes, bill] = await Promise.all([
+            apiCall(`/api/square-open-orders?location_id=${encodeURIComponent(locId())}`),
+            fetchTableBill(selectedTable).catch(() => null),
+        ]);
+        if (ordersRes.ok) openSquareOrders = (await ordersRes.json()).orders || [];
+        drawerBill = bill;
+    } catch (err) { if (err.isAuth) return; }
+    renderDrawerContent();
+    $('drawer-backdrop').style.display = 'flex';
+}
+const closeDrawer = () => { $('drawer-backdrop').style.display = 'none'; };
+
+function renderDrawerContent() {
+    const t = selectedTable;
+    const billLine = drawerBill
+        ? `Open check: total <strong>${money(drawerBill.total_cents, drawerBill.currency)}</strong>, remaining <strong>${money(drawerBill.remaining_cents, drawerBill.currency)}</strong>`
+        : 'No check linked to this table.';
+    const opts = openSquareOrders.map((o) => {
+        const total = o.total_money ? money(o.total_money.amount, o.total_money.currency) : '';
+        const when = o.created_at ? new Date(o.created_at).toLocaleTimeString() : '';
+        const items = String(o.items || '').slice(0, 60);
+        return `<option value="${esc(o.id)}">…${esc(String(o.id).slice(-6))} · ${esc(total)} · ${esc(when)} · ${esc(items)}</option>`;
+    }).join('');
+    $('table-drawer').innerHTML = `
+        <div class="drawer-header"><h2>Table ${esc(t.name)}</h2><button class="btn-close" data-action="close-drawer">&times;</button></div>
+        <p style="font-size:0.9rem;color:var(--text-muted);margin-bottom:6px;">Current State: <strong style="color:var(--navy);">${esc(t.state)}</strong></p>
+        <p style="font-size:0.9rem;color:var(--text-muted);margin-bottom:16px;">${billLine}</p>
+
+        <div style="margin-bottom:20px;">
+            <label style="font-size:0.85rem;font-weight:600;color:var(--text-muted);display:block;margin-bottom:8px;">Link Square Order</label>
+            <select id="link-order-select" style="width:100%;margin-bottom:8px;"><option value="">Select open order...</option>${opts}</select>
+            <button class="btn-action" data-action="link">Link Order to Table</button>
+        </div>
+
+        <div style="margin-bottom:20px;">
+            <label style="font-size:0.85rem;font-weight:600;color:var(--text-muted);display:block;margin-bottom:8px;">Record Cash Payment${drawerBill ? ` (${esc(drawerBill.currency)})` : ''}</label>
+            <input type="number" inputmode="decimal" step="0.01" min="0" id="cash-amount" placeholder="Amount..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;">
+            <button class="btn-secondary" id="btn-cash" data-action="cash">Record Cash Payment</button>
+        </div>
+
+        <div style="margin-bottom:20px;"><button class="btn-secondary" data-action="qr">View Table QR Code</button></div>
+        <div style="margin-top:auto;"><button class="btn-danger" data-action="free">Reset / Free Table</button></div>`;
+}
+
+async function linkCheckToTable() {
+    const orderId = $('link-order-select').value;
+    if (!orderId) return alert('Select an order first.');
+    try {
+        const res = await apiCall(`/api/tables/${encodeURIComponent(selectedTable.id)}/link-check`, { method: 'POST', body: JSON.stringify({ square_order_id: orderId }) });
+        if (res.ok) { closeDrawer(); loadDashboardData(); return; }
+        alert((await readError(res)).message);
+    } catch (e) { if (!e.isAuth) alert('Network problem — please try again.'); }
+}
+
+// ---- cash (idempotent) ----------------------------------------------------------
+// One attempt = one key per (order, amount). The key is kept on any unknown outcome (network error / 5xx / 409 unknown),
+// so tapping again replays the SAME request and can never record the cash twice; it is dropped only after a confirmed
+// success or a confirmed rejection. The button is disabled for the whole request (double-tap safe).
+function loadCash() { if (memCash) return memCash; try { return JSON.parse(sessionStorage.getItem(CASH_KEY) || 'null'); } catch { return null; } }
+function saveCash(a) { memCash = a; try { sessionStorage.setItem(CASH_KEY, JSON.stringify(a)); } catch { /* ignore */ } }
+function clearCash() { memCash = null; try { sessionStorage.removeItem(CASH_KEY); } catch { /* ignore */ } }
+
+async function recordCash() {
+    if (cashBusy) return;
+    const amt = parseFloat($('cash-amount').value);
+    if (!Number.isFinite(amt) || amt <= 0) return alert('Enter a valid cash amount.');
+    const cents = Math.round(amt * 100);
+    const btn = $('btn-cash');
+    cashBusy = true; btn.disabled = true;
+    try {
+        const bill = await fetchTableBill(selectedTable).catch(() => null);
+        if (!bill) return alert('No active check linked to this table.');
+        const sig = `${bill.square_order_id}|${cents}`;
+        let a = loadCash();
+        if (!a || a.sig !== sig) {
+            // fresh attempt: validate against the live balance and confirm with the human
+            if (cents > bill.remaining_cents) return alert(`That is more than the remaining balance (${money(bill.remaining_cents, bill.currency)}).`);
+            if (!confirm(`Record ${money(cents, bill.currency)} cash for Table ${selectedTable.name}?\nRemaining after: ${money(bill.remaining_cents - cents, bill.currency)}`)) return;
+            a = { sig, key: uuid() };
+            saveCash(a);
+        }
+        const res = await apiCall(`/api/checks/${encodeURIComponent(bill.square_order_id)}/record-external-payment`, {
+            method: 'POST',
+            body: JSON.stringify({ mode: 'custom', amount_cents: cents, tip_cents: 0, idempotency_key: a.key }),
+        });
+        if (res.ok) { clearCash(); alert('Cash payment recorded.'); closeDrawer(); loadDashboardData(); return; }
+        const err = await readError(res);
+        if (res.status === 400 || res.status === 402 || (res.status === 409 && (err.code === 'payment_failed' || err.code === 'payment_cancelled'))) {
+            clearCash(); alert(err.message); return; // confirmed: nothing was recorded
+        }
+        alert(`${err.message}\n\nThe result is not confirmed. Check the bill, then tap again — the same request is re-sent and cannot be recorded twice.`);
+    } catch (e) {
+        if (!e.isAuth) alert('Network problem — the result is not confirmed. Tap again: the same request is re-sent and cannot be recorded twice.');
+    } finally { cashBusy = false; btn.disabled = false; }
+}
+
+async function freeTable() {
+    if (!confirm(`Reset and free Table ${selectedTable.name}?${drawerBill ? '\n\nThis table still has an open check.' : ''}`)) return;
+    try {
+        const res = await apiCall(`/api/tables/${encodeURIComponent(selectedTable.id)}/free`, { method: 'POST' });
+        if (!res.ok) return alert((await readError(res)).message);
+        closeDrawer(); loadDashboardData();
+    } catch (e) { if (!e.isAuth) alert('Network problem — please try again.'); }
+}
+
+async function ackCall(tableId) {
+    try {
+        const res = await apiCall(`/api/tables/${encodeURIComponent(tableId)}/ack-call`, { method: 'POST' });
+        if (!res.ok) return alert((await readError(res)).message);
+        loadDashboardData();
+    } catch (e) { if (!e.isAuth) alert('Network problem — please try again.'); }
+}
+
+async function fetchAndShowQR() {
+    try {
+        const res = await apiCall(`/api/tables/${encodeURIComponent(selectedTable.id)}/qr`);
+        if (!res.ok) return alert((await readError(res)).message);
+        const url = URL.createObjectURL(await res.blob());
+        const w = window.open('', '_blank');
+        if (!w) { URL.revokeObjectURL(url); return alert('Please allow pop-ups to print the QR code.'); }
+        w.document.write(`<html><body style="text-align:center;padding:40px;"><img src="${url}" style="width:300px;"/><br/><h2>Table ${esc(selectedTable.name)}</h2><button onclick="window.print()" style="padding:10px 20px;font-size:1rem;margin-top:20px;">Print QR</button></body></html>`);
+        w.document.close();
+        setTimeout(() => URL.revokeObjectURL(url), 120000);
+    } catch (e) { if (!e.isAuth) alert('Network problem — please try again.'); }
+}
+
+async function addTable() {
+    const name = (prompt('Enter table name (e.g. T12):') || '').trim();
+    if (!name) return;
+    if (name.length > 64) return alert('Table name is too long (max 64 characters).');
+    try {
+        const res = await apiCall('/api/tables', { method: 'POST', body: JSON.stringify({ name, location_id: locId() }) });
+        if (!res.ok) return alert((await readError(res)).message);
+        loadDashboardData();
+    } catch (e) { if (!e.isAuth) alert('Network problem — please try again.'); }
+}
+
+// ---- events (no inline handlers: CSP-friendly) -----------------------------------
+document.addEventListener('click', (e) => {
+    if (e.target.id === 'drawer-backdrop') return closeDrawer();
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    switch (el.dataset.action) {
+        case 'open-table': openTableDrawer(el.dataset.id); break;
+        case 'close-drawer': closeDrawer(); break;
+        case 'ack': ackCall(el.dataset.id); break;
+        case 'link': linkCheckToTable(); break;
+        case 'cash': recordCash(); break;
+        case 'qr': fetchAndShowQR(); break;
+        case 'free': freeTable(); break;
+        case 'add-table': addTable(); break;
+        case 'save-token': saveToken(); break;
+        case 'logout': logout(); break;
+        case 'reports': alert('Reports are not available yet.'); break;
+    }
+});
+$('location-select').addEventListener('change', loadDashboardData);
+$('staff-token-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveToken(); });
+
+start();
+
+    </script>
+</body>
+</html>

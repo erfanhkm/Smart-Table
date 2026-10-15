@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Table — Restaurant Portal</title>
+<style>
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/portal/fonts/inter-latin.woff2') format('woff2');
+}
+:root {
+  --bg: #f1f5f9; --card: #ffffff; --ink: #0f172a; --muted: #475569;
+  --line: #e2e8f0; --accent: #0ea5e9; --accent-d: #0284c7;
+  --green: #16a34a; --yellow: #d97706; --red: #b91c1c; --red-bg: #fef2f2;
+  --radius: 12px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: 'Inter', -apple-system, 'Segoe UI', sans-serif;
+  background: var(--bg); color: var(--ink);
+  height: 100vh; height: 100dvh; overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ---------- login ---------- */
+#login-screen {
+  min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 60%, #0ea5e9 130%);
+  padding: 20px;
+}
+.login-card {
+  background: #fff; border-radius: 16px; padding: 40px; width: 100%; max-width: 400px;
+  box-shadow: 0 25px 60px rgba(0,0,0,.35);
+}
+.login-card h1 { font-size: 1.5rem; font-weight: 800; margin-bottom: 6px; }
+.login-card h1 .dot { color: var(--accent); }
+.login-card p.sub { color: var(--muted); font-size: .9rem; margin-bottom: 24px; }
+.login-form label { display: block; font-size: .8rem; font-weight: 600; margin: 14px 0 6px; }
+.login-form input {
+  width: 100%; padding: 12px; border: 1.5px solid var(--line); border-radius: 8px; font-size: 1rem;
+}
+.login-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(14,165,233,.18); outline: none; }
+.login-form button {
+  width: 100%; margin-top: 20px; padding: 13px; border: 0; border-radius: 8px;
+  background: var(--accent); color: #fff; font-size: 1rem; font-weight: 700; cursor: pointer;
+}
+.login-form button:hover { background: var(--accent-d); }
+.login-form button:disabled { opacity: .6; cursor: wait; }
+#login-error {
+  display: none; margin-top: 14px; padding: 10px 12px; border-radius: 8px;
+  background: var(--red-bg); color: var(--red); font-size: .85rem; font-weight: 600;
+}
+.login-hint { margin-top: 18px; font-size: .78rem; color: var(--muted); text-align: center; }
+
+/* ---------- shell ---------- */
+#app-shell { display: none; height: 100vh; height: 100dvh; }
+#app-shell.on { display: flex; }
+.sidebar {
+  width: 232px; flex-shrink: 0; background: #0f172a; color: #e2e8f0;
+  display: flex; flex-direction: column; padding: 20px 14px;
+}
+.brand { font-size: 1.15rem; font-weight: 800; color: #fff; padding: 4px 10px 18px; }
+.brand .dot { color: var(--accent); }
+.nav-item {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 11px 12px; margin-bottom: 4px; border: 0; border-radius: 8px;
+  background: transparent; color: #cbd5e1; font-size: .92rem; font-weight: 600;
+  cursor: pointer; text-align: left;
+}
+.nav-item:hover { background: rgba(255,255,255,.07); color: #fff; }
+.nav-item.active { background: var(--accent); color: #fff; }
+.nav-emoji { font-size: 1.1rem; }
+.demo-pill {
+  margin-left: auto; font-size: .62rem; font-weight: 700; letter-spacing: .04em;
+  background: rgba(217,119,6,.25); color: #fbbf24; border: 1px solid rgba(251,191,36,.4);
+  padding: 2px 7px; border-radius: 99px;
+}
+.sidebar-footer {
+  margin-top: auto; padding: 14px 10px 4px; border-top: 1px solid rgba(255,255,255,.1);
+  font-size: .75rem; color: #94a3b8;
+}
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.topbar {
+  background: var(--card); border-bottom: 1px solid var(--line);
+  padding: 14px 28px; display: flex; align-items: center; gap: 14px;
+}
+.topbar h2 { font-size: 1.25rem; font-weight: 800; }
+.topbar .spacer { flex: 1; }
+.topbar .user { font-size: .85rem; color: var(--muted); font-weight: 600; }
+.btn {
+  padding: 9px 16px; border-radius: 8px; border: 1px solid var(--line);
+  background: #fff; font-size: .85rem; font-weight: 600; cursor: pointer; color: var(--ink);
+}
+.btn:hover { border-color: var(--accent); color: var(--accent-d); }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-d); color: #fff; }
+.btn-danger { background: var(--red); border-color: var(--red); color: #fff; }
+.btn-danger:hover { background: #991b1b; color: #fff; }
+.btn-sm { padding: 6px 12px; font-size: .78rem; }
+.main-content { flex: 1; overflow-y: auto; padding: 28px; height: 100vh; height: 100dvh; }
+.view { display: none; }
+.view.active { display: block; }
+.view-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+.view-head h3 { font-size: 1.35rem; font-weight: 800; }
+.view-head .spacer { flex: 1; }
+.updated-at { font-size: .75rem; color: var(--muted); }
+
+/* ---------- cards / grids ---------- */
+.grid { display: grid; gap: 16px; }
+.grid-4 { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.grid-2 { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 20px; position: relative;
+}
+.card h4 { font-size: 1rem; font-weight: 700; margin-bottom: 12px; }
+.stat-num { font-size: 2rem; font-weight: 800; letter-spacing: -.02em; }
+.stat-label { font-size: .8rem; color: var(--muted); margin-top: 4px; }
+.demo-badge {
+  display: inline-block; font-size: .68rem; font-weight: 700; letter-spacing: .05em;
+  background: #fef3c7; color: #92400e; border: 1px solid #fcd34a;
+  padding: 3px 10px; border-radius: 99px; margin-bottom: 10px;
+}
+.demo-badge.soon { background: #e0f2fe; color: #075985; border-color: #7dd3fc; }
+.badge-row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+
+/* ---------- tables / floor ---------- */
+.floor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+.floor-card {
+  background: var(--card); border: 2px solid var(--line); border-radius: var(--radius);
+  padding: 16px; cursor: pointer; text-align: left; font-family: inherit; color: inherit;
+  transition: border-color .15s, transform .15s; width: 100%;
+}
+.floor-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.floor-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.floor-card-name { font-weight: 700; font-size: 1rem; display: block; }
+.floor-card-body { font-size: .8rem; color: var(--muted); display: block; margin-top: 6px; }
+.chip { font-size: .7rem; font-weight: 700; padding: 3px 10px; border-radius: 99px; }
+.chip.free { background: #dcfce7; color: #166534; }
+.chip.seated { background: #dbeafe; color: #1d4ed8; }
+.chip.paying { background: #fef3c7; color: #92400e; }
+.chip.paid { background: #f1f5f9; color: #475569; }
+.chip.call { background: var(--red-bg); color: var(--red); animation: pulse 1.6s infinite; }
+@keyframes pulse { 50% { opacity: .55; } }
+.call-dot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--red); margin-right: 6px; animation: pulse 1.6s infinite; vertical-align: 1px;
+}
+.data-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+.data-table th, .data-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.data-table th { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.empty { color: var(--muted); font-size: .9rem; padding: 24px; text-align: center; }
+
+/* ---------- orders ---------- */
+#orders-layout { display: grid; grid-template-columns: minmax(0,2fr) minmax(0,1fr); gap: 16px; align-items: start; }
+.order-row {
+  display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+  border: 1px solid var(--line); border-radius: 10px; margin-bottom: 10px; background: #fff;
+}
+.order-row .grow { flex: 1; min-width: 0; }
+.order-row .tname { font-weight: 700; }
+.order-row .meta { font-size: .78rem; color: var(--muted); margin-top: 2px; }
+
+/* ---------- drawer ---------- */
+#table-drawer {
+  position: fixed; top: 0; right: 0; width: min(420px, 100vw); height: 100vh; height: 100dvh;
+  background: #fff; box-shadow: -12px 0 40px rgba(0,0,0,.18); z-index: 60;
+  transform: translateX(100%); visibility: hidden;
+  transition: transform .25s ease, visibility .25s;
+  display: flex; flex-direction: column;
+}
+#table-drawer.open { transform: none; visibility: visible; }
+.drawer-head { padding: 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+.drawer-head h3 { font-size: 1.15rem; font-weight: 800; flex: 1; }
+.drawer-body { flex: 1; overflow-y: auto; padding: 20px; }
+.drawer-foot { padding: 16px 20px; border-top: 1px solid var(--line); display: flex; gap: 10px; flex-wrap: wrap; }
+.drawer-close { border: 0; background: #f1f5f9; border-radius: 8px; width: 34px; height: 34px; cursor: pointer; font-size: 1rem; }
+.bill-line { display: flex; justify-content: space-between; padding: 7px 0; font-size: .9rem; }
+.bill-line.total { font-weight: 800; border-top: 2px solid var(--ink); margin-top: 8px; padding-top: 12px; font-size: 1.05rem; }
+.bill-line .neg { color: var(--green); }
+.cash-box { margin-top: 16px; padding: 16px; background: #f8fafc; border-radius: 10px; border: 1px solid var(--line); }
+.cash-box label { display: block; font-size: .78rem; font-weight: 700; margin-bottom: 6px; }
+.cash-row { display: flex; gap: 8px; }
+.cash-row input { flex: 1; padding: 10px; border: 1.5px solid var(--line); border-radius: 8px; font-size: 1rem; }
+.cash-row input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(14,165,233,.18); outline: none; }
+
+/* ---------- modal ---------- */
+.modal {
+  position: fixed; inset: 0; background: rgba(15,23,42,.5); z-index: 70;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  visibility: hidden; opacity: 0; transition: opacity .2s, visibility .2s;
+}
+.modal.show { visibility: visible; opacity: 1; }
+.modal-card { background: #fff; border-radius: 14px; padding: 28px; width: 100%; max-width: 420px; }
+.modal-card h3 { margin-bottom: 6px; }
+.modal-card p.hint { font-size: .82rem; color: var(--muted); margin-bottom: 14px; }
+.form-control { width: 100%; padding: 11px; border: 1.5px solid var(--line); border-radius: 8px; font-size: .95rem; margin-bottom: 12px; }
+.form-control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(14,165,233,.18); outline: none; }
+.form-control:disabled { background: #f1f5f9; color: var(--muted); }
+label.f-label { display: block; font-size: .78rem; font-weight: 700; margin-bottom: 6px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 6px; }
+.inline-note { font-size: .8rem; color: var(--muted); background: #f8fafc; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-top: 4px; }
+
+/* ---------- settings / misc ---------- */
+.kv { display: flex; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
+.kv:last-child { border-bottom: 0; }
+.kv .k { color: var(--muted); font-weight: 600; }
+.status-ok { color: var(--green); font-weight: 700; }
+.status-bad { color: var(--red); font-weight: 700; }
+.status-warn { color: var(--yellow); font-weight: 700; }
+select.form-control { width: auto; margin-bottom: 0; }
+/* toggle switch (QR ordering) */
+.switch { position: relative; display: inline-block; width: 48px; height: 26px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; inset: 0; cursor: pointer; background: var(--line); border-radius: 26px; transition: background .2s; }
+.slider:before { content: ""; position: absolute; width: 20px; height: 20px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.switch input:checked + .slider { background: var(--green); }
+.switch input:checked + .slider:before { transform: translateX(22px); }
+.switch input:disabled + .slider { opacity: .5; cursor: not-allowed; }
+.report-table-wrap { overflow-x: auto; }
+
+@media (max-width: 900px) {
+  .sidebar { width: 64px; padding: 16px 8px; }
+  .brand { font-size: 0; padding: 4px 0 14px; text-align: center; }
+  .brand .dot { font-size: 1.4rem; }
+  .nav-item { justify-content: center; padding: 12px 0; }
+  .nav-item .nav-label { display: none; }
+  .nav-item .demo-pill { display: none; }
+  .main-content { padding: 16px; }
+  #orders-layout, #overview-split { grid-template-columns: 1fr !important; }
+  .topbar { padding: 12px 16px; }
+  .topbar .user { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ================= LOGIN ================= -->
+<div id="login-screen">
+  <div class="login-card">
+    <h1>Smart Table<span class="dot">.</span></h1>
+    <p class="sub">Restaurant portal — sign in to manage your floor.</p>
+    <form class="login-form" id="login-form">
+      <label for="login-email">Email</label>
+      <input id="login-email" type="email" autocomplete="username" required>
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" required>
+      <div id="login-error" role="alert"></div>
+      <button type="submit" id="login-btn">Sign In</button>
+    </form>
+    <p class="login-hint">Use your owner credentials. v0.1</p>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="app-shell">
+  <nav class="sidebar" aria-label="Portal navigation">
+    <div class="brand">Smart Table<span class="dot">.</span></div>
+    <button class="nav-item active" data-view="overview" aria-label="Overview" title="Overview" aria-current="page"><span class="nav-emoji" aria-hidden="true">📊</span><span class="nav-label">Overview</span></button>
+    <button class="nav-item" data-view="tables" aria-label="Floor and tables" title="Floor &amp; Tables"><span class="nav-emoji" aria-hidden="true">🪑</span><span class="nav-label">Floor &amp; Tables</span></button>
+    <button class="nav-item" data-view="orders" aria-label="Live orders" title="Live Orders"><span class="nav-emoji" aria-hidden="true">🧾</span><span class="nav-label">Live Orders</span></button>
+    <button class="nav-item" data-view="reports" aria-label="Reports" title="Reports"><span class="nav-emoji" aria-hidden="true">📈</span><span class="nav-label">Reports</span></button>
+    <button class="nav-item" data-view="staff" aria-label="Staff, demo data" title="Staff (demo)"><span class="nav-emoji" aria-hidden="true">👥</span><span class="nav-label">Staff</span><span class="demo-pill">Demo</span></button>
+    <button class="nav-item" data-view="devices" aria-label="Devices, demo data" title="Devices (demo)"><span class="nav-emoji" aria-hidden="true">📟</span><span class="nav-label">Devices</span><span class="demo-pill">Demo</span></button>
+    <button class="nav-item" data-view="billing" aria-label="Billing, demo data" title="Billing (demo)"><span class="nav-emoji" aria-hidden="true">💳</span><span class="nav-label">Billing</span><span class="demo-pill">Demo</span></button>
+    <button class="nav-item" data-view="settings" aria-label="Settings" title="Settings"><span class="nav-emoji" aria-hidden="true">⚙️</span><span class="nav-label">Settings</span></button>
+    <div class="sidebar-footer">Smart Table · v0.1<br>Hardware: planned device</div>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <h2 id="view-title">Overview</h2>
+      <div class="spacer"></div>
+      <span class="user" id="user-email">—</span>
+      <button class="btn btn-sm" id="btn-logout">Sign Out</button>
+    </div>
+
+    <main class="main-content">
+      <!-- OVERVIEW -->
+      <section class="view active" id="view-overview" aria-label="Overview">
+        <div class="grid grid-4" id="overview-stats" style="margin-bottom:16px"></div>
+        <div class="grid" style="grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px" id="overview-split">
+          <div class="card">
+            <h4>Floor Status</h4>
+            <div class="floor-grid" id="overview-tables"></div>
+          </div>
+          <div class="card">
+            <h4>Open waiter calls</h4>
+            <div id="recent-activity"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TABLES -->
+      <section class="view" id="view-tables" aria-label="Floor and tables">
+        <div class="view-head">
+          <h3>Floor &amp; Tables</h3>
+          <div class="spacer"></div>
+          <button class="btn btn-primary" id="btn-add-table">+ Add Table</button>
+        </div>
+        <div class="floor-grid" id="floor-grid"></div>
+      </section>
+
+      <!-- ORDERS -->
+      <section class="view" id="view-orders" aria-label="Live orders">
+        <div class="view-head"><h3>Live Orders</h3><div class="spacer"></div><span class="updated-at" id="orders-updated"></span></div>
+        <div id="orders-layout">
+          <div id="orders-list"></div>
+          <div class="card">
+            <h4>Check Detail</h4>
+            <div id="order-detail"><p class="empty">Select a table to see its check.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- REPORTS -->
+      <section class="view" id="view-reports" aria-label="Reports">
+        <div class="view-head">
+          <h3>Reports</h3>
+          <div class="spacer"></div>
+          <label class="visually-hidden" for="report-range">Report range</label>
+          <select class="form-control" id="report-range">
+            <option value="1">Last 24 hours</option>
+            <option value="7" selected>Last 7 days</option>
+            <option value="30">Last 30 days</option>
+          </select>
+          <button class="btn" id="export-csv" disabled title="Coming soon">Export CSV — Soon</button>
+        </div>
+        <div class="grid grid-4" id="report-cards" style="margin-bottom:16px"></div>
+        <div class="card">
+          <div class="badge-row"><h4 style="margin:0">Daily Breakdown</h4><span class="demo-badge">Demo Data</span></div>
+          <div class="report-table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Date</th><th>Checks</th><th>Revenue</th><th>Avg Tip</th></tr></thead>
+            <tbody id="report-table-body"></tbody>
+          </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- STAFF -->
+      <section class="view" id="view-staff" aria-label="Staff">
+        <div class="view-head">
+          <h3>Staff</h3>
+          <div class="spacer"></div>
+          <button class="btn btn-primary" id="invite-staff">+ Invite Staff</button>
+        </div>
+        <div class="badge-row"><span class="demo-badge">Demo Data — staff management isn't connected yet</span></div>
+        <div class="card">
+          <table class="data-table">
+            <thead><tr><th>Name</th><th>Role</th><th>Status</th><th></th></tr></thead>
+            <tbody id="staff-table-body"></tbody>
+          </table>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <div class="badge-row"><h4 style="margin:0">Role Permissions</h4><span class="demo-badge">Not enforced — design preview</span></div>
+          <table class="data-table">
+            <thead><tr><th>Capability</th><th>Owner</th><th>Manager</th><th>Waiter</th></tr></thead>
+            <tbody id="role-matrix"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- DEVICES -->
+      <section class="view" id="view-devices" aria-label="Devices">
+        <div class="view-head"><h3>Devices</h3></div>
+        <div class="badge-row"><span class="demo-badge">Demo Data — device registry isn't connected yet</span></div>
+        <div class="grid grid-2" id="devices-grid"></div>
+      </section>
+
+      <!-- BILLING -->
+      <section class="view" id="view-billing" aria-label="Billing">
+        <div class="view-head"><h3>Billing &amp; Subscription</h3></div>
+        <div class="badge-row"><span class="demo-badge">Demo Data — no real billing connected</span></div>
+        <div id="billing-content"></div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="view" id="view-settings" aria-label="Settings">
+        <div class="view-head"><h3>Settings</h3></div>
+        <div class="grid grid-2" id="settings-content"></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<!-- ================= DRAWER ================= -->
+<aside id="table-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" inert>
+  <div class="drawer-head">
+    <h3 id="drawer-title">Table</h3>
+    <button class="drawer-close" id="drawer-close" aria-label="Close panel">✕</button>
+  </div>
+  <div class="drawer-body" id="drawer-body"></div>
+  <div class="drawer-foot" id="drawer-footer"></div>
+</aside>
+
+<!-- ================= MODALS ================= -->
+<div class="modal" id="modal-table" role="dialog" aria-modal="true" aria-labelledby="modal-table-title" inert>
+  <div class="modal-card">
+    <h3 id="modal-table-title">Add Table</h3>
+    <p class="hint">Creates a table with a fresh QR code.</p>
+    <label class="f-label" for="table-name">Table name</label>
+    <input class="form-control" id="table-name" placeholder="e.g. Patio 3" maxlength="64">
+    <div class="modal-actions">
+      <button class="btn" data-close="modal-table">Cancel</button>
+      <button class="btn btn-primary" id="btn-create-table">Create Table</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modal-invite" role="dialog" aria-modal="true" aria-labelledby="modal-invite-title" inert>
+  <div class="modal-card">
+    <h3 id="modal-invite-title">Invite Staff</h3>
+    <p class="hint">Send an invite link to a team member.</p>
+    <label class="f-label" for="invite-email">Email</label>
+    <input class="form-control" id="invite-email" type="email" placeholder="teammate@example.com" disabled>
+    <div class="inline-note">Demo — invites aren't sent yet. Staff management isn't wired up.</div>
+    <div class="modal-actions">
+      <button class="btn" data-close="modal-invite">Close</button>
+      <button class="btn btn-primary" id="btn-send-invite" disabled>Send Invite</button>
+    </div>
+  </div>
+</div>
+
+<script src="/portal/app.js"></script>
+</body>
+</html>
