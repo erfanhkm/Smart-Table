@@ -1,4 +1,4 @@
-/* Smart Table — Restaurant Portal (v0.1)
+/* Smart Table — Restaurant Portal (v0.2)
  * Served from /portal/app.js with a strict Content-Security-Policy
  * (no inline script). The network layer below has no DOM *rendering*
  * dependencies; it uses sessionStorage only for the auth token. */
@@ -979,12 +979,12 @@ function renderBilling() {
         <h4>Current Plan</h4>
         <div class="stat-num" style="font-size:1.4rem">Starter</div>
         <div class="stat-label">Pricing to be announced</div>
-        <div style="margin-top:12px"><button class="btn" disabled title="Not available in v0.1">Change Plan</button></div>
+        <div style="margin-top:12px"><button class="btn" disabled title="Not available in v0.2">Change Plan</button></div>
       </div>
       <div class="card">
         <h4>Payment Method</h4>
         <div class="stat-label">No payment method on file.</div>
-        <div style="margin-top:12px"><button class="btn" disabled title="Not available in v0.1">Add Card</button></div>
+        <div style="margin-top:12px"><button class="btn" disabled title="Not available in v0.2">Add Card</button></div>
       </div>
     </div>
     <div class="card">
@@ -1079,6 +1079,7 @@ async function renderSettings() {
           note.style.color = 'var(--red)';
           qrToggle.checked = !qrToggle.checked;
         }
+      } finally {
         qrToggle.disabled = false;
       }
     });
