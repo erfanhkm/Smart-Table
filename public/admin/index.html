@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Table — Founder Admin</title>
+<style>
+  :root { --bg: #0f1115; --card: #1a1d24; --text: #e8eaed; --muted: #9aa0a6; --accent: #4caf50; --red: #f44336; --yellow: #ff9800; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
+  h1 { font-size: 1.5rem; margin-bottom: 5px; }
+  .subtitle { color: var(--muted); margin-bottom: 20px; font-size: 0.9rem; }
+  .login-box { max-width: 400px; margin: 100px auto; background: var(--card); padding: 30px; border-radius: 12px; }
+  .login-box input { width: 100%; padding: 12px; margin: 10px 0; background: #0f1115; border: 1px solid #333; color: var(--text); border-radius: 8px; font-size: 1rem; }
+  .login-box button { width: 100%; padding: 12px; background: var(--accent); color: white; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; }
+  .login-box .error { color: var(--red); margin-top: 10px; font-size: 0.9rem; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 15px; margin-bottom: 25px; }
+  .stat-card { background: var(--card); padding: 20px; border-radius: 12px; }
+  .stat-card .label { color: var(--muted); font-size: 0.85rem; margin-bottom: 5px; }
+  .stat-card .value { font-size: 1.8rem; font-weight: 600; }
+  .stat-card .value.ok { color: var(--accent); }
+  .stat-card .value.warn { color: var(--yellow); }
+  .stat-card .value.bad { color: var(--red); }
+  .section { background: var(--card); padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+  .section h2 { font-size: 1.1rem; margin-bottom: 15px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #2a2d35; }
+  th { color: var(--muted); font-weight: 500; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.8rem; }
+  .badge.on { background: rgba(76,175,80,0.2); color: var(--accent); }
+  .badge.off { background: rgba(154,160,166,0.2); color: var(--muted); }
+  .hidden { display: none; }
+  .logout { float: right; background: none; border: 1px solid #333; color: var(--muted); padding: 8px 16px; border-radius: 8px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="login-view" class="login-box">
+  <h1>Smart Table</h1>
+  <p class="subtitle">Founder Admin — restricted access</p>
+  <input type="text" id="username-input" placeholder="Username" autocomplete="username">
+  <input type="password" id="token-input" placeholder="Password" autocomplete="current-password">
+  <button id="login-btn">Sign in</button>
+  <p class="error hidden" id="login-error"></p>
+</div>
+
+<div id="dash-view" class="hidden">
+  <button class="logout" id="logout-btn">Sign out</button>
+  <h1>Founder Dashboard</h1>
+  <p class="subtitle">All locations · v0.2</p>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="section">
+    <h2>Locations</h2>
+    <table>
+      <thead><tr><th>Name</th><th>POS</th><th>Tables</th><th>Open checks</th><th>Revenue 24h</th><th>QR Ordering</th><th>Loyalty</th></tr></thead>
+      <tbody id="locations-body"></tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>Recent Payments</h2>
+    <table>
+      <thead><tr><th>Time</th><th>Location</th><th>Table</th><th>Amount</th><th>Status</th></tr></thead>
+      <tbody id="payments-body"></tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>Website Analytics (7 days)</h2>
+    <table>
+      <thead><tr><th>Date</th><th>Visitors</th><th>Pageviews</th></tr></thead>
+      <tbody id="analytics-body"></tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>System Health</h2>
+    <table>
+      <tbody id="health-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<script src="/admin/app.js"></script>
+</body>
+</html>
