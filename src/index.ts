@@ -13,6 +13,7 @@ import { oauthRoutes } from './routes/oauth.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { staffRoutes } from './routes/staff.js';
 import { portalRoutes } from './routes/portal.js';
+import { adminRoutes } from './routes/admin.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -101,6 +102,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(webhookRoutes);
   await app.register(staffRoutes);
   await app.register(portalRoutes);
+  await app.register(adminRoutes);
   return app;
 }
 
