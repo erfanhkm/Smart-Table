@@ -45,6 +45,15 @@ export const config = {
   encryptionKeyHex: opt('ENCRYPTION_KEY'),
   // Bearer token for every staff-only API (see src/auth.ts). Empty = staff API rejects everything.
   staffApiToken: opt('STAFF_API_TOKEN'),
+  // ---- v0.2 founder admin panel ----
+  /** Admin panel username (for /admin login). */
+  adminUsername: opt('ADMIN_USERNAME'),
+  /** scrypt hash of the admin password (see crypto.hashPassword). */
+  adminPasswordHash: opt('ADMIN_PASSWORD_HASH'),
+  /** Cloudflare API token (Analytics:Read) for website stats in /admin. */
+  cloudflareApiToken: opt('CLOUDFLARE_API_TOKEN'),
+  /** Cloudflare zone ID for smarttablepay.com. */
+  cloudflareZoneId: opt('CLOUDFLARE_ZONE_ID'),
   // ---- v0.2 receipts: Resend ----
   /** Resend API key for email receipts. Empty = emails logged & skipped. */
   resendApiKey: opt('RESEND_API_KEY'),
