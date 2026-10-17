@@ -66,27 +66,17 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // ---- Website analytics (Cloudflare Web Analytics API) ----
-  // GET /api/admin/analytics -> { daily: [{ date, visitors, pageviews }] }
-  // Uses the RUM (Web Analytics) GraphQL dataset: viewer.accounts -> rumPageloadEventsAdaptiveGroups
+  // GET /api/admin/analytics -> { pageviews, visitors, top_pages }
   app.get('/api/admin/analytics', { onRequest: founderOnly }, async () => {
     if (!config.cloudflareApiToken) throw badRequest('analytics is not configured');
-    const accountTag = config.cloudflareAccountId;
-    const siteTag = config.cloudflareSiteTag;
-    if (!accountTag || !siteTag) throw badRequest('analytics is not configured');
-    const start = daysAgo(7);
-    const end = daysAgo(0);
     const query = `
       query {
         viewer {
-          accounts(filter: { accountTag: "${accountTag}" }) {
-            rumPageloadEventsAdaptiveGroups(
-              filter: { siteTag: "${siteTag}", date_geq: "${start}", date_leq: "${end}" }
-              limit: 10
-              orderBy: [date_ASC]
-            ) {
-              count
+          zones(filter: { zoneTag: "${config.cloudflareZoneId}" }) {
+            httpRequests1dGroups(limit: 7, filter: { date_geq: "${daysAgo(7)}", date_leq: "${daysAgo(0)}" }) {
               dimensions { date }
-              sum { visits }
+              sum { pageViews, requests }
+              uniq { uniques }
             }
           }
         }
@@ -102,12 +92,12 @@ export async function adminRoutes(app: FastifyInstance) {
       });
       if (!res.ok) throw new Error(`Cloudflare API ${res.status}`);
       const data = (await res.json()) as any;
-      const groups = data?.data?.viewer?.accounts?.[0]?.rumPageloadEventsAdaptiveGroups ?? [];
+      const groups = data?.data?.viewer?.zones?.[0]?.httpRequests1dGroups ?? [];
       return {
         daily: groups.map((g: any) => ({
           date: g.dimensions?.date,
-          pageviews: g.count ?? 0,
-          visitors: g.sum?.visits ?? 0,
+          pageviews: g.sum?.pageViews ?? 0,
+          visitors: g.uniq?.uniques ?? 0,
         })),
       };
     } catch (e) {

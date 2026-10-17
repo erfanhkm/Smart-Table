@@ -52,11 +52,7 @@ export const config = {
   adminPasswordHash: opt('ADMIN_PASSWORD_HASH'),
   /** Cloudflare API token (Analytics:Read) for website stats in /admin. */
   cloudflareApiToken: opt('CLOUDFLARE_API_TOKEN'),
-  /** Cloudflare account ID (for RUM/Web Analytics GraphQL queries). */
-  cloudflareAccountId: opt('CLOUDFLARE_ACCOUNT_ID'),
-  /** Cloudflare Web Analytics site tag for smarttablepay.com. */
-  cloudflareSiteTag: opt('CLOUDFLARE_SITE_TAG'),
-  /** Cloudflare zone ID for smarttablepay.com (kept for reference). */
+  /** Cloudflare zone ID for smarttablepay.com. */
   cloudflareZoneId: opt('CLOUDFLARE_ZONE_ID'),
   // ---- v0.2 receipts: Resend ----
   /** Resend API key for email receipts. Empty = emails logged & skipped. */
