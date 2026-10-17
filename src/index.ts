@@ -67,6 +67,14 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   const generalLimiter = rateLimit({ name: 'general', windowMs: 60_000, max: 200 });
   const webhookLimiter = rateLimit({ name: 'webhook', windowMs: 60_000, max: 600 });
   app.addHook('onRequest', async (req, reply) => {
+    // Redirect the raw Render hostname to the custom domain (v0.2).
+    // portal.smarttablepay.com is the canonical host; smart-table-vc0t.onrender.com
+    // is kept only as a deploy fallback and should not serve traffic directly.
+    const host = (req.headers.host ?? '').split(':')[0].toLowerCase();
+    if (host.endsWith('.onrender.com')) {
+      const target = `https://portal.smarttablepay.com${req.url}`;
+      return reply.code(301).header('Location', target).send();
+    }
     if (req.url.startsWith('/api/webhooks/')) return webhookLimiter(req, reply);
     const isPay = req.url.includes('/pay') || req.url.includes('/record-external-payment');
     await (isPay ? payLimiter : generalLimiter)(req, reply);
