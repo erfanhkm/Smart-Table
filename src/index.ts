@@ -1,6 +1,7 @@
 import Fastify, { FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { assertSafeConfig, config } from './config.js';
 import { httpError } from './http.js';
@@ -115,8 +116,20 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // its contents come from the APPLE_PAY_DOMAIN_ASSOCIATION env var. 404 when
   // unconfigured — Apple Pay then stays unavailable, Google Pay is unaffected.
   app.get('/.well-known/apple-developer-merchantid-domain-association', async (_req, reply) => {
-    if (!config.applePayDomainAssociation) return reply.code(404).send({ error: 'not configured' });
-    return reply.type('text/plain').send(config.applePayDomainAssociation);
+    // Prefer the committed file (public/.well-known/...): a 9 KB value
+    // pasted into a dashboard env field silently lost ~330 characters
+    // mid-string once (2026-10-20) and Square kept rejecting the domain
+    // with 'partial response'. A file in git is byte-exact. The env var
+    // remains as a fallback.
+    let content = '';
+    try {
+      content = fs
+        .readFileSync(path.join(here, '..', 'public', '.well-known', 'apple-developer-merchantid-domain-association'), 'utf8')
+        .trim();
+    } catch { /* fall through to env */ }
+    if (!content) content = config.applePayDomainAssociation;
+    if (!content) return reply.code(404).send({ error: 'not configured' });
+    return reply.type('text/plain').send(content);
   });
 
   // Pretty URLs for the two frontends.
