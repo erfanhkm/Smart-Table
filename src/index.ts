@@ -68,9 +68,24 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     reply.header('X-Frame-Options', 'DENY');
     reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), usb=(), bluetooth=()');
+    // Static asset caching (the static plugin sets one coarse maxAge for
+    // everything; refine it here where our headers win): HTML always
+    // revalidates so deploys take effect immediately, JS/CSS keep the
+    // plugin's 1h, fonts/images cache for 30 days.
+    const urlPath = _req.url.split('?')[0];
+    if (/^(?:\/portal|\/admin|\/dashboard|\/t)(?:\/|$)/.test(urlPath)) {
+      if (/\.(?:woff2|png|jpe?g|svg|ico)$/i.test(urlPath)) {
+        reply.header('Cache-Control', 'public, max-age=2592000, immutable');
+      } else if (!/\.(?:js|css)$/i.test(urlPath)) {
+        reply.header('Cache-Control', 'no-cache');
+      }
+    }
   });
 
-  await app.register(fastifyStatic, { root: path.join(here, '..', 'public') });
+  await app.register(fastifyStatic, {
+    root: path.join(here, '..', 'public'),
+    maxAge: '1h', // base policy; the onSend hook above refines it per asset type
+  });
 
   // Rate limits. Each limiter has its own named bucket (H1 fix: pay and general
   // never share a counter). Guest routes are keyed per table token where possible

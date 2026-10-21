@@ -1,0 +1,16 @@
+# Dependabot: keep npm dependencies patched automatically.
+# One grouped PR per week (security fixes still arrive as separate PRs
+# from Dependabot alerts). PRs target the repo's default branch, which is
+# the live v0.2 branch.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      all-dependencies:
+        patterns:
+          - "*"
