@@ -92,6 +92,12 @@
         .floating-waiter { position: fixed; bottom: 85px; right: 20px; background: white; border: 1px solid var(--border); color: var(--navy); padding: 10px 16px; border-radius: 30px; font-size: 0.85rem; font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,0.1); cursor: pointer; display: flex; align-items: center; gap: 6px; z-index: 10; }
         
         .trust-badge { text-align: center; font-size: 0.75rem; color: var(--text-muted); padding: 4px 0; }
+        /* Wallets (Apple Pay / Google Pay): SDK renders its own buttons inside these mounts */
+        #wallet-area { display: flex; flex-direction: column; gap: 8px; }
+        #apple-pay-button, #google-pay-button { height: 48px; border-radius: 14px; overflow: hidden; cursor: pointer; }
+        #apple-pay-button:empty, #google-pay-button:empty { display: none; }
+        .wallet-divider { display: flex; align-items: center; gap: 10px; color: var(--text-muted); font-size: 0.75rem; }
+        .wallet-divider::before, .wallet-divider::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
 
         .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
         .empty-state h3 { color: var(--navy); font-size: 1.25rem; margin-bottom: 8px; }
@@ -133,6 +139,11 @@
         </button>
 
         <div class="pay-footer" id="pay-footer" style="display: none;">
+            <div id="wallet-area" style="display: none;">
+                <div id="apple-pay-button" role="button" aria-label="Pay with Apple Pay"></div>
+                <div id="google-pay-button" role="button" aria-label="Pay with Google Pay"></div>
+                <div class="wallet-divider"><span>or pay with card</span></div>
+            </div>
             <div id="card-container"></div>
             <div class="trust-badge">🔒 Secure payment · No app needed · No account needed</div>
             <button class="btn-primary" id="btn-pay-main" data-action="pay">Pay $0.00</button>
@@ -282,19 +293,103 @@ function loadScript(src) {
     });
 }
 
-// Square: Web Payments SDK card iframe mounted in #card-container.
-let squareCard = null;
-async function squareTokenize(cfg) {
+// Square: Web Payments SDK. One payments instance is shared by the card
+// iframe and the wallet buttons (Apple Pay / Google Pay).
+let squarePayments = null;
+let squarePaymentsKey = '';
+async function getSquarePayments(cfg) {
     const env = cfg.extra?.environment === 'production' ? '' : 'sandbox.';
     await loadScript(`https://${env}web.squarecdn.com/v1/square.js`);
     if (!window.Square) throw new Error('Square payments library failed to load.');
+    const key = `${cfg.publishableKey}|${cfg.extra?.locationId || ''}`;
+    if (!squarePayments || squarePaymentsKey !== key) {
+        squarePayments = window.Square.payments(cfg.publishableKey, cfg.extra.locationId);
+        squarePaymentsKey = key;
+        squareCard = null; // card iframe belongs to the previous instance
+    }
+    return squarePayments;
+}
+
+let squareCard = null;
+async function squareTokenize(cfg) {
+    const payments = await getSquarePayments(cfg);
     if (!squareCard) {
-        const payments = window.Square.payments(cfg.publishableKey, cfg.extra.locationId);
         squareCard = await payments.card();
         await squareCard.attach('#card-container');
     }
     const r = await squareCard.tokenize();
     if (r.status !== 'OK') throw new Error(r.errors?.[0]?.message || 'Please check your card details.');
+    return r.token; // "cnon:..."
+}
+
+// ---- wallets (Apple Pay / Google Pay, Square locations only) -----------------
+// The wallet sheet charges the SAME frozen amount as the card flow (current
+// split + tip, or the stored attempt on a retry). Tokenize returns a Square
+// cnon: token, which the pay endpoint already accepts; payment_method tells
+// the backend (and staff) how the guest paid. Availability is decided by the
+// SDK at attach() time: Apple Pay needs Safari + a Wallet card + the domain
+// registered with Square; Google Pay needs a supported browser/device. When
+// neither attaches, the area stays hidden and card payment is unaffected.
+let walletState = { key: '', apple: null, google: null, busy: false };
+
+function effectiveTotalCents() {
+    const a = currentAttempt();
+    if (a) return a.amount + a.tip;
+    const p = payCents();
+    return p + tipCentsFor(p);
+}
+
+async function setupWallets() {
+    const area = $('wallet-area');
+    if (!area) return;
+    if (!check || receipt || check.remaining_cents <= 0) { area.style.display = 'none'; return; }
+    const a = currentAttempt();
+    if (a && a.blocked) { area.style.display = 'none'; return; }
+    const total = effectiveTotalCents();
+    const key = `${check.square_order_id}|${total}|${check.currency || 'CAD'}`;
+    if (walletState.key === key || walletState.busy) return;
+    walletState.busy = true;
+    try {
+        const cfg = await getCardConfig(check.square_order_id);
+        if (cfg.provider !== 'square') { walletState.key = key; area.style.display = 'none'; return; }
+        const payments = await getSquarePayments(cfg);
+        for (const kind of ['apple', 'google']) {
+            if (walletState[kind]) { try { await walletState[kind].destroy(); } catch { /* ignore */ } walletState[kind] = null; }
+        }
+        $('apple-pay-button').innerHTML = '';
+        $('google-pay-button').innerHTML = '';
+        const paymentRequest = payments.paymentRequest({
+            countryCode: 'CA',
+            currencyCode: check.currency || 'CAD',
+            total: { amount: (total / 100).toFixed(2), label: 'Total' },
+        });
+        let shown = 0;
+        try {
+            walletState.apple = await payments.applePay(paymentRequest);
+            await walletState.apple.attach('#apple-pay-button');
+            shown++;
+        } catch { walletState.apple = null; $('apple-pay-button').innerHTML = ''; }
+        try {
+            walletState.google = await payments.googlePay(paymentRequest);
+            await walletState.google.attach('#google-pay-button');
+            shown++;
+        } catch { walletState.google = null; $('google-pay-button').innerHTML = ''; }
+        area.style.display = shown > 0 ? 'flex' : 'none';
+        walletState.key = key;
+    } catch {
+        // SDK failed to load etc.: stay on card-only; a total change retries.
+        walletState.key = key;
+        area.style.display = 'none';
+    } finally {
+        walletState.busy = false;
+    }
+}
+
+async function walletTokenize(kind) {
+    const w = kind === 'apple' ? walletState.apple : walletState.google;
+    if (!w) throw new Error('That payment option is not available on this device.');
+    const r = await w.tokenize();
+    if (r.status !== 'OK') throw new Error(r.errors?.[0]?.message || 'Payment was not completed.');
     return r.token; // "cnon:..."
 }
 
@@ -615,7 +710,7 @@ async function callWaiter() {
 const UNCONFIRMED = 'We could not confirm whether your payment went through. Tap "Retry payment" — it is safe: the same request is re-sent and you will not be charged twice.';
 const ASK_STAFF = 'We could not confirm your payment. Please ask your server — do NOT pay again.';
 
-async function processPayment() {
+async function processPayment(tokenGetter, methodLabel) {
     if (paying || !check || receipt) return;
     const orderId = check.square_order_id;
     let a = loadAttempt(orderId);
@@ -629,7 +724,7 @@ async function processPayment() {
     paying = true; setNotice(null); render(true);
     try {
         let nonce;
-        try { nonce = await getCardToken(orderId); }
+        try { nonce = tokenGetter ? await tokenGetter() : await getCardToken(orderId); }
         catch (e) { setNotice(e.message || 'Card entry failed — please try again.'); return; } // no attempt exists yet: nothing to resolve
 
         if (!a) {
@@ -642,7 +737,7 @@ async function processPayment() {
             res = await fetch(`/api/checks/${encodeURIComponent(orderId)}/pay`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mode: a.mode, amount_cents: a.amount, tip_cents: a.tip, card_nonce: nonce, idempotency_key: a.key }),
+                body: JSON.stringify({ mode: a.mode, amount_cents: a.amount, tip_cents: a.tip, card_nonce: nonce, idempotency_key: a.key, payment_method: methodLabel || 'card' }),
             });
         } catch { setNotice(UNCONFIRMED); return; } // network error: outcome unknown -> keep the attempt
 
@@ -695,6 +790,7 @@ function updatePayButton() {
     const footer = $('pay-footer');
     if (!check || receipt || check.remaining_cents <= 0) { footer.style.display = 'none'; return; }
     footer.style.display = 'flex';
+    setupWallets(); // no-op unless the payable total changed; hides itself when blocked/unavailable
     const a = currentAttempt();
     if (a && a.blocked) { btn.disabled = true; btn.textContent = 'Ask your server'; return; }
     if (a) { btn.disabled = paying; btn.textContent = paying ? 'Processing payment...' : `Retry payment · ${formatMoney(a.amount + a.tip, check.currency)}`; return; }
@@ -854,6 +950,14 @@ async function sendReceiptEmail() {
 }
 
 // ---- events (no inline handlers: CSP-friendly) ---------------------------------
+// Wallet buttons: the Square SDK renders its own button inside these mounts;
+// a click anywhere on the mount starts the wallet sheet for the frozen total.
+$('apple-pay-button').addEventListener('click', () => {
+    if (walletState.apple) processPayment(() => walletTokenize('apple'), 'apple_pay');
+});
+$('google-pay-button').addEventListener('click', () => {
+    if (walletState.google) processPayment(() => walletTokenize('google'), 'google_pay');
+});
 document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-action]');
     if (!el) return;

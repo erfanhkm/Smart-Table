@@ -58,6 +58,15 @@ export const config = {
   cloudflareSiteTag: opt('CLOUDFLARE_SITE_TAG'),
   /** Cloudflare zone ID for smarttablepay.com (kept for reference). */
   cloudflareZoneId: opt('CLOUDFLARE_ZONE_ID'),
+  // ---- v0.3 wallets (Apple Pay / Google Pay via Square Web Payments SDK) ----
+  /**
+   * Contents of Apple's domain-association file for THIS domain, served at
+   * /.well-known/apple-developer-merchantid-domain-association. Square issues
+   * the file per domain in the Square Developer Dashboard (Apple Pay > Web >
+   * register domain). Paste its full contents here. Empty = route answers 404
+   * and the guest page simply never offers Apple Pay.
+   */
+  applePayDomainAssociation: opt('APPLE_PAY_DOMAIN_ASSOCIATION'),
   // ---- v0.2 receipts: Resend ----
   /** Resend API key for email receipts. Empty = emails logged & skipped. */
   resendApiKey: opt('RESEND_API_KEY'),

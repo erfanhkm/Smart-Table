@@ -289,6 +289,15 @@ select.form-control { width: auto; margin-bottom: 0; }
     <main class="main-content">
       <!-- OVERVIEW -->
       <section class="view active" id="view-overview" aria-label="Overview">
+        <div class="card" id="onboarding-card" style="display:none;margin-bottom:16px">
+          <div class="badge-row">
+            <h4 style="margin:0">🚀 Getting started</h4>
+            <span style="flex:1"></span>
+            <button class="btn btn-sm" id="onboarding-dismiss">Dismiss</button>
+          </div>
+          <p class="inline-note">Three steps and you're live — connect your POS, verify your menu, add your tables. No setup call needed.</p>
+          <div id="onboarding-steps"></div>
+        </div>
         <div class="grid grid-4" id="overview-stats" style="margin-bottom:16px"></div>
         <div class="grid" style="grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px" id="overview-split">
           <div class="card">

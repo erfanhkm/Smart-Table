@@ -459,6 +459,7 @@ function floorCard(t, showCall) {
 }
 
 async function renderOverview() {
+  loadOnboarding().catch(() => { /* wizard is best-effort; the overview must still render */ });
   const oRes = await PortalAPI.getOverview();
   const tables = oRes.tables || [];
   // Populate the drawer cache here too, so overview chips work on first load.
@@ -479,6 +480,112 @@ async function renderOverview() {
     : '<p class="empty">No tables yet — add one from Floor &amp; Tables.</p>';
 
   renderCalls(oRes.waiter_calls || []);
+}
+
+/* ------------------------------------------------------------------ */
+/* onboarding — "Getting started" wizard on the overview               */
+/* State lives server-side (/api/portal/onboarding): POS connection is  */
+/* derived from stored POS credentials, the menu step is a live        */
+/* verification against the POS catalog, tables from the floor itself. */
+/* ------------------------------------------------------------------ */
+let onboardingBusy = false;
+
+async function loadOnboarding() {
+  const card = $('onboarding-card');
+  if (!card) return;
+  let s;
+  try {
+    const res = await request('/api/portal/onboarding');
+    s = await readJson(res);
+    if (!res.ok) throw new Error('bad status');
+  } catch { card.style.display = 'none'; return; }
+  if (!s || s.dismissed) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  const steps = s.steps || {};
+  const pos = steps.pos_connected || {};
+  const menu = steps.menu_verified || {};
+  const tbl = steps.tables_created || {};
+  const row = (done, title, desc, actionHtml) => `
+    <div style="display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--line)">
+      <div style="font-size:1.2rem" aria-hidden="true">${done ? '✅' : '⬜'}</div>
+      <div style="flex:1">
+        <div style="font-weight:600">${title}</div>
+        <div style="font-size:.85rem;color:var(--muted)">${desc}</div>
+        ${actionHtml || ''}
+      </div>
+    </div>`;
+  const posAction = pos.done ? '' : '<button class="btn btn-sm" id="ob-connect" style="margin-top:8px">Connect POS</button>';
+  const menuAction = `
+    <button class="btn btn-sm" id="ob-verify" style="margin-top:8px" ${!pos.done || onboardingBusy ? 'disabled' : ''}>${menu.done ? 'Re-verify menu' : 'Verify menu'}</button>
+    <div id="ob-menu-result" style="font-size:.85rem;margin-top:6px"></div>`;
+  const tblAction = `
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+      <input id="ob-table-count" type="number" min="1" max="50" value="10" aria-label="Number of tables" style="width:70px;padding:6px;border:1px solid var(--line);border-radius:8px">
+      <button class="btn btn-sm" id="ob-add-tables" ${onboardingBusy ? 'disabled' : ''}>Add tables</button>
+      <button class="btn btn-sm" id="ob-goto-tables">Open Floor &amp; Tables</button>
+    </div>`;
+  $('onboarding-steps').innerHTML =
+    row(pos.done, '1. Connect your POS',
+      pos.done ? `Connected (${esc(pos.pos_type || 'POS')}) — Smart Table reads your checks and menu from it.`
+               : 'Connect the POS you already use, so checks and menu flow in automatically.', posAction) +
+    row(menu.done, '2. Verify your menu',
+      menu.done ? `${menu.item_count ?? 0} items found in your POS catalog${menu.verified_at ? ' · verified ' + esc(timeAgo(menu.verified_at)) : ''}. Guests see exactly this menu for QR ordering.`
+                : 'We pull your menu straight from your POS catalog — nothing to type in.', menuAction) +
+    row(tbl.done, '3. Add your tables',
+      tbl.done ? `${tbl.count} table${tbl.count === 1 ? '' : 's'} on your floor. Print each table's QR code from Floor &amp; Tables.`
+               : 'Create your tables, then print a QR code for each one.', tblAction) +
+    (s.complete ? '<p class="inline-note" style="margin-top:10px">🎉 You\'re live — guests can scan, order and pay. Dismiss this card whenever you\'re ready.</p>' : '');
+
+  const dismiss = $('onboarding-dismiss');
+  if (dismiss) dismiss.onclick = async () => {
+    try { await request('/api/portal/onboarding/dismiss', { method: 'POST', body: {} }); } catch { /* hide anyway */ }
+    card.style.display = 'none';
+  };
+  const connect = $('ob-connect');
+  if (connect) connect.onclick = async () => {
+    // Square connects with one click (OAuth); other POS connect in Settings.
+    if ((pos.pos_type || 'square') === 'square') {
+      connect.disabled = true; connect.textContent = 'Opening…';
+      try { window.location.href = await PortalAPI.startOAuth(); }
+      catch { connect.disabled = false; connect.textContent = 'Connect POS'; }
+    } else {
+      showView('settings');
+    }
+  };
+  const verify = $('ob-verify');
+  if (verify) verify.onclick = async () => {
+    if (onboardingBusy) return;
+    onboardingBusy = true;
+    const out = $('ob-menu-result');
+    if (out) out.textContent = 'Pulling your menu from the POS…';
+    try {
+      const res = await request('/api/portal/onboarding/verify-menu', { method: 'POST', body: {} });
+      const data = await readJson(res);
+      if (!res.ok) throw new Error((data && data.error) || 'Menu could not be verified.');
+      await loadOnboarding();
+      const out2 = $('ob-menu-result');
+      if (out2) out2.textContent = `✓ ${data.item_count} items verified just now.`;
+    } catch (e) {
+      const out3 = $('ob-menu-result');
+      if (out3) out3.textContent = e.message || 'Menu could not be verified.';
+    } finally { onboardingBusy = false; }
+  };
+  const add = $('ob-add-tables');
+  if (add) add.onclick = async () => {
+    if (onboardingBusy) return;
+    const n = parseInt((($('ob-table-count') || {}).value || '0'), 10);
+    if (!Number.isInteger(n) || n < 1 || n > 50) return;
+    onboardingBusy = true;
+    try {
+      const res = await request('/api/portal/onboarding/quick-tables', { method: 'POST', body: { count: n } });
+      const data = await readJson(res);
+      if (!res.ok) throw new Error((data && data.error) || 'Could not add tables.');
+      await renderOverview();
+    } catch { /* wizard stays as-is; the owner can retry */ }
+    finally { onboardingBusy = false; }
+  };
+  const gotoTables = $('ob-goto-tables');
+  if (gotoTables) gotoTables.onclick = () => showView('tables');
 }
 
 function renderCalls(calls) {

@@ -14,6 +14,7 @@ import { webhookRoutes } from './routes/webhooks.js';
 import { staffRoutes } from './routes/staff.js';
 import { portalRoutes } from './routes/portal.js';
 import { adminRoutes } from './routes/admin.js';
+import { onboardingRoutes } from './routes/onboarding.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -82,6 +83,15 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
 
   app.get('/healthz', async () => ({ ok: true, env: config.squareEnv }));
 
+  // Apple Pay domain verification (v0.3 wallets). Square issues this file per
+  // domain when the merchant registers the domain for Apple Pay on the web;
+  // its contents come from the APPLE_PAY_DOMAIN_ASSOCIATION env var. 404 when
+  // unconfigured — Apple Pay then stays unavailable, Google Pay is unaffected.
+  app.get('/.well-known/apple-developer-merchantid-domain-association', async (_req, reply) => {
+    if (!config.applePayDomainAssociation) return reply.code(404).send({ error: 'not configured' });
+    return reply.type('text/plain').send(config.applePayDomainAssociation);
+  });
+
   // Pretty URLs for the two frontends.
   app.get('/t/:token', async (_req, reply) => reply.sendFile('t/index.html'));
   app.get('/dashboard', async (_req, reply) => reply.sendFile('dashboard/index.html'));
@@ -111,6 +121,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(staffRoutes);
   await app.register(portalRoutes);
   await app.register(adminRoutes);
+  await app.register(onboardingRoutes);
   return app;
 }
 

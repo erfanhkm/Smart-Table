@@ -134,6 +134,22 @@ export async function customerRoutes(app: FastifyInstance) {
       posType === 'helcim' ? /^[A-Za-z0-9_-]{8,200}$/.test(nonce) :
       false;
     if (!ok) throw badRequest('invalid card token for this location');
+    // v0.3 wallets: the guest page may declare how the token was produced
+    // (Square Web Payments SDK card form, Apple Pay or Google Pay). Wallet
+    // tokens are Square cnon: tokens, so they pass the same validation above;
+    // the label only tells staff how the guest paid. Wallets are Square-only.
+    const method = body.payment_method;
+    if (method !== undefined && method !== null) {
+      if (method !== 'card' && method !== 'apple_pay' && method !== 'google_pay') {
+        throw badRequest('payment_method must be card | apple_pay | google_pay');
+      }
+      if (method !== 'card' && posType !== 'square') {
+        throw badRequest('wallet payments are only available at Square locations');
+      }
+      if (method !== 'card' && !p.payerLabel) {
+        p.payerLabel = method === 'apple_pay' ? 'Apple Pay' : 'Google Pay';
+      }
+    }
     return payCheck({ checkRef: ref, ...p, source: { kind: 'card', nonce } });
   });
 
