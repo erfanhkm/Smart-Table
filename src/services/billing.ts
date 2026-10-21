@@ -319,7 +319,7 @@ export async function switchPlan(locationId: string, target: BillingPlan): Promi
 
 export interface HistoryEntry {
   date: string;
-  kind: 'commission_fee' | 'subscription_invoice' | 'accrued_charge';
+  kind: 'commission_fee' | 'subscription_invoice' | 'accrued_charge' | 'fee_reversal';
   description: string;
   amount_cents: number;
   currency: string;
@@ -335,13 +335,16 @@ export async function billingHistory(locationId: string): Promise<HistoryEntry[]
      WHERE location_id = $1 ORDER BY created_at DESC LIMIT 50`,
     [locationId],
   );
+  const pct = `${acct.commission_bps / 100}%`;
   const out: HistoryEntry[] = ledger.rows.map((r) => ({
     date: new Date(r.created_at).toISOString(),
-    kind: 'commission_fee' as const,
+    kind: (r.method === 'reversal' ? 'fee_reversal' : 'commission_fee') as HistoryEntry['kind'],
     description:
-      r.method === 'square_app_fee'
-        ? `2% fee on a $${(r.charge_cents / 100).toFixed(2)} guest payment (taken by Square)`
-        : `2% fee on a $${(r.charge_cents / 100).toFixed(2)} guest payment (accrued)`,
+      r.method === 'reversal'
+        ? 'Commission given back — guest payment was refunded'
+        : r.method === 'square_app_fee'
+          ? `${pct} fee on a $${(r.charge_cents / 100).toFixed(2)} guest payment (taken by Square)`
+          : `${pct} fee on a $${(r.charge_cents / 100).toFixed(2)} guest payment (accrued)`,
     amount_cents: r.fee_cents,
     currency: r.currency,
     status: r.status,
@@ -387,15 +390,27 @@ export async function platformCardConfig(): Promise<{ provider: string; publisha
  * only after a successful charge).
  */
 export async function processAccruedFees(): Promise<{ locationsCharged: number; totalCents: number }> {
-  const due = await query<{ location_id: string; total: string; oldest: string }>(
-    `SELECT location_id, SUM(fee_cents) AS total, MIN(created_at) AS oldest
-     FROM fee_ledger WHERE status = 'accrued'
-     GROUP BY location_id
-     HAVING SUM(fee_cents) >= 5000 OR MIN(created_at) <= now() - interval '25 days'`,
+  // Due-selection computed in JS (portable across Postgres/pg-mem, which
+  // cannot plan the compound HAVING this used to use): a location is due
+  // when its net accrued balance is positive AND (≥ $50 or oldest fee ≥ 25
+  // days old). Reversal rows (negative) net into the balance.
+  const accrued = await query<{ location_id: string; fee_cents: number; created_at: string }>(
+    `SELECT location_id, fee_cents, created_at FROM fee_ledger WHERE status = 'accrued'`,
   );
+  const byLocation = new Map<string, { total: number; oldest: string }>();
+  for (const r of accrued.rows) {
+    const cur = byLocation.get(r.location_id) ?? { total: 0, oldest: r.created_at };
+    cur.total += r.fee_cents;
+    if (r.created_at < cur.oldest) cur.oldest = r.created_at;
+    byLocation.set(r.location_id, cur);
+  }
+  const cutoff = new Date(Date.now() - 25 * 86400000).toISOString();
+  const due = [...byLocation.entries()]
+    .filter(([, v]) => v.total > 0 && (v.total >= 5000 || v.oldest <= cutoff))
+    .map(([location_id, v]) => ({ location_id, total: v.total, oldest: v.oldest }));
   let locationsCharged = 0;
   let totalCents = 0;
-  for (const row of due.rows) {
+  for (const row of due) {
     try {
       const acct = await ensureBillingAccount(row.location_id);
       if (!acct.square_card_id || !acct.square_customer_id) continue;

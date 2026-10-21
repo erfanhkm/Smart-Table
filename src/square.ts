@@ -210,6 +210,37 @@ export async function retrieveOrder(orderId: string, token?: string): Promise<{ 
   return sq('GET', `/v2/orders/${pathSeg(orderId, 'order_id')}`, undefined, token);
 }
 
+export async function retrievePayment(paymentId: string, token?: string): Promise<{ payment: SquarePayment }> {
+  return sq('GET', `/v2/payments/${pathSeg(paymentId, 'payment_id')}`, undefined, token);
+}
+
+/** Cancel (void) an APPROVED payment that has not been captured yet.
+ *  Releases the guest's authorization hold; all-or-nothing per payment. */
+export async function cancelPayment(paymentId: string, token?: string): Promise<{ payment: SquarePayment }> {
+  return sq('POST', `/v2/payments/${pathSeg(paymentId, 'payment_id')}/cancel`, {}, token);
+}
+
+export interface CreateRefundInput {
+  paymentId: string;
+  amountCents: number;
+  currency: string;
+  idempotencyKey?: string;
+  reason?: string;
+}
+
+/** Refund (part of) a completed card payment. Square also returns the
+ *  proportional share of any application fee with the refund. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function createRefund(input: CreateRefundInput, token?: string): Promise<{ refund: any }> {
+  assertSquareId(input.paymentId, 'payment_id');
+  return sq('POST', '/v2/refunds', {
+    idempotency_key: input.idempotencyKey ?? randomUUID(),
+    payment_id: input.paymentId,
+    amount_money: { amount: input.amountCents, currency: input.currency },
+    reason: input.reason ? input.reason.slice(0, 192) : undefined,
+  }, token);
+}
+
 export async function searchOpenOrders(locationId: string, token?: string): Promise<{ orders?: SquareOrder[] }> {
   assertSquareId(locationId, 'location_id');
   return sq(

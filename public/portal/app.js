@@ -138,6 +138,20 @@ const PortalAPI = {
     if (!res.ok) throw new Error('Could not load check.');
     return readJson(res);
   },
+  async getCheckPayments(checkRef) {
+    const res = await request(`/api/portal/checks/${encodeURIComponent(checkRef)}/payments`);
+    if (!res.ok) throw new Error('Could not load payments.');
+    return readJson(res);
+  },
+  /** Raw outcome for the idempotent refund flow: { ok, status, error, code, data }. Never throws on HTTP errors. */
+  async refundPaymentRaw(paymentId, amountCents, idempotencyKey) {
+    const res = await request(`/api/portal/payments/${encodeURIComponent(paymentId)}/refund`, {
+      method: 'POST',
+      body: { amount_cents: amountCents, idempotency_key: idempotencyKey },
+    });
+    const data = await readJson(res);
+    return { ok: res.ok, status: res.status, error: (data && data.error) || null, code: (data && data.code) || null, data };
+  },
   /** Raw outcome for the idempotent cash flow: { ok, status, error, code, data }. Never throws on HTTP errors. */
   async recordCashPaymentRaw(squareOrderId, amountCents, tipCents, idempotencyKey) {
     const res = await request(`/api/checks/${encodeURIComponent(squareOrderId)}/record-external-payment`, {
@@ -737,7 +751,114 @@ async function renderOrderDetail(tableId) {
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-sm btn-primary" data-cash="${esc(t.id)}">Record Cash</button>
       <button class="btn btn-sm" data-freethis="${esc(t.id)}">Free Table</button>
-    </div>`;
+    </div>
+    <div id="order-payments"></div>`;
+  loadOrderPayments(t.checkId);
+}
+
+/* ---- refunds --------------------------------------------------------- */
+/* Our own payment rows for this check, each with its refundable          */
+/* remainder and a Refund action. Cash rows are listed too — the server   */
+/* answers those with a clear "refund at the till" message.               */
+async function loadOrderPayments(checkRef) {
+  const box = $('order-payments');
+  if (!box) return;
+  let data;
+  try {
+    data = await PortalAPI.getCheckPayments(checkRef);
+  } catch {
+    box.innerHTML = '';
+    return;
+  }
+  const rows = (data.payments || []).filter((p) => p.status === 'AUTHORIZED' || p.status === 'COMPLETED');
+  if (!rows.length) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML =
+    '<div style="margin-top:16px"><strong>Payments</strong></div>' +
+    rows
+      .map((p) => {
+        const total = p.amount_cents + p.tip_cents;
+        const label = p.payer_label || 'Payment';
+        const refunded = p.refunded_cents > 0 ? ` <span class="chip">refunded ${money(p.refunded_cents, p.currency || 'CAD')}</span>` : '';
+        const btn =
+          p.refundable_cents > 0
+            ? `<button class="btn btn-sm" data-refund="${esc(p.id)}" data-max="${p.refundable_cents}" data-cur="${esc(p.currency || 'CAD')}">Refund</button>`
+            : '<span class="chip">fully refunded</span>';
+        return `<div class="bill-line"><span>${esc(label)} — ${money(total, p.currency || 'CAD')}${refunded}</span><span>${btn}</span></div>`;
+      })
+      .join('');
+  box.querySelectorAll('[data-refund]').forEach((b) =>
+    b.addEventListener('click', () => startRefund(b.dataset.refund, Number(b.dataset.max), b.dataset.cur, checkRef)),
+  );
+}
+
+/* One attempt = one idempotency key per (payment, amount), kept in
+   sessionStorage across unknown outcomes (same discipline as cash), so a
+   retry can never refund twice. The key is dropped on a confirmed success
+   or a confirmed rejection. */
+const REFUND_KEY = 'st_portal_refund';
+let refundBusy = false;
+
+function loadRefundAttempts() {
+  try {
+    return JSON.parse(sessionStorage.getItem(REFUND_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+function saveRefundAttempts(a) {
+  try {
+    sessionStorage.setItem(REFUND_KEY, JSON.stringify(a));
+  } catch { /* ignore */ }
+}
+function newRefundKey() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'k-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+}
+
+async function startRefund(paymentId, maxCents, currency, checkRef) {
+  if (refundBusy) return;
+  const raw = prompt(
+    `Refund amount — up to ${money(maxCents, currency)}. Leave unchanged for the full remaining amount:`,
+    (maxCents / 100).toFixed(2),
+  );
+  if (raw === null) return;
+  const cents = Math.round(parseFloat(String(raw).replace(',', '.')) * 100);
+  if (!Number.isFinite(cents) || cents <= 0 || cents > maxCents) {
+    alert('Enter a valid amount up to the refundable remainder.');
+    return;
+  }
+  if (!confirm(`Refund ${money(cents, currency)} to the guest's card?`)) return;
+  refundBusy = true;
+  try {
+    const attempts = loadRefundAttempts();
+    const sig = `${paymentId}|${cents}`;
+    if (!attempts[sig]) {
+      attempts[sig] = newRefundKey();
+      saveRefundAttempts(attempts);
+    }
+    const out = await PortalAPI.refundPaymentRaw(paymentId, cents, attempts[sig]);
+    if (out.ok) {
+      delete attempts[sig];
+      saveRefundAttempts(attempts);
+      alert('Refund sent to the guest\u2019s card.');
+    } else if (out.status === 409) {
+      // Unknown outcome — keep the key so a retry replays the same refund.
+      alert(out.error || 'This refund is still being confirmed. Check again in a moment before retrying.');
+    } else {
+      delete attempts[sig];
+      saveRefundAttempts(attempts);
+      alert(out.error || 'Refund failed.');
+    }
+  } catch {
+    alert('Network problem — the refund may or may not have gone through. Check the payment before retrying.');
+  } finally {
+    refundBusy = false;
+    const t = tablesCache.find((x) => x.checkId === checkRef);
+    if (t) renderOrderDetail(t.id);
+  }
 }
 
 /* ---- idempotent cash recording -------------------------------------- */
@@ -1017,17 +1138,13 @@ async function renderReports() {
     <div class="card"><div class="stat-num">${fmtDur(met.avg_waiter_response_secs)}</div><div class="stat-label">Avg waiter response · ${esc(label)}</div></div>
     <div class="card"><div class="stat-num">${met.open_calls ?? '—'}</div><div class="stat-label">Open waiter calls</div></div>`;
 
-  // Daily breakdown: demo data — the backend exposes aggregates only.
-  const rows = [
-    ['Oct 12', 42, 1840.50, 3.10],
-    ['Oct 11', 38, 1622.00, 2.85],
-    ['Oct 10', 45, 1975.25, 3.40],
-    ['Oct 9',  31, 1290.75, 2.60],
-    ['Oct 8',  40, 1718.00, 3.00],
-  ];
-  $('report-table-body').innerHTML = rows.map((r) =>
-    `<tr><td>${esc(r[0])}</td><td>${r[1]}</td><td>${money(Math.round(r[2] * 100), 'CAD')}</td><td>${money(Math.round(r[3] * 100), 'CAD')}</td></tr>`,
-  ).join('');
+  // Daily breakdown: real data from the metrics API (payments minus refunds).
+  const daily = Array.isArray(met.daily) ? met.daily : [];
+  $('report-table-body').innerHTML = daily.length
+    ? daily.map((r) =>
+        `<tr><td>${esc(new Date(`${r.date}T12:00:00`).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }))}</td><td>${r.checks}</td><td>${money(r.revenue_cents, 'CAD')}</td><td>${money(r.avg_tip_cents, 'CAD')}</td></tr>`,
+      ).join('')
+    : '<tr><td colspan="4">No settled payments in this range yet.</td></tr>';
 }
 
 /* ------------------------------------------------------------------ */
@@ -1138,12 +1255,12 @@ async function renderBilling() {
         </div>
       </div>
       <div class="card" style="${!isCommission ? 'outline:2px solid var(--accent)' : ''}">
-        <h4>Subscription ${!isCommission ? '· Current plan' : ''}</h4>
+        <h4>Base — Subscription ${!isCommission ? '· Current plan' : ''}</h4>
         <div class="stat-num" style="font-size:1.4rem">${price}/month</div>
         <div class="stat-label">Flat monthly fee charged to your card on file. No per-payment fees, ever.</div>
         ${subStatus}
         <div style="margin-top:12px">
-          <button class="btn" id="billing-plan-subscription" ${!isCommission ? 'disabled' : ''}>${!isCommission ? 'Current plan' : 'Switch to Subscription'}</button>
+          <button class="btn" id="billing-plan-subscription" ${!isCommission ? 'disabled' : ''}>${!isCommission ? 'Current plan' : 'Switch to Base'}</button>
         </div>
       </div>
     </div>
@@ -1153,7 +1270,7 @@ async function renderBilling() {
         ${st.has_card
           ? `<div class="stat-num" style="font-size:1.15rem">${esc(st.card_brand || 'Card')} •••• ${esc(st.card_last4 || '')}</div>
              <div class="stat-label">Used for the subscription plan and monthly fee collection.</div>`
-          : `<div class="stat-label">No card on file. Add one to use the Subscription plan.</div>`}
+          : `<div class="stat-label">No card on file. Add one to use the Base plan.</div>`}
         <div id="billing-card-form-wrap" style="margin-top:12px">
           <button class="btn" id="billing-card-toggle">${st.has_card ? 'Update card' : 'Add card'}</button>
           <div id="billing-card-form" style="display:none;margin-top:12px">
@@ -1167,8 +1284,12 @@ async function renderBilling() {
         <h4>This Month</h4>
         <div class="kv"><span class="k">Fees collected</span><span>${money(st.collected_this_month_cents, cur)}</span></div>
         <div class="kv"><span class="k">Fees accrued (unbilled)</span><span>${money(st.accrued_cents, cur)}</span></div>
-        <div class="kv"><span class="k">Plan</span><span>${esc(st.effective_plan)}</span></div>
+        <div class="kv"><span class="k">Plan</span><span>${isCommission ? 'Commission' : 'Base — Subscription'}</span></div>
       </div>
+    </div>
+    <div class="card" style="margin-bottom:16px;opacity:.85">
+      <h4>Pro — ${money(19900, cur)}/month <span class="chip" style="margin-left:8px">Coming soon</span></h4>
+      <div class="stat-label">For larger rooms and groups: multiple locations under one account, advanced analytics, your own branding on the guest page, loyalty, device health monitoring with priority replacement, and priority support. Pro is on its way — no action needed today.</div>
     </div>
     <div class="card">
       <h4>Billing History</h4>
@@ -1196,9 +1317,9 @@ async function renderBilling() {
 async function switchBillingPlan(plan, st) {
   if (billingBusy) return;
   if (plan === 'subscription') {
-    if (!st.has_card) { alert('Add a payment card first, then switch to the Subscription plan.'); return; }
-    if (!confirm(`Switch to the Subscription plan? Your card will be charged ${money(st.subscription_price_cents, st.currency)} today and monthly. Per-payment fees stop immediately.`)) return;
-  } else if (st.plan === 'subscription' && !confirm('Switch to the Commission plan? Your subscription stays active until the end of the paid period; the 2% per-payment fee starts after that.')) {
+    if (!st.has_card) { alert('Add a payment card first, then switch to the Base plan.'); return; }
+    if (!confirm(`Switch to the Base plan? Your card will be charged ${money(st.subscription_price_cents, st.currency)} today and monthly. Per-payment fees stop immediately.`)) return;
+  } else if (st.plan === 'subscription' && !confirm('Switch to the Commission plan? Your subscription stays active until the end of the paid period; the per-payment fee starts after that.')) {
     return;
   }
   billingBusy = true;
@@ -1228,6 +1349,7 @@ async function initBillingCardForm() {
     if (!res.ok || !cfg) throw new Error('Could not load the card form.');
     const env = cfg.extra.environment === 'sandbox' ? 'sandbox.' : '';
     await loadScriptOnce(`https://${env}web.squarecdn.com/v1/square.js`);
+    if (!window.Square) throw new Error('Could not load the secure card form — check your connection and try again.');
     const payments = window.Square.payments(cfg.publishableKey, cfg.extra.locationId);
     billingCardInstance = await payments.card();
     await billingCardInstance.attach('#billing-sq-card');

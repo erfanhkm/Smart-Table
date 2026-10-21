@@ -17,6 +17,7 @@ import { portalRoutes } from './routes/portal.js';
 import { adminRoutes } from './routes/admin.js';
 import { onboardingRoutes } from './routes/onboarding.js';
 import { billingRoutes } from './routes/billing.js';
+import { refundRoutes } from './routes/refunds.js';
 import { processAccruedFees } from './services/billing.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -177,6 +178,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(adminRoutes);
   await app.register(onboardingRoutes);
   await app.register(billingRoutes);
+  await app.register(refundRoutes);
 
   // v0.4 billing: collect accrued commission fees on a slow timer (the
   // processor itself decides what is due: >= $50 accrued, or oldest fee

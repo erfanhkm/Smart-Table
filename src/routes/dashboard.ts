@@ -20,6 +20,54 @@ function avgSeconds(pairs: Array<[string, string]>): number | null {
   return Math.round(total / pairs.length);
 }
 
+export interface DailyRow {
+  date: string; // YYYY-MM-DD (UTC)
+  checks: number;
+  revenue_cents: number; // payments that day minus refunds that day
+  avg_tip_cents: number; // average tip per settled check that day
+}
+
+/** Real per-day breakdown from the payments + refunds tables (aggregated
+ *  in JS for pg-mem/Postgres portability, like the rest of this file). */
+async function dailyBreakdown(locationId: string, sinceIso: string): Promise<DailyRow[]> {
+  const pays = await query<{ check_id: string; amount_cents: number; tip_cents: number; created_at: string }>(
+    `SELECT p.check_id, p.amount_cents, p.tip_cents, p.created_at
+     FROM payments p
+     JOIN checks c ON c.id = p.check_id
+     JOIN tables t ON t.id = c.table_id
+     WHERE t.location_id = $1 AND p.status IN ('AUTHORIZED', 'COMPLETED') AND p.created_at >= $2`,
+    [locationId, sinceIso],
+  );
+  const refs = await query<{ amount_cents: number; created_at: string }>(
+    `SELECT amount_cents, created_at FROM refunds
+     WHERE location_id = $1 AND status = 'COMPLETED' AND created_at >= $2`,
+    [locationId, sinceIso],
+  );
+  const byDay = new Map<string, { checks: Set<string>; revenue: number; tips: number }>();
+  const dayOf = (iso: string) => new Date(iso).toISOString().slice(0, 10);
+  for (const p of pays.rows) {
+    const d = dayOf(p.created_at);
+    if (!byDay.has(d)) byDay.set(d, { checks: new Set(), revenue: 0, tips: 0 });
+    const row = byDay.get(d)!;
+    row.checks.add(p.check_id);
+    row.revenue += p.amount_cents + p.tip_cents;
+    row.tips += p.tip_cents;
+  }
+  for (const r of refs.rows) {
+    const d = dayOf(r.created_at);
+    if (!byDay.has(d)) byDay.set(d, { checks: new Set(), revenue: 0, tips: 0 });
+    byDay.get(d)!.revenue -= r.amount_cents;
+  }
+  return [...byDay.entries()]
+    .map(([date, v]) => ({
+      date,
+      checks: v.checks.size,
+      revenue_cents: v.revenue,
+      avg_tip_cents: v.checks.size > 0 ? Math.round(v.tips / v.checks.size) : 0,
+    }))
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
 export async function dashboardRoutes(app: FastifyInstance) {
   app.get('/api/dashboard/overview', staffOnly, async (req) => {
     const { location_id } = req.query as { location_id?: string };
@@ -71,6 +119,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
       avg_waiter_response_secs: avgSeconds(responsePairs),
       answered_calls: responsePairs.length,
       open_calls: calls.length - responsePairs.length,
+      daily: await dailyBreakdown(location_id, since),
     };
   });
 }

@@ -143,32 +143,58 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // ---- All locations with per-location stats ----
+  // Aggregates computed per location with plain parameterized queries
+  // (portable across Postgres/pg-mem — correlated scalar subqueries that
+  // reference the outer row are not portable to pg-mem).
   app.get('/api/admin/locations', { onRequest: founderOnly }, async () => {
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
-    const r = await query(
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const locs = await query(
       `SELECT l.id, l.name, l.pos_type, l.currency, l.qr_ordering_enabled,
               l.loyalty_enabled, l.created_at,
-              b.plan AS billing_plan, b.subscription_status,
-              (SELECT COALESCE(SUM(f.fee_cents), 0)::bigint FROM fee_ledger f
-               WHERE f.location_id = l.id AND f.status IN ('collected','charged')
-               AND f.created_at >= $1) AS fees_this_month_cents,
-              (SELECT COALESCE(SUM(f.fee_cents), 0)::bigint FROM fee_ledger f
-               WHERE f.location_id = l.id AND f.status = 'accrued') AS fees_accrued_cents,
-              (SELECT COUNT(*)::int FROM tables t WHERE t.location_id = l.id) AS tables,
-              (SELECT COUNT(*)::int FROM checks c JOIN tables t ON t.id = c.table_id
-               WHERE t.location_id = l.id AND c.state = 'OPEN') AS open_checks,
-              (SELECT COALESCE(SUM(p.amount_cents + p.tip_cents), 0)::bigint FROM payments p
-               JOIN checks c ON c.id = p.check_id JOIN tables t ON t.id = c.table_id
-               WHERE t.location_id = l.id AND p.status IN ('AUTHORIZED','COMPLETED')
-               AND p.created_at > now() - interval '24 hours') AS revenue_24h_cents
+              b.plan AS billing_plan, b.subscription_status
        FROM locations l
        LEFT JOIN billing_accounts b ON b.location_id = l.id
        ORDER BY l.created_at DESC`,
-      [monthStart.toISOString()],
     );
-    return { locations: r.rows };
+    const out = [];
+    for (const l of locs.rows as any[]) {
+      const [feesMonth, feesAccrued, tbls, openChecks, revenue] = await Promise.all([
+        query(
+          `SELECT COALESCE(SUM(fee_cents), 0)::bigint AS total FROM fee_ledger
+           WHERE location_id = $1 AND status IN ('collected','charged') AND created_at >= $2`,
+          [l.id, monthStart.toISOString()],
+        ),
+        query(
+          `SELECT COALESCE(SUM(fee_cents), 0)::bigint AS total FROM fee_ledger
+           WHERE location_id = $1 AND status = 'accrued'`,
+          [l.id],
+        ),
+        query(`SELECT COUNT(*)::int AS n FROM tables WHERE location_id = $1`, [l.id]),
+        query(
+          `SELECT COUNT(*)::int AS n FROM checks c JOIN tables t ON t.id = c.table_id
+           WHERE t.location_id = $1 AND c.state = 'OPEN'`,
+          [l.id],
+        ),
+        query(
+          `SELECT COALESCE(SUM(p.amount_cents + p.tip_cents), 0)::bigint AS total FROM payments p
+           JOIN checks c ON c.id = p.check_id JOIN tables t ON t.id = c.table_id
+           WHERE t.location_id = $1 AND p.status IN ('AUTHORIZED','COMPLETED') AND p.created_at > $2`,
+          [l.id, dayAgo],
+        ),
+      ]);
+      out.push({
+        ...l,
+        fees_this_month_cents: Number(feesMonth.rows[0].total),
+        fees_accrued_cents: Number(feesAccrued.rows[0].total),
+        tables: tbls.rows[0].n,
+        open_checks: openChecks.rows[0].n,
+        revenue_24h_cents: Number(revenue.rows[0].total),
+      });
+    }
+    return { locations: out };
   });
 
   // ---- Recent payments across all locations ----

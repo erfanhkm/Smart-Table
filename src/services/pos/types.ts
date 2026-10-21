@@ -70,6 +70,23 @@ export interface PosPaymentResult {
   feeCollected?: boolean;
 }
 
+export interface RefundPaymentArgs {
+  /** POS-native payment id to refund (from PosPaymentResult.paymentId). */
+  paymentId: string;
+  amountCents: number;
+  currency: string;
+  idempotencyKey: string;
+  reason?: string;
+  token?: string;
+}
+
+export interface PosRefundResult {
+  /** POS-native refund id. */
+  refundId: string;
+  /** POS-native refund status (e.g. COMPLETED, PENDING, APPROVED). */
+  status: string;
+}
+
 /** Internal domain events produced from POS webhooks. */
 export type PosEventType = 'check.updated' | 'check.closed' | 'payment.recorded';
 
@@ -196,6 +213,13 @@ export interface PosAdapter {
    * card payments.
    */
   chargeCard?(args: ChargeCardArgs): Promise<PosPaymentResult>;
+  /**
+   * Refund (part of) a previously completed CARD payment. Optional: POS
+   * without it get a clear 400 from the refund service. Implementations
+   * must reject non-card tenders (cash/external money never moved through
+   * the POS, so there is nothing for it to give back).
+   */
+  refundPayment?(args: RefundPaymentArgs): Promise<PosRefundResult>;
   /**
    * Publishable card config for the guest browser SDK. Implement alongside
    * chargeCard. `card.publicToken` carries the merchant's publishable card

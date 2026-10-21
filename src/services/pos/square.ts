@@ -16,14 +16,17 @@
 //   state OPEN|COMPLETED|CANCELED -> OPEN|CLOSED|CANCELLED
 import {
   assertSquareId,
+  cancelPayment,
   createCatalogOrder,
   createPayment,
+  createRefund,
   exchangeOAuthCode,
   getMerchantProfile,
   listLocations,
   orderRemaining,
   payOrder,
   retrieveOrder,
+  retrievePayment,
   searchCatalogItems,
   searchOpenOrders,
   squareAuthorizeUrl,
@@ -45,6 +48,8 @@ import {
   PosMenuItem,
   PosOpenCheckSummary,
   PosPaymentResult,
+  PosRefundResult,
+  RefundPaymentArgs,
 } from './types.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -204,6 +209,57 @@ export const squareAdapter: PosAdapter = {
       return { paymentId: payment.id, remainingCents: 0, currency: d.currency, replayed: false, feeCollected };
     }
     return { paymentId: payment.id, remainingCents: d.remainingCents, currency: d.currency, replayed: false, feeCollected };
+  },
+
+  async refundPayment(args: RefundPaymentArgs): Promise<PosRefundResult> {
+    // Only real card payments can be refunded through Square: an EXTERNAL
+    // tender (cash recorded in the POS) never moved money through Square,
+    // so there is nothing for Square to give back — staff refund cash at
+    // the till. Verified against the payment object itself, not our rows.
+    const { payment } = await retrievePayment(args.paymentId, args.token);
+    if (!payment) throw new Error('payment not found in Square');
+    if (payment.source_type !== 'CARD') {
+      throw new Error('only card payments can be refunded here — cash is refunded at the till');
+    }
+    if (payment.status === 'COMPLETED') {
+      // Captured/settled: the Refunds API applies (partial allowed). Square
+      // also returns the proportional application fee with the refund.
+      const { refund } = await createRefund(
+        {
+          paymentId: args.paymentId,
+          amountCents: args.amountCents,
+          currency: args.currency,
+          idempotencyKey: args.idempotencyKey,
+          reason: args.reason,
+        },
+        args.token,
+      );
+      if (!refund?.id) throw new Error('Square refund creation failed');
+      return { refundId: String(refund.id), status: String(refund.status ?? 'PENDING') };
+    }
+    if (payment.status === 'APPROVED') {
+      // Authorized but not captured yet. Order-attached payments (our
+      // guest flow) are guaranteed-to-complete: Square will not cancel
+      // them, and the Refunds API will not touch them until they settle —
+      // which takes seconds. Refuse with a clear "try again shortly".
+      if (payment.order_id) {
+        throw new Error(
+          'this payment is still settling with Square (usually under a minute) — refunds open as soon as it settles; try again shortly',
+        );
+      }
+      // Standalone authorized payments can be VOIDED instead — but only
+      // in full; a partial give-back opens once the payment settles.
+      const total =
+        Number(payment.amount_money?.amount ?? 0) + Number(payment.tip_money?.amount ?? 0);
+      if (args.amountCents !== total) {
+        throw new Error(
+          'this payment has not settled yet — until it does, only a full void of the whole payment is possible (partial refunds open once it settles)',
+        );
+      }
+      await cancelPayment(args.paymentId, args.token);
+      return { refundId: args.paymentId, status: 'CANCELED' };
+    }
+    throw new Error(`payment is ${String(payment.status ?? 'unknown')} in Square and cannot be refunded`);
   },
 
   async getCardConfig(locationRef: string, _card: CardCredentials): Promise<CardPaymentConfig> {
