@@ -11,6 +11,8 @@ import { PosCheckDetail } from '../services/pos/types.js';
 import { CARD_NONCE_RE, parsePaymentBody, payCheck } from '../services/payments.js';
 import { sendReceiptEmail } from '../services/email.js';
 import { badRequest, httpError, notFound } from '../http.js';
+import { extractBearer, isValidStaffToken } from '../auth.js';
+import { getPortalUser } from './portal.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function billView(detail: PosCheckDetail, row: any) {
@@ -81,16 +83,34 @@ export async function customerRoutes(app: FastifyInstance) {
 
   // Bill detail for a check that has been linked to a table (arbitrary POS
   // checks are not readable here). :ref is the POS-native check reference.
-  // Review fix: require the table's QR token (?table_token=...) so sequential
-  // POS refs (e.g. Shopify numeric IDs) can't be enumerated across shops.
+  // Review fix: guests must present the table's QR token (?table_token=...)
+  // so sequential POS refs (e.g. Shopify numeric IDs) can't be enumerated
+  // across shops.
+  // v0.4.2 fix: the restaurant portal reads check detail with a staff/portal
+  // bearer token instead (Live Orders + Check Detail) — the QR-token-only
+  // rule broke every open check in the portal ("Unavailable — retry").
+  // Portal users are scoped to their own location, same as refunds.
   app.get('/api/checks/:ref', async (req) => {
     const ref = String((req.params as { ref: string }).ref ?? '');
     const tableToken = String((req.query as { table_token?: unknown }).table_token ?? '');
     const row = await loadCheckRow(ref);
     if (!row.table_id) throw notFound('check not found');
-    if (!tableToken) throw badRequest('table_token is required');
-    const tok = await query(`SELECT id FROM tables WHERE id = $1 AND qr_token = $2`, [row.table_id, tableToken]);
-    if (tok.rowCount === 0) throw notFound('check not found');
+    if (tableToken) {
+      const tok = await query(`SELECT id FROM tables WHERE id = $1 AND qr_token = $2`, [row.table_id, tableToken]);
+      if (tok.rowCount === 0) throw notFound('check not found');
+    } else {
+      const bearer = extractBearer(req.headers.authorization);
+      let allowed = !!bearer && isValidStaffToken(bearer);
+      if (!allowed && bearer) {
+        const user = await getPortalUser(bearer);
+        if (user) {
+          const t = await query<{ location_id: string }>(`SELECT location_id FROM tables WHERE id = $1`, [row.table_id]);
+          if (t.rows[0]?.location_id === user.location_id) allowed = true;
+          else throw notFound('check not found');
+        }
+      }
+      if (!allowed) throw badRequest('table_token is required');
+    }
     const ctx = await getCheckPos(row.id);
     const detail = await ctx.adapter.getCheckDetail(ctx.checkRef, ctx.token);
     return { ...billView(detail, row), pos_state: detail.state };

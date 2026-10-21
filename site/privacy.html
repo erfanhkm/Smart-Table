@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy | Smart Table</title>
+    <meta name="description" content="How Smart Table collects, uses, shares and protects personal information for restaurants and their guests. Guest card payments are processed by Square — full card numbers never touch Smart Table's servers.">
+    <meta name="robots" content="index, follow">
+    <meta name="author" content="Smart Table">
+    <meta name="geo.region" content="CA-BC">
+    <meta name="geo.placename" content="Vancouver">
+    <link rel="canonical" href="https://smarttablepay.com/privacy.html">
+    <meta name="theme-color" content="#0E1B2C">
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Smart Table">
+    <meta property="og:title" content="Privacy Policy — Smart Table">
+    <meta property="og:description" content="How Smart Table collects, uses, shares and protects personal information for restaurants and their guests.">
+    <meta property="og:url" content="https://smarttablepay.com/privacy.html">
+    <meta property="og:locale" content="en_CA">
+    <meta property="og:image" content="https://smarttablepay.com/og-image.jpg">
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Privacy Policy — Smart Table">
+    <meta name="twitter:description" content="How Smart Table collects, uses, shares and protects personal information for restaurants and their guests.">
+    <meta name="twitter:image" content="https://smarttablepay.com/og-image.jpg">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230E1B2C'/%3E%3Ctext x='50' y='70' font-size='54' text-anchor='middle' fill='%23F59E0B' font-family='sans-serif' font-weight='bold'%3ES%3C/text%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="dns-prefetch" href="https://static.cloudflareinsights.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --navy: #0E1B2C;
+            --navy-dark: #08101C;
+            --paper: #FAF8F4;
+            --card-bg: #FFFFFF;
+            --text-main: #1E293B;
+            --text-muted: #64748B;
+            --border: #E2E8F0;
+            --blue: #2F80ED;
+            --amber: #F59E0B;
+            --green: #16A34A;
+            --gold: #B45309;
+            --gold-hover: #92400E;
+            --gold-soft: #FEF3C7;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, system-ui, -apple-system, sans-serif; }
+        body { background: var(--paper); color: var(--text-main); line-height: 1.6; font-size: 1rem; }
+
+        :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+        .skip-link { position: absolute; left: -9999px; top: 0; background: var(--navy); color: #fff; padding: 10px 16px; z-index: 200; border-radius: 0 0 8px 0; }
+        .skip-link:focus { left: 0; }
+
+        /* Navigation */
+        header { background: var(--navy); color: white; padding: 18px 40px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(255,255,255,0.08); }
+        .brand { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.025em; display: flex; align-items: center; gap: 6px; text-decoration: none; color: white; }
+        .brand span { color: var(--amber); }
+        .nav-links { display: flex; align-items: center; gap: 30px; }
+        .nav-links a { color: #94A3B8; text-decoration: none; font-size: 0.95rem; font-weight: 500; transition: color 0.2s; }
+        .nav-links a:hover { color: white; }
+        .nav-cta { background: var(--gold); color: white; padding: 10px 20px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 0.95rem; transition: background 0.2s; white-space: nowrap; }
+        .nav-cta:hover { background: var(--gold-hover); }
+        .nav-login { color: #94A3B8; text-decoration: none; font-size: 0.95rem; font-weight: 500; white-space: nowrap; }
+        .nav-login:hover { color: white; }
+
+        @media(max-width: 900px) {
+            .nav-links { display: none; }
+            header .nav-cta { display: none; }
+            header { padding: 16px 20px; }
+        }
+
+        /* Mobile hamburger menu (pure CSS; no JS) */
+        .nav-toggle-input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+        .nav-toggle { display: none; cursor: pointer; padding: 8px 4px; }
+        .nav-toggle span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px; margin: 5px 0; }
+        .mobile-menu { display: none; }
+
+        @media(max-width: 900px) {
+            .nav-toggle { display: block; }
+            .nav-toggle-input:checked ~ .mobile-menu {
+                display: flex;
+                position: absolute;
+                top: 100%; left: 0; right: 0;
+                background: var(--navy);
+                flex-direction: column;
+                padding: 8px 20px 20px;
+                border-bottom: 1px solid rgba(255,255,255,0.08);
+                box-shadow: 0 12px 24px rgba(0,0,0,0.25);
+                z-index: 99;
+            }
+            .nav-toggle-input:checked ~ .mobile-menu a { color: #94A3B8; text-decoration: none; font-size: 1rem; font-weight: 500; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+            .nav-toggle-input:checked ~ .mobile-menu a:hover { color: #fff; }
+            .nav-toggle-input:checked ~ .mobile-menu .nav-cta { display: block; text-align: center; margin-top: 12px; padding: 12px 20px; border-bottom: none; }
+        }
+
+        /* Legal pages */
+        section { padding: 90px 20px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        .legal-hero { background: var(--navy); color: white; padding: 64px 20px 54px; text-align: center; }
+        .legal-hero h1 { font-size: clamp(2rem, 6vw, 2.8rem); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 12px; }
+        .legal-hero p { color: #94A3B8; max-width: 640px; margin: 0 auto; }
+        .legal-card { background: white; border: 1px solid var(--border); border-radius: 20px; padding: 45px; max-width: 850px; margin: 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.02); }
+        .legal-card .updated { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 26px; }
+        .legal-card h2 { font-size: 1.3rem; font-weight: 700; color: var(--navy); margin: 34px 0 12px; }
+        .legal-card h2:first-of-type { margin-top: 0; }
+        .legal-card p { margin-bottom: 14px; }
+        .legal-card ul { margin: 0 0 14px 22px; }
+        .legal-card li { margin-bottom: 7px; }
+        .legal-card a { color: var(--blue); }
+
+        /* Footer */
+        footer { background: var(--navy-dark); color: #94A3B8; padding: 50px 20px; text-align: center; font-size: 0.9rem; border-top: 1px solid rgba(255,255,255,0.08); }
+        .footer-content { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; align-items: center; }
+        .footer-contact-block { font-weight: 500; color: white; }
+        .footer-contact-block a { color: var(--amber); text-decoration: none; }
+
+        @media(max-width: 600px) {
+            header { padding: 14px 16px; }
+            section { padding: 56px 16px; }
+            .legal-card { padding: 26px 20px; }
+        }
+
+        @media (prefers-reduced-motion: no-preference) {
+            html { scroll-behavior: smooth; }
+        }
+    </style>
+<!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "50093eb2d5dc4982bad58e9e46723827"}'></script><!-- End Cloudflare Web Analytics -->
+</head>
+<body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <!-- Sticky Navigation -->
+    <header>
+        <a href="/" class="brand">Smart Table<span>.</span></a>
+        <nav class="nav-links" aria-label="Main">
+            <a href="/#product">Product</a>
+            <a href="/#device">Device</a>
+            <a href="/#roi">Savings</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#partner">Founding program</a>
+            <a href="/#faq">FAQ</a>
+        </nav>
+        <input type="checkbox" id="nav-toggle" class="nav-toggle-input">
+        <label for="nav-toggle" class="nav-toggle" aria-label="Menu"><span></span><span></span><span></span></label>
+        <nav class="mobile-menu" aria-label="Mobile">
+            <a href="/#product">Product</a>
+            <a href="/#device">Device</a>
+            <a href="/#roi">Savings</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#partner">Founding program</a>
+            <a href="/#faq">FAQ</a>
+            <a href="/#partner" class="nav-cta">Join the founding program</a>
+        </nav>
+        <a href="/#partner" class="nav-cta">Join the founding program</a>
+        <a href="https://portal.smarttablepay.com/portal" class="nav-login">Restaurant login</a>
+    </header>
+
+    <main id="main">
+    <div class="legal-hero">
+        <h1>Privacy Policy</h1>
+        <p>How Smart Table collects, uses, shares and protects personal information — for restaurants and their guests.</p>
+    </div>
+
+    <section>
+        <div class="container">
+            <div class="legal-card">
+                <p class="updated">Last updated: October 21, 2026</p>
+
+                <p>Smart Table (“Smart Table”, “we”, “us”) operates the website at smarttablepay.com and the Smart Table pay-at-the-table platform for restaurants in British Columbia, Canada. This policy describes the personal information we collect through our website and platform, why we collect it, who processes it for us, and the rights you have under Canada’s <em>Personal Information Protection and Electronic Documents Act</em> (PIPEDA).</p>
+                <p>Smart Table serves two groups: <strong>restaurants</strong> that use our platform, and <strong>guests</strong> who pay a restaurant’s bill through Smart Table. Guests never need an account to pay.</p>
+
+                <h2>1. Information we collect</h2>
+                <p><strong>From restaurants</strong></p>
+                <ul>
+                    <li>Account details for the restaurant’s portal users: email address, a securely hashed password, role, and the restaurant and location details the account is set up with (business name, locations, tables).</li>
+                    <li>Point-of-sale (POS) connection details, including access credentials for the POS connection, which are stored encrypted.</li>
+                    <li>Billing details: the plan the restaurant chooses, fee and subscription records, and — for a card on file — only the card’s brand, last four digits and a reference ID. The card itself is held by Square, not by us.</li>
+                    <li>Messages and applications sent to us, including through the forms on this website (see below).</li>
+                </ul>
+                <p><strong>From guests</strong></p>
+                <ul>
+                    <li>Check and order data from the restaurant’s POS: the table, the items on the check, totals, taxes and the payment status. This data originates with the restaurant’s POS system.</li>
+                    <li>Payment records: the amount paid, the tip, how the bill was split (equal, by items or custom), an optional name or label a guest enters when splitting a bill, and the payment reference Square returns to us.</li>
+                    <li>Card details are entered into Square’s secure payment form in the guest’s browser and go directly to Square. <strong>Full card numbers never reach, and are never stored on, Smart Table’s servers.</strong></li>
+                    <li>Optional items a guest may choose to provide: an email address to receive an emailed receipt; a star rating and optional written feedback for the restaurant; a phone number for a restaurant’s optional loyalty program — for loyalty we store only a one-way hash of the phone number together with a visit count, not the number itself.</li>
+                    <li>Service events connected to a table or check, such as a “call waiter” request and its timestamp, which staff use to run the floor.</li>
+                </ul>
+                <p><strong>From website visitors</strong></p>
+                <ul>
+                    <li>Information submitted through the forms on this website (founding-restaurant application and contact form): name, restaurant name, email address, optional phone number, city, number of tables, POS system and message.</li>
+                    <li>Aggregate website analytics: pages visited, approximate region and device type, measured with Cloudflare Web Analytics. It does not use cookies and does not track individuals across websites.</li>
+                </ul>
+
+                <h2>2. How we use this information</h2>
+                <ul>
+                    <li>To provide and operate the service: show guests their bill, process payments through Square, record payments back to the restaurant’s POS, run the restaurant’s live floor dashboard and metrics, process refunds that a restaurant initiates, email receipts, and operate loyalty where a restaurant enables it.</li>
+                    <li>To administer restaurant accounts and billing: apply plan fees, charge subscriptions, and keep billing records.</li>
+                    <li>To respond to applications, messages and support requests.</li>
+                    <li>To keep the platform secure, prevent duplicate or fraudulent transactions, troubleshoot and improve the service.</li>
+                    <li>To meet legal, tax and accounting obligations.</li>
+                </ul>
+                <p>We do not sell personal information.</p>
+
+                <h2>3. Who processes information for us</h2>
+                <p>We share personal information only as needed to run the service:</p>
+                <ul>
+                    <li><strong>Square</strong> — processes all card payments, holds cards on file, and runs subscription billing. Where a restaurant’s POS is Square, check and order data also comes from and returns to Square. Square handles this information under its own privacy policy and terms.</li>
+                    <li><strong>The restaurant’s POS provider</strong> — checks, menu items and orders are read from and recorded back to the restaurant’s own point-of-sale system.</li>
+                    <li><strong>Resend</strong> — delivers emailed receipts to guests who request one.</li>
+                    <li><strong>Formspree</strong> — receives the submissions from the forms on this website and delivers them to us.</li>
+                    <li><strong>Cloudflare</strong> — provides our website analytics, domain services and email routing.</li>
+                    <li><strong>Hosting and database providers</strong> — run the platform’s application and database on our behalf.</li>
+                    <li><strong>The restaurant a guest visited</strong> — a restaurant can see its own checks, payment records, guest feedback and loyalty visit counts in its portal. That information relates to its own guests’ visits.</li>
+                    <li><strong>Google</strong> — if a guest chooses to leave a public review, they are taken to Google and Google’s privacy policy applies there.</li>
+                </ul>
+                <p>Some of these providers may store or process information in the United States or other countries. While information is in another jurisdiction, it may be subject to that jurisdiction’s laws, including lawful access by its authorities. We may also disclose information if required by law, or to protect our rights, our users or the public.</p>
+
+                <h2>4. Cookies and browser storage</h2>
+                <p>Smart Table does not use advertising or cross-site tracking cookies, and our website analytics does not set cookies. Our guest pages and restaurant portal use your browser’s <em>session storage</em> — temporary storage that clears when the tab closes — for essential functions only: keeping a portal user signed in during a session and preventing a payment or order from being submitted twice.</p>
+
+                <h2>5. Retention</h2>
+                <p>We keep personal information only as long as reasonably necessary for the purposes described in this policy and to meet legal, tax and accounting requirements — payment and fee records, for example, are kept as business records. When a restaurant stops using Smart Table, it may ask us to delete its account data, subject to those requirements. Guests may contact us, or the restaurant they visited, about information connected to a visit.</p>
+
+                <h2>6. Security</h2>
+                <p>We protect information with safeguards appropriate to its sensitivity: encryption in transit (HTTPS), encrypted storage of POS access credentials, hashed passwords, and access limited to what is needed to operate the service. Guest and restaurant card data is handled by Square, a PCI DSS compliant payment processor, and never touches our servers in full. No system is perfectly secure, but we work to protect the information entrusted to us.</p>
+
+                <h2>7. Your rights</h2>
+                <p>Under PIPEDA, you may:</p>
+                <ul>
+                    <li>Request access to the personal information we hold about you;</li>
+                    <li>Ask us to correct information that is inaccurate or incomplete;</li>
+                    <li>Withdraw consent to our use of your information, subject to legal or contractual restrictions and reasonable notice;</li>
+                    <li>Ask questions or complain about how we handle personal information.</li>
+                </ul>
+                <p>Contact us at <a href="mailto:info@smarttablepay.com">info@smarttablepay.com</a> and we will respond within a reasonable time. If you are not satisfied with our response, you may contact the Office of the Privacy Commissioner of Canada or the Office of the Information and Privacy Commissioner for British Columbia.</p>
+
+                <h2>8. Email and Canada’s anti-spam law (CASL)</h2>
+                <p>If you submit a form on this website, we use your details to respond to your inquiry. We send marketing or product-update emails only to people who have consented to receive them, and every such email includes an unsubscribe option. Transactional messages — such as a receipt a guest requested, or billing notices to a restaurant — are part of providing the service and are not marketing.</p>
+
+                <h2>9. Children</h2>
+                <p>Smart Table is a business service for restaurants and their guests and is not directed at children. We do not knowingly collect personal information from children.</p>
+
+                <h2>10. Changes to this policy</h2>
+                <p>We may update this policy from time to time. Changes take effect when posted on this page, and we will update the “last updated” date above. For material changes, we will also note the change on our website or notify restaurant account holders by email where appropriate.</p>
+
+                <h2>11. Contact us</h2>
+                <p>Questions about this policy or your personal information: <a href="mailto:info@smarttablepay.com">info@smarttablepay.com</a> — Smart Table, Metro Vancouver, British Columbia, Canada.</p>
+            </div>
+        </div>
+    </section>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-content">
+            <div class="footer-contact-block">
+                QR code table payments for restaurants &nbsp;·&nbsp; Metro Vancouver, BC &nbsp;·&nbsp; <a href="mailto:info@smarttablepay.com">info@smarttablepay.com</a>
+            </div>
+            <p><a href="/privacy.html" style="color: #94A3B8; text-decoration: none;">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms.html" style="color: #94A3B8; text-decoration: none;">Terms of Service</a></p>
+            <p>&copy; 2026 smarttablepay · Metro Vancouver, BC</p>
+        </div>
+    </footer>
+
+</body>
+</html>

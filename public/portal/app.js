@@ -1,4 +1,4 @@
-/* Smart Table — Restaurant Portal (v0.4.1)
+/* Smart Table — Restaurant Portal (v0.4.2)
  * Served from /portal/app.js with a strict Content-Security-Policy
  * (no inline script). The network layer below has no DOM *rendering*
  * dependencies; it uses sessionStorage only for the auth token. */

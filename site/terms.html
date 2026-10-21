@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terms of Service | Smart Table</title>
+    <meta name="description" content="The terms that govern a restaurant's use of Smart Table: the service, plans and fees (2% commission or $99/month Base per location), Square payment processing, refunds, availability and liability.">
+    <meta name="robots" content="index, follow">
+    <meta name="author" content="Smart Table">
+    <meta name="geo.region" content="CA-BC">
+    <meta name="geo.placename" content="Vancouver">
+    <link rel="canonical" href="https://smarttablepay.com/terms.html">
+    <meta name="theme-color" content="#0E1B2C">
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Smart Table">
+    <meta property="og:title" content="Terms of Service — Smart Table">
+    <meta property="og:description" content="The terms that govern a restaurant's use of Smart Table: plans and fees, Square payment processing, refunds, availability and liability.">
+    <meta property="og:url" content="https://smarttablepay.com/terms.html">
+    <meta property="og:locale" content="en_CA">
+    <meta property="og:image" content="https://smarttablepay.com/og-image.jpg">
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Terms of Service — Smart Table">
+    <meta name="twitter:description" content="The terms that govern a restaurant's use of Smart Table: plans and fees, Square payment processing, refunds, availability and liability.">
+    <meta name="twitter:image" content="https://smarttablepay.com/og-image.jpg">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230E1B2C'/%3E%3Ctext x='50' y='70' font-size='54' text-anchor='middle' fill='%23F59E0B' font-family='sans-serif' font-weight='bold'%3ES%3C/text%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="dns-prefetch" href="https://static.cloudflareinsights.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --navy: #0E1B2C;
+            --navy-dark: #08101C;
+            --paper: #FAF8F4;
+            --card-bg: #FFFFFF;
+            --text-main: #1E293B;
+            --text-muted: #64748B;
+            --border: #E2E8F0;
+            --blue: #2F80ED;
+            --amber: #F59E0B;
+            --green: #16A34A;
+            --gold: #B45309;
+            --gold-hover: #92400E;
+            --gold-soft: #FEF3C7;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, system-ui, -apple-system, sans-serif; }
+        body { background: var(--paper); color: var(--text-main); line-height: 1.6; font-size: 1rem; }
+
+        :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+        .skip-link { position: absolute; left: -9999px; top: 0; background: var(--navy); color: #fff; padding: 10px 16px; z-index: 200; border-radius: 0 0 8px 0; }
+        .skip-link:focus { left: 0; }
+
+        /* Navigation */
+        header { background: var(--navy); color: white; padding: 18px 40px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(255,255,255,0.08); }
+        .brand { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.025em; display: flex; align-items: center; gap: 6px; text-decoration: none; color: white; }
+        .brand span { color: var(--amber); }
+        .nav-links { display: flex; align-items: center; gap: 30px; }
+        .nav-links a { color: #94A3B8; text-decoration: none; font-size: 0.95rem; font-weight: 500; transition: color 0.2s; }
+        .nav-links a:hover { color: white; }
+        .nav-cta { background: var(--gold); color: white; padding: 10px 20px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 0.95rem; transition: background 0.2s; white-space: nowrap; }
+        .nav-cta:hover { background: var(--gold-hover); }
+        .nav-login { color: #94A3B8; text-decoration: none; font-size: 0.95rem; font-weight: 500; white-space: nowrap; }
+        .nav-login:hover { color: white; }
+
+        @media(max-width: 900px) {
+            .nav-links { display: none; }
+            header .nav-cta { display: none; }
+            header { padding: 16px 20px; }
+        }
+
+        /* Mobile hamburger menu (pure CSS; no JS) */
+        .nav-toggle-input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+        .nav-toggle { display: none; cursor: pointer; padding: 8px 4px; }
+        .nav-toggle span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px; margin: 5px 0; }
+        .mobile-menu { display: none; }
+
+        @media(max-width: 900px) {
+            .nav-toggle { display: block; }
+            .nav-toggle-input:checked ~ .mobile-menu {
+                display: flex;
+                position: absolute;
+                top: 100%; left: 0; right: 0;
+                background: var(--navy);
+                flex-direction: column;
+                padding: 8px 20px 20px;
+                border-bottom: 1px solid rgba(255,255,255,0.08);
+                box-shadow: 0 12px 24px rgba(0,0,0,0.25);
+                z-index: 99;
+            }
+            .nav-toggle-input:checked ~ .mobile-menu a { color: #94A3B8; text-decoration: none; font-size: 1rem; font-weight: 500; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+            .nav-toggle-input:checked ~ .mobile-menu a:hover { color: #fff; }
+            .nav-toggle-input:checked ~ .mobile-menu .nav-cta { display: block; text-align: center; margin-top: 12px; padding: 12px 20px; border-bottom: none; }
+        }
+
+        /* Legal pages */
+        section { padding: 90px 20px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        .legal-hero { background: var(--navy); color: white; padding: 64px 20px 54px; text-align: center; }
+        .legal-hero h1 { font-size: clamp(2rem, 6vw, 2.8rem); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 12px; }
+        .legal-hero p { color: #94A3B8; max-width: 640px; margin: 0 auto; }
+        .legal-card { background: white; border: 1px solid var(--border); border-radius: 20px; padding: 45px; max-width: 850px; margin: 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.02); }
+        .legal-card .updated { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 26px; }
+        .legal-card h2 { font-size: 1.3rem; font-weight: 700; color: var(--navy); margin: 34px 0 12px; }
+        .legal-card h2:first-of-type { margin-top: 0; }
+        .legal-card p { margin-bottom: 14px; }
+        .legal-card ul { margin: 0 0 14px 22px; }
+        .legal-card li { margin-bottom: 7px; }
+        .legal-card a { color: var(--blue); }
+
+        /* Footer */
+        footer { background: var(--navy-dark); color: #94A3B8; padding: 50px 20px; text-align: center; font-size: 0.9rem; border-top: 1px solid rgba(255,255,255,0.08); }
+        .footer-content { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; align-items: center; }
+        .footer-contact-block { font-weight: 500; color: white; }
+        .footer-contact-block a { color: var(--amber); text-decoration: none; }
+
+        @media(max-width: 600px) {
+            header { padding: 14px 16px; }
+            section { padding: 56px 16px; }
+            .legal-card { padding: 26px 20px; }
+        }
+
+        @media (prefers-reduced-motion: no-preference) {
+            html { scroll-behavior: smooth; }
+        }
+    </style>
+<!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "50093eb2d5dc4982bad58e9e46723827"}'></script><!-- End Cloudflare Web Analytics -->
+</head>
+<body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <!-- Sticky Navigation -->
+    <header>
+        <a href="/" class="brand">Smart Table<span>.</span></a>
+        <nav class="nav-links" aria-label="Main">
+            <a href="/#product">Product</a>
+            <a href="/#device">Device</a>
+            <a href="/#roi">Savings</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#partner">Founding program</a>
+            <a href="/#faq">FAQ</a>
+        </nav>
+        <input type="checkbox" id="nav-toggle" class="nav-toggle-input">
+        <label for="nav-toggle" class="nav-toggle" aria-label="Menu"><span></span><span></span><span></span></label>
+        <nav class="mobile-menu" aria-label="Mobile">
+            <a href="/#product">Product</a>
+            <a href="/#device">Device</a>
+            <a href="/#roi">Savings</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#partner">Founding program</a>
+            <a href="/#faq">FAQ</a>
+            <a href="/#partner" class="nav-cta">Join the founding program</a>
+        </nav>
+        <a href="/#partner" class="nav-cta">Join the founding program</a>
+        <a href="https://portal.smarttablepay.com/portal" class="nav-login">Restaurant login</a>
+    </header>
+
+    <main id="main">
+    <div class="legal-hero">
+        <h1>Terms of Service</h1>
+        <p>The terms that govern a restaurant’s use of Smart Table — the service, plans and fees, payment processing and responsibilities.</p>
+    </div>
+
+    <section>
+        <div class="container">
+            <div class="legal-card">
+                <p class="updated">Last updated: October 21, 2026</p>
+
+                <p>These Terms of Service (the “Terms”) are an agreement between Smart Table (“Smart Table”, “we”, “us”) and the restaurant or business that creates an account or uses the Smart Table platform (the “Restaurant”, “you”). By creating an account or using the platform, you agree to these Terms. If you accept them on behalf of a business, you confirm you have authority to bind that business.</p>
+
+                <h2>1. The service</h2>
+                <p>Smart Table is a pay-at-the-table platform for restaurants. Each table has a QR code; guests scan it with their phone to view their check from the restaurant’s point-of-sale (POS) system, split and pay the bill by card in their browser, and optionally order from the POS menu, request a waiter, receive an emailed receipt, leave feedback, and join a restaurant’s loyalty program where the restaurant enables it. Payments are recorded back to the POS, and restaurant staff manage tables, payments and service from a live web portal.</p>
+                <p>The platform works with Square POS today. Additional POS integrations may be added over time. A tabletop device is planned; it is not yet available, and devices, when offered, will be sold separately on the terms presented at that time.</p>
+
+                <h2>2. Accounts</h2>
+                <ul>
+                    <li>You are responsible for your portal account, for keeping login credentials confidential, and for everything done under your account, including by your staff.</li>
+                    <li>You must keep your account and location information accurate, and keep your POS account connected and in good standing so the platform can read checks and record payments.</li>
+                </ul>
+
+                <h2>3. Plans and fees</h2>
+                <p>Each location is billed on one of two plans, selected in the portal. Prices are in Canadian dollars, before applicable taxes.</p>
+                <ul>
+                    <li><strong>Commission plan — 2% per payment, no monthly fee.</strong> We charge 2% of each guest card payment processed through Smart Table, calculated on the total the guest pays, including tip. Where supported, the fee is collected by Square at the time of the payment; otherwise it accrues and is charged to your card on file when accrued fees reach $50, or when the oldest accrued fee is 25 days old, whichever comes first. Cash payments recorded by staff carry no fee.</li>
+                    <li><strong>Base subscription — $99 per month per location.</strong> A flat monthly fee charged to your card on file through Square. While a paid subscription period is running, no per-payment commission applies.</li>
+                    <li><strong>Pro — $199 per month</strong> is shown on our website as coming soon. It is not currently offered, and nothing in these Terms sells it.</li>
+                </ul>
+                <p>You can switch plans or end a subscription for future periods at any time in the portal. Switching from Base to Commission takes effect at the end of the paid subscription period, so you are never charged both ways for the same days. Fees already collected or charged for a period are not refundable except where the law requires it. Your billing history, current plan and how each fee was charged are shown in the portal. If a charge to your card on file fails, we may retry it and may suspend paid features until outstanding fees are paid.</p>
+
+                <h2>4. Payment processing by Square</h2>
+                <p>All card payments — guest payments, subscription charges and fee collection — are processed by Square under Square’s own terms and privacy policy. Smart Table never receives or stores full card numbers. Settlement of guest payments to you, and any Square processing fees, are governed by your own agreement with Square; Square’s processing fees are separate from Smart Table’s fees. Smart Table does not process cash: cash payments are recorded by your staff in the portal for tracking, and the money itself never passes through us.</p>
+
+                <h2>5. Your responsibilities</h2>
+                <ul>
+                    <li><strong>Your POS, your data.</strong> Your menu, items, prices, taxes and check contents come from your POS system. Their accuracy — and the accuracy of what a guest is charged — is your responsibility.</li>
+                    <li><strong>Refunds.</strong> Whether to refund a guest is your decision. When you initiate a refund in the portal, we process it through Square back to the guest’s card; a refund of a payment that is still settling becomes available as soon as the payment settles. Cash is refunded at your till and recorded in your POS. When a card payment is refunded, the Smart Table commission on the refunded amount is returned to you proportionally.</li>
+                    <li><strong>Your guests and your legal duties.</strong> You are responsible for your service to guests, for taxes on your sales and their remittance, and for complying with the laws that apply to your business.</li>
+                    <li><strong>Acceptable use.</strong> You will not misuse the platform, interfere with its operation, attempt to access another restaurant’s data, or use it for anything unlawful.</li>
+                </ul>
+
+                <h2>6. Intellectual property and your data</h2>
+                <p>The Smart Table platform, website and branding belong to Smart Table. Your restaurant’s data — its locations, menus, checks and reports — remains yours. You give us the permission needed to use that data to operate the service for you, as described in our <a href="/privacy.html">Privacy Policy</a>.</p>
+
+                <h2>7. Availability — provided “as is”</h2>
+                <p>The service is provided “as is” and “as available”. We work to keep Smart Table running and secure, but we do not guarantee uninterrupted or error-free operation, and during our founding period features may change, be added or be removed as the platform develops. The service depends on third parties — including Square, your POS and internet connectivity — whose outages are outside our control.</p>
+
+                <h2>8. Limitation of liability</h2>
+                <p>To the maximum extent permitted by law: neither party is liable for indirect, incidental, special or consequential damages, or for lost profits or revenue, arising from the use of the service; and Smart Table’s total liability arising from the service is limited to the fees you paid to Smart Table in the three months before the event giving rise to the claim. Nothing in these Terms limits liability that cannot be limited under applicable law.</p>
+
+                <h2>9. Ending the service</h2>
+                <p>You may stop using Smart Table at any time and close your account by contacting us. We may suspend or end access if these Terms are breached or fees remain unpaid. Fees accrued before the end date remain payable. Sections that by their nature should survive — including fees, liability and governing law — survive the end of the service.</p>
+
+                <h2>10. Changes to these Terms</h2>
+                <p>We may update these Terms from time to time. We will post changes on this page with a new “last updated” date, and for material changes we will notify restaurant account holders by email or in the portal before the changes take effect. Continuing to use the service after changes take effect means you accept them.</p>
+
+                <h2>11. Governing law</h2>
+                <p>These Terms are governed by the laws of the Province of British Columbia and the federal laws of Canada applicable in British Columbia. Any dispute arising from these Terms or the service will be resolved in the courts located in British Columbia.</p>
+
+                <h2>12. Contact</h2>
+                <p>Questions about these Terms: <a href="mailto:info@smarttablepay.com">info@smarttablepay.com</a> — Smart Table, Metro Vancouver, British Columbia, Canada.</p>
+            </div>
+        </div>
+    </section>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-content">
+            <div class="footer-contact-block">
+                QR code table payments for restaurants &nbsp;·&nbsp; Metro Vancouver, BC &nbsp;·&nbsp; <a href="mailto:info@smarttablepay.com">info@smarttablepay.com</a>
+            </div>
+            <p><a href="/privacy.html" style="color: #94A3B8; text-decoration: none;">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms.html" style="color: #94A3B8; text-decoration: none;">Terms of Service</a></p>
+            <p>&copy; 2026 smarttablepay · Metro Vancouver, BC</p>
+        </div>
+    </footer>
+
+</body>
+</html>
