@@ -168,6 +168,10 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     reply.header('X-Content-Type-Options', 'nosniff').type('text/javascript').sendFile('portal/app.js'),
   );
 
+  // The portal subdomain's root used to 404 — send it to the portal login
+  // (owner ask, 2026-10-21: "لینک پرتال کار نمیکنه" was the bare root URL).
+  app.get('/', async (_req, reply) => reply.redirect('/portal'));
+
   await app.register(tableRoutes);
   await app.register(customerRoutes);
   await app.register(dashboardRoutes);
