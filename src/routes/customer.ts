@@ -10,7 +10,9 @@ import { getCachedMenu, getCheckPos, getLocationPos } from '../services/pos/cont
 import { PosCheckDetail } from '../services/pos/types.js';
 import { CARD_NONCE_RE, parsePaymentBody, payCheck } from '../services/payments.js';
 import { sendReceiptEmail } from '../services/email.js';
-import { badRequest, httpError, notFound } from '../http.js';
+import { raiseServiceAlert } from '../services/alerts.js';
+import { badRequest, conflict, httpError, notFound } from '../http.js';
+import { claimItem, listClaims, releaseAllClaims, releaseClaims, unclaimItem } from '../services/grouppay.js';
 import { extractBearer, isValidStaffToken } from '../auth.js';
 import { getPortalUser } from './portal.js';
 
@@ -65,7 +67,10 @@ export async function customerRoutes(app: FastifyInstance) {
       try {
         const ctx = await getCheckPos(row.id);
         const detail = await ctx.adapter.getCheckDetail(ctx.checkRef, ctx.token);
-        checks.push(billView(detail, row));
+        const view = billView(detail, row) as ReturnType<typeof billView> & { item_claims: unknown[] };
+        // Group Pay (idea 2): live item claims ride along with the bill poll.
+        view.item_claims = await listClaims(row.id);
+        checks.push(view);
       } catch {
         // Skip checks whose POS order vanished; don't break the whole page.
       }
@@ -114,6 +119,49 @@ export async function customerRoutes(app: FastifyInstance) {
     const ctx = await getCheckPos(row.id);
     const detail = await ctx.adapter.getCheckDetail(ctx.checkRef, ctx.token);
     return { ...billView(detail, row), pos_state: detail.state };
+  });
+
+  // ---- Group Pay (idea 2): item claims --------------------------------------
+  // Guests at the same table coordinate who pays what: claiming an item shows
+  // it as taken on every other phone at the table (via the bill poll), so the
+  // same dish is never paid twice. Guests authenticate with the table's QR
+  // token — the same rule as GET /api/checks/:ref above.
+  async function assertTableToken(ref: string, tableToken: string) {
+    const row = await loadCheckRow(ref);
+    if (!row.table_id) throw notFound('check not found');
+    const tok = await query(`SELECT id FROM tables WHERE id = $1 AND qr_token = $2`, [row.table_id, tableToken]);
+    if (tok.rowCount === 0) throw notFound('check not found');
+    return row;
+  }
+
+  function parseClaimBody(req: { body?: unknown }) {
+    const body = (req.body ?? {}) as { item_index?: unknown; fingerprint?: unknown; device_id?: unknown };
+    const itemIndex = Number(body.item_index);
+    if (!Number.isInteger(itemIndex) || itemIndex < 0 || itemIndex > 500) throw badRequest('item_index must be a non-negative integer');
+    if (typeof body.device_id !== 'string' || !body.device_id || body.device_id.length > 64) throw badRequest('device_id is required');
+    return { itemIndex, deviceId: body.device_id, fingerprint: body.fingerprint };
+  }
+
+  app.post('/api/checks/:ref/claims', async (req) => {
+    const ref = String((req.params as { ref: string }).ref ?? '');
+    const tableToken = String((req.query as { table_token?: unknown }).table_token ?? '');
+    if (!tableToken) throw badRequest('table_token is required');
+    const row = await assertTableToken(ref, tableToken);
+    const { itemIndex, deviceId, fingerprint } = parseClaimBody(req);
+    if (typeof fingerprint !== 'string' || !fingerprint || fingerprint.length > 300) throw badRequest('fingerprint is required');
+    const mine = await claimItem(row.id, itemIndex, fingerprint, deviceId);
+    if (!mine) throw conflict('that item was just claimed by someone else at your table', 'item_claimed');
+    return { ok: true };
+  });
+
+  app.delete('/api/checks/:ref/claims', async (req) => {
+    const ref = String((req.params as { ref: string }).ref ?? '');
+    const tableToken = String((req.query as { table_token?: unknown }).table_token ?? '');
+    if (!tableToken) throw badRequest('table_token is required');
+    const row = await assertTableToken(ref, tableToken);
+    const { itemIndex, deviceId } = parseClaimBody(req);
+    await unclaimItem(row.id, itemIndex, deviceId);
+    return { ok: true };
   });
 
   // Pay by card: full | equal | items | custom. See src/services/payments.ts.
@@ -170,13 +218,39 @@ export async function customerRoutes(app: FastifyInstance) {
         p.payerLabel = method === 'apple_pay' ? 'Apple Pay' : 'Google Pay';
       }
     }
-    return payCheck({ checkRef: ref, ...p, source: { kind: 'card', nonce } });
+    const result = await payCheck({ checkRef: ref, ...p, source: { kind: 'card', nonce } });
+    // Group Pay (idea 2): a successful payment releases claims — the payer's
+    // own claims in "items" mode; every claim when the whole bill was paid.
+    // Claims are coordination only: never fail a completed payment over them.
+    try {
+      if (p.mode === 'items') {
+        const dev = body.device_id;
+        if (typeof dev === 'string' && dev && dev.length <= 64) await releaseClaims(row.id, dev);
+      } else if (p.mode === 'full') {
+        await releaseAllClaims(row.id);
+      }
+    } catch { /* ignore */ }
+    return result;
   });
 
   // Guest calls the waiter from the web app (physical button comes with hardware).
   app.post('/api/tables/:id/call-waiter', async (req) => {
     const tableId = (req.params as { id: string }).id;
     await query(`INSERT INTO events(id, table_id, type) VALUES ($1,$2,'call_waiter')`, [randomUUID(), tableId]);
+    // Service Recovery (idea 1): 3+ calls from the same table within 10
+    // minutes means the guest feels ignored — raise an alert (deduped while
+    // one is open) so staff reach the table now, not at the next poll.
+    const t = await query(`SELECT location_id FROM tables WHERE id = $1`, [tableId]);
+    if (t.rowCount) {
+      const cutoff = new Date(Date.now() - 10 * 60 * 1000);
+      const recent = await query(
+        `SELECT COUNT(*) AS n FROM events WHERE table_id = $1 AND type = 'call_waiter' AND created_at > $2`,
+        [tableId, cutoff],
+      );
+      if (Number(recent.rows[0]?.n ?? 0) >= 3) {
+        await raiseServiceAlert({ locationId: t.rows[0].location_id, tableId, kind: 'waiter_repeat' });
+      }
+    }
     return { ok: true };
   });
 
@@ -205,6 +279,15 @@ export async function customerRoutes(app: FastifyInstance) {
       `INSERT INTO feedback(id, location_id, check_id, rating, comment) VALUES ($1,$2,$3,$4,$5)`,
       [randomUUID(), t.rows[0].location_id, c.rows[0]?.id ?? null, rating, comment],
     );
+    // Service Recovery (idea 1): a 1-3 star rating raises an instant alert so
+    // staff can reach the table BEFORE the guest leaves (and before a public
+    // review). Deduped while an alert for this table is still open.
+    if (rating <= 3) {
+      await raiseServiceAlert({
+        locationId: t.rows[0].location_id, tableId: t.rows[0].id,
+        checkId: c.rows[0]?.id ?? null, kind: 'low_rating', rating, comment,
+      });
+    }
     return {
       ok: true,
       // Frontend: 4-5 stars -> open this URL; otherwise show "thanks".

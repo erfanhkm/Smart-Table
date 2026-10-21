@@ -1,4 +1,4 @@
-/* Smart Table — Restaurant Portal (v0.5.0)
+/* Smart Table — Restaurant Portal (v0.6.0)
  * Served from /portal/app.js with a strict Content-Security-Policy
  * (no inline script). The network layer below has no DOM *rendering*
  * dependencies; it uses sessionStorage only for the auth token. */
@@ -118,6 +118,13 @@ const PortalAPI = {
     if (!res.ok) throw new Error('Could not load metrics.');
     return readJson(res);
   },
+  async exportExcel(days) {
+    const res = await request(
+      `/api/dashboard/export.xlsx?location_id=${encodeURIComponent(CONFIG.locationId)}&days=${encodeURIComponent(days || 7)}`,
+    );
+    if (!res.ok) throw new Error('Could not export the report.');
+    return res.blob();
+  },
   async getTables() {
     const res = await request(`/api/tables?location_id=${encodeURIComponent(CONFIG.locationId)}`);
     if (!res.ok) throw new Error('Could not load tables.');
@@ -164,6 +171,17 @@ const PortalAPI = {
   async ackCall(tableId) {
     const res = await request(`/api/tables/${encodeURIComponent(tableId)}/ack-call`, { method: 'POST' });
     if (!res.ok) throw new Error('Could not acknowledge the call.');
+    return readJson(res);
+  },
+  async getServiceAlerts() {
+    const res = await request(`/api/service-alerts?location_id=${encodeURIComponent(CONFIG.locationId)}`);
+    if (!res.ok) throw new Error('Could not load service alerts.');
+    const data = await readJson(res);
+    return (data && data.alerts) || [];
+  },
+  async resolveServiceAlert(id) {
+    const res = await request(`/api/service-alerts/${encodeURIComponent(id)}/resolve`, { method: 'POST' });
+    if (!res.ok) throw new Error('Could not resolve the alert.');
     return readJson(res);
   },
   async freeTable(tableId) {
@@ -494,6 +512,25 @@ async function renderOverview() {
     : '<p class="empty">No tables yet — add one from Floor &amp; Tables.</p>';
 
   renderCalls(oRes.waiter_calls || []);
+  renderServiceAlerts().catch(() => { /* alerts are best-effort; the overview must still render */ });
+}
+
+/* Service Recovery (idea 1): open alerts sit on top of the overview until a
+   staff member resolves them — the guest is still in the building. */
+async function renderServiceAlerts() {
+  const card = $('service-alerts-card');
+  if (!card) return;
+  const alerts = await PortalAPI.getServiceAlerts();
+  if (!alerts.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  $('service-alerts').innerHTML = alerts.map((a) => `
+    <div class="order-row">
+      <div class="grow">
+        <div class="tname">${a.kind === 'low_rating' ? '🚨' : '🔔'} ${esc(a.table_name || 'Table')}${a.kind === 'low_rating' && a.rating ? ` — ${a.rating}★ rating` : ' — repeated waiter calls'}</div>
+        <div class="meta">${a.comment ? esc(a.comment) + ' · ' : ''}${esc(timeAgo(a.created_at))} · go to the table now</div>
+      </div>
+      <button class="btn btn-sm" data-resolve-alert="${esc(a.id)}">Resolved</button>
+    </div>`).join('');
 }
 
 /* ------------------------------------------------------------------ */
@@ -1145,6 +1182,27 @@ async function renderReports() {
         `<tr><td>${esc(new Date(`${r.date}T12:00:00`).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }))}</td><td>${r.checks}</td><td>${money(r.revenue_cents, 'CAD')}</td><td>${money(r.avg_tip_cents, 'CAD')}</td></tr>`,
       ).join('')
     : '<tr><td colspan="4">No settled payments in this range yet.</td></tr>';
+
+  // Revenue by table (idea 5): floor heatmap + ranking. Intensity scales to
+  // the best table of the range; zero-revenue tables stay pale.
+  const tbl = Array.isArray(met.tables) ? met.tables : [];
+  const maxRev = Math.max(0, ...tbl.map((x) => x.revenue_cents));
+  $('report-table-heat').innerHTML = tbl.length
+    ? tbl.map((x) => {
+        const heat = maxRev > 0 ? Math.max(0, x.revenue_cents) / maxRev : 0;
+        const bg = heat > 0 ? `background:rgba(217,119,6,${(0.12 + heat * 0.55).toFixed(2)});` : '';
+        const top = maxRev > 0 && x.revenue_cents === maxRev && x.revenue_cents > 0;
+        return `<div class="floor-card" style="${bg}">
+          <span class="floor-card-head"><span class="floor-card-name">${esc(x.table_name)}${top ? ' ⭐' : ''}</span></span>
+          <span class="floor-card-body">${money(x.revenue_cents, 'CAD')} · ${x.checks} check${x.checks === 1 ? '' : 's'}</span>
+        </div>`;
+      }).join('')
+    : '<p class="empty">No tables yet.</p>';
+  $('report-tables-body').innerHTML = tbl.length
+    ? tbl.map((x) =>
+        `<tr><td>${esc(x.table_name)}</td><td>${money(x.revenue_cents, 'CAD')}</td><td>${x.checks}</td><td>${money(x.avg_bill_cents, 'CAD')}</td><td>${money(x.tips_cents, 'CAD')}</td><td>${x.share_pct}%</td></tr>`,
+      ).join('')
+    : '<tr><td colspan="6">No tables yet.</td></tr>';
 }
 
 /* ------------------------------------------------------------------ */
@@ -1610,6 +1668,14 @@ document.addEventListener('click', (e) => {
     return;
   }
 
+  const resAlert = e.target.closest('[data-resolve-alert]');
+  if (resAlert) {
+    PortalAPI.resolveServiceAlert(resAlert.dataset.resolveAlert)
+      .then(() => renderView(currentView))
+      .catch((err) => { if (!(err instanceof AuthExpired)) alert(err.message); });
+    return;
+  }
+
   const order = e.target.closest('[data-order]');
   if (order) { renderOrderDetail(order.dataset.order); return; }
 
@@ -1636,6 +1702,25 @@ $('btn-add-table').addEventListener('click', () => openModal('modal-table'));
 $('invite-staff').addEventListener('click', () => openModal('modal-invite'));
 $('btn-create-table').addEventListener('click', createTable);
 $('report-range').addEventListener('change', () => renderReports());
+$('export-excel').addEventListener('click', async () => {
+  const btn = $('export-excel');
+  const days = parseInt($('report-range').value, 10) || 7;
+  btn.disabled = true;
+  try {
+    const blob = await PortalAPI.exportExcel(days);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `smart-table-report-last-${days}-days.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) {
+    if (!(e instanceof AuthExpired)) alert(e.message);
+  }
+  btn.disabled = false;
+});
 
 $('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();

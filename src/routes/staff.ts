@@ -52,6 +52,48 @@ export async function staffRoutes(app: FastifyInstance) {
     return { feedback: r.rows };
   });
 
+  // Service Recovery (idea 1): open alerts for the location — a guest needs
+  // help NOW (1-3 star rating or repeated waiter calls). Portal-scoped like
+  // /api/feedback. Resolve once a staff member has been to the table.
+  app.get('/api/service-alerts', staffOnly, async (req) => {
+    const u = req.portalUser;
+    const { location_id, status } = req.query as { location_id?: string; status?: string };
+    let locId = location_id;
+    if (u) {
+      if (location_id && location_id !== u.location_id) throw badRequest('not your location');
+      locId = u.location_id;
+    }
+    if (!locId) throw badRequest('location_id is required');
+    const st = status === 'resolved' ? 'resolved' : 'open';
+    const r = await query(
+      `SELECT a.id, a.kind, a.rating, a.comment, a.status, a.created_at, a.resolved_at,
+              a.table_id, t.name AS table_name
+       FROM service_alerts a LEFT JOIN tables t ON t.id = a.table_id
+       WHERE a.location_id = $1 AND a.status = $2
+       ORDER BY a.created_at DESC LIMIT 50`,
+      [locId, st],
+    );
+    return { alerts: r.rows };
+  });
+
+  app.post('/api/service-alerts/:id/resolve', staffOnly, async (req) => {
+    const u = req.portalUser;
+    const id = (req.params as { id: string }).id;
+    const r = u
+      ? await query(
+          `UPDATE service_alerts SET status = 'resolved', resolved_at = now()
+           WHERE id = $1 AND location_id = $2 AND status = 'open' RETURNING id`,
+          [id, u.location_id],
+        )
+      : await query(
+          `UPDATE service_alerts SET status = 'resolved', resolved_at = now()
+           WHERE id = $1 AND status = 'open' RETURNING id`,
+          [id],
+        );
+    if (r.rowCount === 0) throw notFound('open alert not found');
+    return { ok: true, id: r.rows[0].id };
+  });
+
   // Toggle QR ordering for a location (owner opt-in).
   // Also: loyalty settings + Google review URL (v0.2 review/loyalty).
   app.patch('/api/locations/:id', staffOnly, async (req) => {

@@ -259,7 +259,7 @@ select.form-control { width: auto; margin-bottom: 0; }
       <div id="login-error" role="alert"></div>
       <button type="submit" id="login-btn">Sign In</button>
     </form>
-    <p class="login-hint">Use your owner credentials. v0.5.0</p>
+    <p class="login-hint">Use your owner credentials. v0.6.0</p>
   </div>
 </div>
 
@@ -275,7 +275,7 @@ select.form-control { width: auto; margin-bottom: 0; }
     <button class="nav-item" data-view="devices" aria-label="Devices, demo data" title="Devices (demo)"><span class="nav-emoji" aria-hidden="true">📟</span><span class="nav-label">Devices</span><span class="demo-pill">Demo</span></button>
     <button class="nav-item" data-view="billing" aria-label="Billing" title="Billing"><span class="nav-emoji" aria-hidden="true">💳</span><span class="nav-label">Billing</span></button>
     <button class="nav-item" data-view="settings" aria-label="Settings" title="Settings"><span class="nav-emoji" aria-hidden="true">⚙️</span><span class="nav-label">Settings</span></button>
-    <div class="sidebar-footer">Smart Table · v0.5.0<br>Hardware: planned device</div>
+    <div class="sidebar-footer">Smart Table · v0.6.0<br>Hardware: planned device</div>
   </nav>
 
   <div class="main">
@@ -297,6 +297,10 @@ select.form-control { width: auto; margin-bottom: 0; }
           </div>
           <p class="inline-note">Three steps and you're live — connect your POS, verify your menu, add your tables. No setup call needed.</p>
           <div id="onboarding-steps"></div>
+        </div>
+        <div class="card" id="service-alerts-card" style="display:none;margin-bottom:16px;border:2px solid #DC2626">
+          <h4>🚨 Service alerts — a guest needs help now</h4>
+          <div id="service-alerts"></div>
         </div>
         <div class="grid grid-4" id="overview-stats" style="margin-bottom:16px"></div>
         <div class="grid" style="grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px" id="overview-split">
@@ -344,7 +348,7 @@ select.form-control { width: auto; margin-bottom: 0; }
             <option value="7" selected>Last 7 days</option>
             <option value="30">Last 30 days</option>
           </select>
-          <button class="btn" id="export-csv" disabled title="Coming soon">Export CSV — Soon</button>
+          <button class="btn" id="export-excel" title="Download all reports for the selected range as one Excel file">⬇ Export to Excel</button>
         </div>
         <div class="grid grid-4" id="report-cards" style="margin-bottom:16px"></div>
         <div class="card">
@@ -353,6 +357,16 @@ select.form-control { width: auto; margin-bottom: 0; }
           <table class="data-table">
             <thead><tr><th>Date</th><th>Checks</th><th>Revenue</th><th>Avg Tip</th></tr></thead>
             <tbody id="report-table-body"></tbody>
+          </table>
+          </div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <div class="badge-row"><h4 style="margin:0">Revenue by Table</h4><span style="flex:1"></span><span class="inline-note">Darker = more revenue in this range</span></div>
+          <div class="floor-grid" id="report-table-heat" style="margin-bottom:16px"></div>
+          <div class="report-table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Table</th><th>Revenue</th><th>Settled checks</th><th>Avg bill</th><th>Tips</th><th>Share</th></tr></thead>
+            <tbody id="report-tables-body"></tbody>
           </table>
           </div>
         </div>

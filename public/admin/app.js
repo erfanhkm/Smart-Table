@@ -1,4 +1,4 @@
-// Smart Table — Founder Admin (v0.5.0)
+// Smart Table — Founder Admin (v0.6.0)
 (function () {
   const $ = (id) => document.getElementById(id);
   const TOKEN_KEY = 'st_admin_token';
