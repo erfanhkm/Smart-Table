@@ -7,7 +7,7 @@
 //  3. Subscription plan: no app fee on the payment, no ledger row.
 //  4. Square definitively rejecting the fee: the adapter retries once
 //     without the fee (guest still pays) and the fee accrues instead.
-//  5. Billing routes: auth required, defaults are commission/2%/$49,
+//  5. Billing routes: auth required, defaults are commission/2%/$99,
 //     switching to subscription without a card is a 400.
 //
 // Run: PG_MEM=1 npx tsx --test tests/billing.test.ts
@@ -110,11 +110,11 @@ describe('v0.4 billing', () => {
     assert.equal(feeFor(10000, 0), 0);
   });
 
-  it('defaults: commission plan at 2%, $49 subscription price', async () => {
+  it('defaults: commission plan at 2%, $99 subscription price', async () => {
     const acct = await ensureBillingAccount(LOC);
     assert.equal(acct.plan, 'commission');
     assert.equal(acct.commission_bps, 200);
-    assert.equal(acct.subscription_price_cents, 4900);
+    assert.equal(acct.subscription_price_cents, 9900);
   });
 
   it('commission + Square: payment carries the 2% app fee; ledger collected', async () => {
@@ -203,7 +203,7 @@ describe('v0.4 billing routes', () => {
     const body = JSON.parse(r.body);
     assert.equal(body.effective_plan, 'commission');
     assert.equal(body.commission_percent, 2);
-    assert.equal(body.subscription_price_cents, 4900);
+    assert.equal(body.subscription_price_cents, 9900);
     assert.equal(body.has_card, false);
   });
 

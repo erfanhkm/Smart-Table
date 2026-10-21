@@ -57,7 +57,7 @@ export interface BillingAccount {
 }
 
 export const DEFAULT_COMMISSION_BPS = 200; // 2.00%
-export const DEFAULT_SUBSCRIPTION_PRICE_CENTS = 4900; // $49.00 — placeholder price, change per account
+export const DEFAULT_SUBSCRIPTION_PRICE_CENTS = 9900; // $99.00/mo — Base plan price (Erfan, 2026-10-21); per-account adjustable
 
 /** 2% of the charged amount (amount + tip), rounded to the nearest cent; never negative, never the whole charge. */
 export function feeFor(chargeCents: number, bps: number): number {
@@ -68,8 +68,8 @@ export function feeFor(chargeCents: number, bps: number): number {
 
 export async function ensureBillingAccount(locationId: string): Promise<BillingAccount> {
   await query(
-    `INSERT INTO billing_accounts(location_id) VALUES ($1) ON CONFLICT (location_id) DO NOTHING`,
-    [locationId],
+    `INSERT INTO billing_accounts(location_id, subscription_price_cents) VALUES ($1, $2) ON CONFLICT (location_id) DO NOTHING`,
+    [locationId, DEFAULT_SUBSCRIPTION_PRICE_CENTS],
   );
   const r = await query<BillingAccount>(`SELECT * FROM billing_accounts WHERE location_id = $1`, [locationId]);
   return r.rows[0];

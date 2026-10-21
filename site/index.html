@@ -72,7 +72,7 @@
             { "@type": "Question", "name": "Does it replace our POS?", "acceptedAnswer": { "@type": "Answer", "text": "No — today it works with Square. It reads your open checks and records payments back." } },
             { "@type": "Question", "name": "Do guests need an app?", "acceptedAnswer": { "@type": "Answer", "text": "No — everything happens in the phone browser." } },
             { "@type": "Question", "name": "What about cash?", "acceptedAnswer": { "@type": "Answer", "text": "Staff record cash payments from the dashboard." } },
-            { "@type": "Question", "name": "What does it cost?", "acceptedAnswer": { "@type": "Answer", "text": "A device purchase plus a subscription. Founding pricing is set one-on-one — talk to us." } },
+            { "@type": "Question", "name": "What does it cost?", "acceptedAnswer": { "@type": "Answer", "text": "Two options: 2% per card payment with no monthly fee, or a flat $99/month per location with no per-payment fee. A one-time device purchase applies per table. A Pro plan at $199/month is coming soon." } },
             { "@type": "Question", "name": "When is it available?", "acceptedAnswer": { "@type": "Answer", "text": "We're onboarding founding restaurants across Metro Vancouver now. The software works with Square today; the tabletop device is planned next, and founding restaurants get first units." } }
           ]
         }
@@ -218,6 +218,19 @@
         .pricing-box { background: white; border: 1px solid var(--border); border-radius: 24px; padding: 50px; text-align: center; max-width: 750px; margin: 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.03); }
         .pricing-box h3 { font-size: 2rem; color: var(--navy); font-weight: 800; margin-bottom: 16px; }
         .pricing-box p { color: var(--text-muted); font-size: 1.05rem; margin-bottom: 30px; }
+        .pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; max-width: 1080px; margin: 0 auto; align-items: stretch; }
+        @media(max-width: 900px) { .pricing-grid { grid-template-columns: 1fr; max-width: 520px; } }
+        .plan-card { background: white; border: 1px solid var(--border); border-radius: 24px; padding: 38px 30px; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.03); }
+        .plan-card.featured { border: 2px solid var(--gold); }
+        .plan-card.soon { background: var(--paper); box-shadow: none; }
+        .plan-card h3 { font-size: 1.35rem; color: var(--navy); font-weight: 800; margin: 10px 0 4px; }
+        .plan-price { font-size: 2.3rem; font-weight: 800; color: var(--navy); letter-spacing: -0.02em; }
+        .plan-price span { font-size: 1rem; font-weight: 600; color: var(--text-muted); }
+        .plan-sub { color: var(--text-muted); font-size: 0.95rem; margin-bottom: 20px; }
+        .plan-card ul { list-style: none; margin: 0 0 28px; padding: 0; flex: 1; }
+        .plan-card li { padding: 7px 0 7px 24px; position: relative; color: var(--text-muted); font-size: 0.98rem; }
+        .plan-card li::before { content: "✓"; position: absolute; left: 0; color: var(--gold-hover); font-weight: 800; }
+        .plan-note { text-align: center; color: var(--text-muted); margin-top: 26px; font-size: 0.95rem; }
 
         /* ROI calculator */
         .roi-box { background: white; border: 1px solid var(--border); border-radius: 24px; padding: 50px; max-width: 900px; margin: 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.03); }
@@ -594,14 +607,54 @@
         <div class="container">
             <div class="section-header">
                 <h2>Pricing</h2>
-                <p>Founding pricing is set one-on-one.</p>
+                <p>Two ways to pay — pick the one that fits your restaurant. Prices in CAD, per location. Plus a one-time device purchase per table.</p>
             </div>
-            <div class="pricing-box">
-                <div class="pricing-badge">Founding program</div>
-                <h3>Planned: one device per table, one simple subscription.</h3>
-                <p>Planned model: a one-time device purchase plus a monthly plan. Today the software runs with Square — it reads your open checks and records payments back. Final pricing is confirmed when you join.</p>
-                <a href="#partner" class="btn-primary">Apply as a founding restaurant</a>
+            <div class="pricing-grid">
+                <div class="plan-card">
+                    <div class="pricing-badge">Pay as you go</div>
+                    <h3>Commission</h3>
+                    <div class="plan-price">2% <span>per payment</span></div>
+                    <p class="plan-sub">No monthly fee. We only earn when your guests pay at the table.</p>
+                    <ul>
+                        <li>2% of each card payment made through Smart Table</li>
+                        <li>No fixed monthly cost — ideal for trying it out</li>
+                        <li>Pay at the table, bill splitting and tips</li>
+                        <li>Review capture (happy guests go to Google)</li>
+                        <li>Email and print receipts</li>
+                    </ul>
+                    <a href="#partner" class="btn-primary">Get started</a>
+                </div>
+                <div class="plan-card featured">
+                    <div class="pricing-badge">Available now</div>
+                    <h3>Base</h3>
+                    <div class="plan-price">$99 <span>/ month</span></div>
+                    <p class="plan-sub">One flat monthly price. No per-payment commission, ever.</p>
+                    <ul>
+                        <li>Unlimited table payments — no 2% fee</li>
+                        <li>Everything in Commission, plus QR ordering</li>
+                        <li>Owner dashboard and sales reporting</li>
+                        <li>Less than one server shift a month</li>
+                        <li>Switch plans any time from your portal</li>
+                    </ul>
+                    <a href="#partner" class="btn-primary">Get started</a>
+                </div>
+                <div class="plan-card soon">
+                    <div class="pricing-badge">Coming soon</div>
+                    <h3>Pro</h3>
+                    <div class="plan-price">$199 <span>/ month</span></div>
+                    <p class="plan-sub">For larger rooms and restaurant groups. Pro is on its way.</p>
+                    <ul>
+                        <li>Multiple locations under one account</li>
+                        <li>Advanced analytics — per table, per server, peak hours</li>
+                        <li>Your own branding on the guest page</li>
+                        <li>Loyalty program included</li>
+                        <li>Device health monitoring and priority replacement</li>
+                        <li>On-site setup, staff training and priority support</li>
+                    </ul>
+                    <a href="#partner" class="btn-primary">Join the waitlist</a>
+                </div>
             </div>
+            <p class="plan-note">Founding restaurants across Metro Vancouver are onboarding now — <a href="#partner">apply here</a> and we'll set your pricing up with you.</p>
         </div>
     </section>
 
@@ -711,7 +764,7 @@
                 </div>
                 <div class="faq-item">
                     <h3>What does it cost?</h3>
-                    <p>A device purchase plus a subscription. Founding pricing is set one-on-one — talk to us.</p>
+                    <p>Two options: 2% per card payment with no monthly fee, or a flat $99/month per location with no per-payment fee. A one-time device purchase applies per table. A Pro plan at $199/month is coming soon.</p>
                 </div>
                 <div class="faq-item">
                     <h3>When is it available?</h3>
