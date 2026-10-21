@@ -153,11 +153,15 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // Restaurant portal: strict CSP (the page's script is external; styles are
   // inline in <style> and style="" attributes, so style-src allows 'unsafe-inline'
   // — safe for styles, unlike scripts), not framable — it has Record Cash / Free Table buttons.
+  // Square is allowlisted for the Billing "Add card" form (Web Payments SDK:
+  // script + card iframe + tokenization calls) — without it the SDK script was
+  // CSP-blocked and the card form silently never rendered (bug fix 2026-10-21).
+  // Same Square hosts as the guest page above, which is proven in production.
   app.get('/portal', async (_req, reply) =>
     reply
       .header(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+        "default-src 'self'; script-src 'self' https://*.squarecdn.com https://*.squareup.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://*.squarecdn.com https://*.squareup.com; frame-src https://*.squarecdn.com https://*.squareup.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
       )
       .header('X-Frame-Options', 'DENY')
       .header('X-Content-Type-Options', 'nosniff')
