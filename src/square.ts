@@ -161,13 +161,15 @@ export interface CreatePaymentInput {
   autocomplete?: boolean;
   idempotencyKey?: string;
   externalSource?: string;
+  /** v0.4 billing: Smart Table's commission, taken by Square as an application fee at charge time. */
+  appFeeCents?: number;
 }
 
 export async function createPayment(input: CreatePaymentInput, token?: string): Promise<{ payment: SquarePayment }> {
   const {
     orderId, amountCents, currency, sourceId,
     tipCents = 0, autocomplete = false,
-    idempotencyKey = randomUUID(), externalSource,
+    idempotencyKey = randomUUID(), externalSource, appFeeCents,
   } = input;
   assertSquareId(orderId, 'order_id');
   if (typeof sourceId !== 'string' || sourceId.length === 0 || sourceId.length > 255) {
@@ -185,7 +187,8 @@ export async function createPayment(input: CreatePaymentInput, token?: string): 
     amount_money: { amount: amountCents, currency },
     tip_money: tipCents > 0 ? { amount: tipCents, currency } : undefined,
     autocomplete,
-    app_fee_money: undefined,
+    app_fee_money:
+      appFeeCents !== undefined && appFeeCents > 0 ? { amount: appFeeCents, currency } : undefined,
     ...(sourceId === 'EXTERNAL'
       ? { external_details: { type: 'OTHER_GIFT_CARD', source: externalSource } }
       : {}),
@@ -256,4 +259,168 @@ export async function getMerchantProfile(token: string): Promise<{ merchant: Squ
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function listLocations(token: string): Promise<{ locations?: any[] }> {
   return sq('GET', '/v2/locations', undefined, token);
+}
+
+// ---- Platform billing (v0.4) ----------------------------------------------
+// These calls act on OUR OWN Square account (the platform), never on a
+// merchant's: restaurants are OUR customers here. They therefore always use
+// the app-level token (requireSquareToken) and deliberately accept no
+// per-merchant token parameter.
+// API shapes verified live against the sandbox on 2026-10-21: plan +
+// plan-variation via Catalog (STATIC phase pricing for Square-Version
+// 2024-12-18), customer via company_name, card on file via cnon: nonce,
+// subscription ACTIVE on create, cancel -> CANCELED with canceled_date.
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function platformLocation(): Promise<{ id: string; currency: string; name: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await sq('GET', '/v2/locations');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const loc = (data?.locations ?? []).find((l: any) => l?.status === 'ACTIVE') ?? data?.locations?.[0];
+  if (!loc?.id) throw new Error('platform Square account has no location');
+  return { id: String(loc.id), currency: String(loc.currency ?? 'CAD'), name: String(loc.name ?? '') };
+}
+
+/** Create the subscription plan + its monthly variation; returns the variation id (what subscriptions reference). */
+export async function createSubscriptionPlanVariation(
+  priceCents: number,
+  currency: string,
+): Promise<string> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const plan: any = await sq('POST', '/v2/catalog/object', {
+    idempotency_key: randomUUID(),
+    object: {
+      type: 'SUBSCRIPTION_PLAN',
+      id: '#smart-table-plan',
+      subscription_plan_data: { name: 'Smart Table' },
+    },
+  });
+  const planId = plan?.catalog_object?.id ?? plan?.object?.id;
+  if (!planId) throw new Error('subscription plan creation returned no id');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const variation: any = await sq('POST', '/v2/catalog/object', {
+    idempotency_key: randomUUID(),
+    object: {
+      type: 'SUBSCRIPTION_PLAN_VARIATION',
+      id: '#smart-table-plan-monthly',
+      subscription_plan_variation_data: {
+        name: 'Monthly',
+        subscription_plan_id: planId,
+        phases: [
+          {
+            cadence: 'MONTHLY',
+            ordinal: 0,
+            pricing: { type: 'STATIC', price_money: { amount: priceCents, currency } },
+          },
+        ],
+      },
+    },
+  });
+  const variationId = variation?.catalog_object?.id ?? variation?.object?.id;
+  if (!variationId) throw new Error('subscription plan variation creation returned no id');
+  return String(variationId);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function createPlatformCustomer(companyName: string, email: string): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await sq('POST', '/v2/customers', {
+    idempotency_key: randomUUID(),
+    company_name: companyName || 'Restaurant',
+    email_address: email || undefined,
+  });
+  return data?.customer;
+}
+
+/** Add/replace the email on a platform customer (Square Subscriptions refuse customers without one). */
+export async function updatePlatformCustomerEmail(customerId: string, email: string): Promise<void> {
+  await sq('PUT', `/v2/customers/${pathSeg(customerId, 'customer_id')}`, { email_address: email });
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function createPlatformCard(input: {
+  customerId: string;
+  sourceId: string;
+  verificationToken?: string;
+  cardholderName?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+}): Promise<any> {
+  assertSquareId(input.customerId, 'customer_id');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await sq('POST', '/v2/cards', {
+    idempotency_key: randomUUID(),
+    source_id: input.sourceId,
+    verification_token: input.verificationToken || undefined,
+    card: { customer_id: input.customerId, cardholder_name: input.cardholderName || undefined },
+  });
+  return data?.card;
+}
+
+export async function disablePlatformCard(cardId: string): Promise<void> {
+  await sq('POST', `/v2/cards/${pathSeg(cardId, 'card_id')}/disable`, {});
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function createPlatformSubscription(input: {
+  customerId: string;
+  planVariationId: string;
+  cardId: string;
+  locationId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+}): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await sq('POST', '/v2/subscriptions', {
+    idempotency_key: randomUUID(),
+    customer_id: input.customerId,
+    location_id: input.locationId,
+    plan_variation_id: input.planVariationId,
+    card_id: input.cardId,
+    timezone: 'America/Vancouver',
+  });
+  return data?.subscription;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function retrievePlatformSubscription(subscriptionId: string): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await sq('GET', `/v2/subscriptions/${pathSeg(subscriptionId, 'subscription_id')}`);
+  return data?.subscription;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function cancelPlatformSubscription(subscriptionId: string): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await sq('POST', `/v2/subscriptions/${pathSeg(subscriptionId, 'subscription_id')}/cancel`, {});
+  return data?.subscription;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function retrievePlatformInvoice(invoiceId: string): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await sq('GET', `/v2/invoices/${pathSeg(invoiceId, 'invoice_id')}`);
+  return data?.invoice;
+}
+
+/** Charge a stored card on the platform account (accrued commission collection). */
+export async function createPlatformCardCharge(input: {
+  customerId: string;
+  cardId: string;
+  locationId: string;
+  amountCents: number;
+  currency: string;
+  idempotencyKey: string;
+  note?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+}): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await sq('POST', '/v2/payments', {
+    idempotency_key: input.idempotencyKey,
+    source_id: input.cardId,
+    customer_id: input.customerId,
+    location_id: input.locationId,
+    amount_money: { amount: input.amountCents, currency: input.currency },
+    note: input.note?.slice(0, 500),
+    autocomplete: true,
+  });
+  return data?.payment;
 }

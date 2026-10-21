@@ -1077,33 +1077,194 @@ function renderDevices() {
 }
 
 /* ------------------------------------------------------------------ */
-/* billing (demo — no real billing connected)                          */
+/* billing (v0.4 — real billing)                                       */
+/* Two ways to pay for Smart Table:                                    */
+/*  - Commission: 2% of each guest card payment (Square takes it as an */
+/*    application fee at charge time; other POS accrue monthly).       */
+/*  - Subscription: flat monthly price via Square Subscriptions,       */
+/*    charged to the card on file. No per-payment fees.                */
 /* ------------------------------------------------------------------ */
-function renderBilling() {
-  $('billing-content').innerHTML = `
+let billingCardInstance = null;
+let billingBusy = false;
+
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Could not load the card form.'));
+    document.head.appendChild(s);
+  });
+}
+
+async function renderBilling() {
+  const box = $('billing-content');
+  box.innerHTML = '<div class="card"><p class="empty">Loading…</p></div>';
+  let st;
+  let entries = [];
+  try {
+    const res = await request('/api/portal/billing');
+    const data = await readJson(res);
+    if (!res.ok) throw new Error((data && data.error) || 'Could not load billing.');
+    st = data;
+    const hres = await request('/api/portal/billing/history');
+    if (hres.ok) entries = (await readJson(hres)).entries || [];
+  } catch (e) {
+    if (e instanceof AuthExpired) return;
+    box.innerHTML = `<div class="card"><p class="empty">${esc(e.message || 'Could not load billing.')}</p></div>`;
+    return;
+  }
+
+  const cur = st.currency;
+  const isCommission = st.effective_plan === 'commission';
+  const price = money(st.subscription_price_cents, cur);
+  const pendingNote = st.pending_plan === 'commission' && st.subscription_paid_through
+    ? `<p class="stat-label" style="margin-top:8px">Switching to Commission after ${esc(st.subscription_paid_through)} — your subscription is paid through then, so you never pay twice for the same days.</p>`
+    : '';
+  const subStatus = st.plan === 'subscription'
+    ? `<div class="stat-label">Status: ${esc(st.subscription_status || '—')}${st.subscription_paid_through ? ` · paid through ${esc(st.subscription_paid_through)}` : ''}</div>`
+    : '';
+
+  box.innerHTML = `
+    <div class="grid grid-2" style="margin-bottom:16px">
+      <div class="card" style="${isCommission ? 'outline:2px solid var(--accent)' : ''}">
+        <h4>Commission ${isCommission ? '· Current plan' : ''}</h4>
+        <div class="stat-num" style="font-size:1.4rem">${st.commission_percent}% per payment</div>
+        <div class="stat-label">Taken only when a guest pays by card through Smart Table. No monthly fee, nothing when you're closed.</div>
+        ${pendingNote}
+        <div style="margin-top:12px">
+          <button class="btn" id="billing-plan-commission" ${isCommission && !st.pending_plan ? 'disabled' : ''}>${isCommission ? 'Current plan' : 'Switch to Commission'}</button>
+        </div>
+      </div>
+      <div class="card" style="${!isCommission ? 'outline:2px solid var(--accent)' : ''}">
+        <h4>Subscription ${!isCommission ? '· Current plan' : ''}</h4>
+        <div class="stat-num" style="font-size:1.4rem">${price}/month</div>
+        <div class="stat-label">Flat monthly fee charged to your card on file. No per-payment fees, ever.</div>
+        ${subStatus}
+        <div style="margin-top:12px">
+          <button class="btn" id="billing-plan-subscription" ${!isCommission ? 'disabled' : ''}>${!isCommission ? 'Current plan' : 'Switch to Subscription'}</button>
+        </div>
+      </div>
+    </div>
     <div class="grid grid-2" style="margin-bottom:16px">
       <div class="card">
-        <h4>Current Plan</h4>
-        <div class="stat-num" style="font-size:1.4rem">Starter</div>
-        <div class="stat-label">Pricing to be announced</div>
-        <div style="margin-top:12px"><button class="btn" disabled title="Not available in v0.2">Change Plan</button></div>
+        <h4>Payment Method</h4>
+        ${st.has_card
+          ? `<div class="stat-num" style="font-size:1.15rem">${esc(st.card_brand || 'Card')} •••• ${esc(st.card_last4 || '')}</div>
+             <div class="stat-label">Used for the subscription plan and monthly fee collection.</div>`
+          : `<div class="stat-label">No card on file. Add one to use the Subscription plan.</div>`}
+        <div id="billing-card-form-wrap" style="margin-top:12px">
+          <button class="btn" id="billing-card-toggle">${st.has_card ? 'Update card' : 'Add card'}</button>
+          <div id="billing-card-form" style="display:none;margin-top:12px">
+            <div id="billing-sq-card" style="min-height:96px"></div>
+            <p class="stat-label" id="billing-card-msg" role="alert"></p>
+            <button class="btn" id="billing-card-save" style="margin-top:8px">Save card</button>
+          </div>
+        </div>
       </div>
       <div class="card">
-        <h4>Payment Method</h4>
-        <div class="stat-label">No payment method on file.</div>
-        <div style="margin-top:12px"><button class="btn" disabled title="Not available in v0.2">Add Card</button></div>
+        <h4>This Month</h4>
+        <div class="kv"><span class="k">Fees collected</span><span>${money(st.collected_this_month_cents, cur)}</span></div>
+        <div class="kv"><span class="k">Fees accrued (unbilled)</span><span>${money(st.accrued_cents, cur)}</span></div>
+        <div class="kv"><span class="k">Plan</span><span>${esc(st.effective_plan)}</span></div>
       </div>
     </div>
     <div class="card">
-      <h4>Invoices</h4>
+      <h4>Billing History</h4>
       <table class="data-table">
-        <thead><tr><th>Invoice</th><th>Date</th><th>Amount</th><th>Status</th></tr></thead>
+        <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead>
         <tbody>
-          <tr><td>INV-2024-089</td><td>Oct 1, 2026</td><td>—</td><td><span class="chip seated">Example</span></td></tr>
-          <tr><td>INV-2024-076</td><td>Sep 1, 2026</td><td>—</td><td><span class="chip seated">Example</span></td></tr>
+          ${entries.map((en) => `<tr>
+            <td>${esc(new Date(en.date).toLocaleDateString('en-CA'))}</td>
+            <td>${esc(en.description)}</td>
+            <td>${money(en.amount_cents, en.currency)}</td>
+            <td>${esc(en.status)}</td>
+          </tr>`).join('') || '<tr><td colspan="4">No billing activity yet.</td></tr>'}
         </tbody>
       </table>
     </div>`;
+
+  const commBtn = $('billing-plan-commission');
+  if (commBtn) commBtn.addEventListener('click', () => switchBillingPlan('commission', st));
+  const subBtn = $('billing-plan-subscription');
+  if (subBtn) subBtn.addEventListener('click', () => switchBillingPlan('subscription', st));
+  const toggle = $('billing-card-toggle');
+  if (toggle) toggle.addEventListener('click', initBillingCardForm);
+}
+
+async function switchBillingPlan(plan, st) {
+  if (billingBusy) return;
+  if (plan === 'subscription') {
+    if (!st.has_card) { alert('Add a payment card first, then switch to the Subscription plan.'); return; }
+    if (!confirm(`Switch to the Subscription plan? Your card will be charged ${money(st.subscription_price_cents, st.currency)} today and monthly. Per-payment fees stop immediately.`)) return;
+  } else if (st.plan === 'subscription' && !confirm('Switch to the Commission plan? Your subscription stays active until the end of the paid period; the 2% per-payment fee starts after that.')) {
+    return;
+  }
+  billingBusy = true;
+  try {
+    const res = await request('/api/portal/billing/plan', { method: 'POST', body: { plan } });
+    const data = await readJson(res);
+    if (!res.ok) throw new Error((data && data.error) || 'Could not switch plans.');
+    await renderBilling();
+  } catch (e) {
+    if (e instanceof AuthExpired) return;
+    alert(e.message || 'Could not switch plans.');
+  } finally {
+    billingBusy = false;
+  }
+}
+
+async function initBillingCardForm() {
+  const form = $('billing-card-form');
+  if (!form) return;
+  if (form.style.display !== 'none') { form.style.display = 'none'; return; }
+  form.style.display = 'block';
+  if (billingCardInstance) return;
+  const msg = $('billing-card-msg');
+  try {
+    const res = await request('/api/portal/billing/card-config');
+    const cfg = await readJson(res);
+    if (!res.ok || !cfg) throw new Error('Could not load the card form.');
+    const env = cfg.extra.environment === 'sandbox' ? 'sandbox.' : '';
+    await loadScriptOnce(`https://${env}web.squarecdn.com/v1/square.js`);
+    const payments = window.Square.payments(cfg.publishableKey, cfg.extra.locationId);
+    billingCardInstance = await payments.card();
+    await billingCardInstance.attach('#billing-sq-card');
+    $('billing-card-save').addEventListener('click', saveBillingCard);
+  } catch (e) {
+    if (msg) msg.textContent = e.message || 'Could not load the card form.';
+  }
+}
+
+async function saveBillingCard() {
+  if (!billingCardInstance || billingBusy) return;
+  const msg = $('billing-card-msg');
+  billingBusy = true;
+  try {
+    const result = await billingCardInstance.tokenize({
+      intent: 'STORE',
+      customerInitiated: true,
+      sellerKeyedIn: false,
+    });
+    if (result.status !== 'OK') {
+      const detail = (result.errors && result.errors[0] && result.errors[0].message) || 'Please check the card details.';
+      throw new Error(detail);
+    }
+    const res = await request('/api/portal/billing/card', {
+      method: 'POST',
+      body: { source_id: result.token, verification_token: result.verificationToken || undefined },
+    });
+    const data = await readJson(res);
+    if (!res.ok) throw new Error((data && data.error) || 'Could not save the card.');
+    billingCardInstance = null;
+    await renderBilling();
+  } catch (e) {
+    if (e instanceof AuthExpired) return;
+    if (msg) msg.textContent = e.message || 'Could not save the card.';
+  } finally {
+    billingBusy = false;
+  }
 }
 
 /* ------------------------------------------------------------------ */

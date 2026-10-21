@@ -66,6 +66,8 @@ export interface PosPaymentResult {
   currency: string;
   /** True when the idempotency key replayed an already-recorded payment. */
   replayed: boolean;
+  /** v0.4 billing: true when the platform commission was actually collected in-flight (Square application fee). */
+  feeCollected?: boolean;
 }
 
 /** Internal domain events produced from POS webhooks. */
@@ -117,6 +119,8 @@ export interface ChargeCardArgs {
    * Callers read these from our payments table.
    */
   priorPaymentIds: string[];
+  /** v0.4 billing: platform commission to collect in-flight when the POS supports it (Square application fee). 0/undefined = no fee. */
+  appFeeCents?: number;
   /** Card processing credentials (Ecommerce private token, Helcim API token...). */
   card: CardCredentials;
   token?: string;

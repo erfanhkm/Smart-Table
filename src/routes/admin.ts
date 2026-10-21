@@ -11,6 +11,7 @@ import { isValidStaffToken, extractBearer } from '../auth.js';
 import { verifyPassword } from '../crypto.js';
 import { config } from '../config.js';
 import { badRequest } from '../http.js';
+import { processAccruedFees } from '../services/billing.js';
 
 // Short-lived admin sessions (in-memory, single instance).
 const sessions = new Map<string, number>();
@@ -136,11 +137,25 @@ export async function adminRoutes(app: FastifyInstance) {
     };
   });
 
+  // ---- Manually trigger accrued-commission collection (v0.4) ----
+  app.post('/api/admin/billing/run', { onRequest: founderOnly }, async () => {
+    return processAccruedFees();
+  });
+
   // ---- All locations with per-location stats ----
   app.get('/api/admin/locations', { onRequest: founderOnly }, async () => {
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
     const r = await query(
       `SELECT l.id, l.name, l.pos_type, l.currency, l.qr_ordering_enabled,
               l.loyalty_enabled, l.created_at,
+              b.plan AS billing_plan, b.subscription_status,
+              (SELECT COALESCE(SUM(f.fee_cents), 0)::bigint FROM fee_ledger f
+               WHERE f.location_id = l.id AND f.status IN ('collected','charged')
+               AND f.created_at >= $1) AS fees_this_month_cents,
+              (SELECT COALESCE(SUM(f.fee_cents), 0)::bigint FROM fee_ledger f
+               WHERE f.location_id = l.id AND f.status = 'accrued') AS fees_accrued_cents,
               (SELECT COUNT(*)::int FROM tables t WHERE t.location_id = l.id) AS tables,
               (SELECT COUNT(*)::int FROM checks c JOIN tables t ON t.id = c.table_id
                WHERE t.location_id = l.id AND c.state = 'OPEN') AS open_checks,
@@ -148,7 +163,10 @@ export async function adminRoutes(app: FastifyInstance) {
                JOIN checks c ON c.id = p.check_id JOIN tables t ON t.id = c.table_id
                WHERE t.location_id = l.id AND p.status IN ('AUTHORIZED','COMPLETED')
                AND p.created_at > now() - interval '24 hours') AS revenue_24h_cents
-       FROM locations l ORDER BY l.created_at DESC`,
+       FROM locations l
+       LEFT JOIN billing_accounts b ON b.location_id = l.id
+       ORDER BY l.created_at DESC`,
+      [monthStart.toISOString()],
     );
     return { locations: r.rows };
   });

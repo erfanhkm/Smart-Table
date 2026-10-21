@@ -148,25 +148,62 @@ export const squareAdapter: PosAdapter = {
     // time in the guest browser — the SDK presents the verification challenge
     // when the issuer requires it, so the cnon: token arriving here is already
     // verification-aware. No backend changes needed.
-    const { payment } = await createPayment(
-      {
-        orderId: args.checkId,
-        amountCents: args.amountCents,
-        currency: args.currency,
-        sourceId: args.cardToken,
-        tipCents: args.tipCents,
-        autocomplete: false,
-        idempotencyKey: args.idempotencyKey,
-      },
-      args.token,
-    );
+    //
+    // v0.4 billing: the commission rides along as a Square application fee.
+    // A guest payment must NEVER fail because of our fee: if Square
+    // definitively rejects the request while a fee is attached (e.g. the
+    // seller never granted the application-fee OAuth scope), retry ONCE
+    // without the fee under a derived idempotency key and report
+    // feeCollected=false — the fee then accrues in the ledger instead.
+    // Only definitive 4xx rejections are retried: a validation failure
+    // means no payment was created, so the retry cannot double-charge.
+    const fee = args.appFeeCents && args.appFeeCents > 0 ? args.appFeeCents : 0;
+    let payment;
+    let feeCollected = false;
+    try {
+      ({ payment } = await createPayment(
+        {
+          orderId: args.checkId,
+          amountCents: args.amountCents,
+          currency: args.currency,
+          sourceId: args.cardToken,
+          tipCents: args.tipCents,
+          autocomplete: false,
+          idempotencyKey: args.idempotencyKey,
+          appFeeCents: fee || undefined,
+        },
+        args.token,
+      ));
+      feeCollected = fee > 0;
+    } catch (e) {
+      const definitive =
+        e instanceof SquareError && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429;
+      if (fee <= 0 || !definitive) throw e;
+      console.error(
+        `[billing] Square rejected payment with app fee (order ${args.checkId}); retrying without fee:`,
+        e.message,
+      );
+      ({ payment } = await createPayment(
+        {
+          orderId: args.checkId,
+          amountCents: args.amountCents,
+          currency: args.currency,
+          sourceId: args.cardToken,
+          tipCents: args.tipCents,
+          autocomplete: false,
+          idempotencyKey: `${args.idempotencyKey}-nf`,
+        },
+        args.token,
+      ));
+      feeCollected = false;
+    }
     const { order } = await retrieveOrder(args.checkId, args.token);
     const d = mapDetail(order);
     if (d.remainingCents <= 0) {
       await payOrder(args.checkId, [...args.priorPaymentIds, payment.id], randomUUID(), args.token);
-      return { paymentId: payment.id, remainingCents: 0, currency: d.currency, replayed: false };
+      return { paymentId: payment.id, remainingCents: 0, currency: d.currency, replayed: false, feeCollected };
     }
-    return { paymentId: payment.id, remainingCents: d.remainingCents, currency: d.currency, replayed: false };
+    return { paymentId: payment.id, remainingCents: d.remainingCents, currency: d.currency, replayed: false, feeCollected };
   },
 
   async getCardConfig(locationRef: string, _card: CardCredentials): Promise<CardPaymentConfig> {

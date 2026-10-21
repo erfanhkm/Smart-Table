@@ -25,6 +25,7 @@ import {
   createPayment, orderRemaining, payOrder, retrieveOrder, SquareError, squareErrorCode,
 } from '../square.js';
 import { getCheckPos } from './pos/context.js';
+import { effectivePlan, ensureBillingAccount, feeFor, recordFee } from './billing.js';
 import { badRequest, conflict, httpError, isClientError } from '../http.js';
 
 export type SplitMode = 'full' | 'equal' | 'items' | 'custom';
@@ -308,6 +309,17 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
            ORDER BY created_at ASC`,
           [check.id],
         );
+        // v0.4 billing: on the commission plan, this charge carries our 2%
+        // fee. Square locations collect it in-flight as an application fee;
+        // other POS accrue it in the fee ledger for monthly collection.
+        // Subscription-plan locations are never charged per payment.
+        let feeCents = 0;
+        if (ctx.locationId) {
+          const acct = await ensureBillingAccount(ctx.locationId).catch(() => null);
+          if (acct && effectivePlan(acct) === 'commission') {
+            feeCents = feeFor(amount + tipCents, acct.commission_bps);
+          }
+        }
         const res = await adapter.chargeCard!({
           checkId: nativeRef,
           amountCents: amount,
@@ -318,11 +330,26 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
           priorPaymentIds: prior.rows.map((r) => String(r.pid)),
           card: ctx.card,
           token,
+          appFeeCents: posType === 'square' ? feeCents : 0,
         });
         chargeCreated = true;
         externalPaymentId = res.paymentId;
         newRemaining = res.remainingCents;
         resultCurrency = res.currency || currency;
+        if (feeCents > 0 && ctx.locationId) {
+          // Autocommit on purpose (same reasoning as the H5 tender-ref write
+          // below): Square may already have taken this fee, so the ledger
+          // row must survive even if the surrounding transaction rolls back.
+          await recordFee({
+            locationId: ctx.locationId,
+            paymentRowId: reservation.id,
+            posPaymentRef: res.paymentId,
+            chargeCents: amount + tipCents,
+            feeCents,
+            currency: resultCurrency,
+            method: posType === 'square' && res.feeCollected ? 'square_app_fee' : 'accrued',
+          }).catch(() => undefined);
+        }
         // H5 fix: persist the POS reference outside the transaction (see above).
         await query(
           `UPDATE payments SET pos_tender_ref = $2, amount_cents = $3, tip_cents = $4

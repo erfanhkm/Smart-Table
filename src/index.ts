@@ -16,6 +16,8 @@ import { staffRoutes } from './routes/staff.js';
 import { portalRoutes } from './routes/portal.js';
 import { adminRoutes } from './routes/admin.js';
 import { onboardingRoutes } from './routes/onboarding.js';
+import { billingRoutes } from './routes/billing.js';
+import { processAccruedFees } from './services/billing.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -174,6 +176,24 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(portalRoutes);
   await app.register(adminRoutes);
   await app.register(onboardingRoutes);
+  await app.register(billingRoutes);
+
+  // v0.4 billing: collect accrued commission fees on a slow timer (the
+  // processor itself decides what is due: >= $50 accrued, or oldest fee
+  // >= 25 days old). Skipped under pg-mem (tests) where no real Square
+  // account exists.
+  if (!config.usePgMem) {
+    const runBilling = () =>
+      processAccruedFees()
+        .then((r) => {
+          if (r.locationsCharged > 0) {
+            app.log.info(r, '[billing] accrued commission collected');
+          }
+        })
+        .catch((e) => app.log.error(e, '[billing] accrued fee processing failed'));
+    setTimeout(runBilling, 60_000).unref();
+    setInterval(runBilling, 6 * 60 * 60 * 1000).unref();
+  }
   return app;
 }
 

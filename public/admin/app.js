@@ -61,7 +61,10 @@
           <td>${money(l.revenue_24h_cents, l.currency)}</td>
           <td><span class="badge ${l.qr_ordering_enabled ? 'on' : 'off'}">${l.qr_ordering_enabled ? 'ON' : 'OFF'}</span></td>
           <td><span class="badge ${l.loyalty_enabled ? 'on' : 'off'}">${l.loyalty_enabled ? 'ON' : 'OFF'}</span></td>
-        </tr>`).join('') || '<tr><td colspan="7">No locations yet.</td></tr>';
+          <td>${esc(l.billing_plan || 'commission')}${l.subscription_status ? ' (' + esc(l.subscription_status) + ')' : ''}</td>
+          <td>${money(Number(l.fees_this_month_cents || 0), l.currency)}</td>
+          <td>${money(Number(l.fees_accrued_cents || 0), l.currency)}</td>
+        </tr>`).join('') || '<tr><td colspan="10">No locations yet.</td></tr>';
 
       $('payments-body').innerHTML = pays.payments.map((p) => `
         <tr>

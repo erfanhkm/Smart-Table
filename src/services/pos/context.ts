@@ -88,7 +88,7 @@ export async function getLocationPos(locationId: string): Promise<PosContext> {
 }
 
 /** Resolve from a check row: the check's location determines the POS. */
-export async function getCheckPos(checkId: string): Promise<PosContext & { checkRef: string; checkPosType: string }> {
+export async function getCheckPos(checkId: string): Promise<PosContext & { checkRef: string; checkPosType: string; locationId: string }> {
   const r = await query<{ location_id: string; external_check_ref: string; pos_type: string }>(
     `SELECT t.location_id, c.external_check_ref, c.pos_type
      FROM checks c JOIN tables t ON t.id = c.table_id
@@ -104,7 +104,7 @@ export async function getCheckPos(checkId: string): Promise<PosContext & { check
   if (row.pos_type !== ctx.posType) {
     throw new Error(`POS mismatch: check is ${row.pos_type} but its location is ${ctx.posType}`);
   }
-  return { ...ctx, checkRef: row.external_check_ref, checkPosType: row.pos_type };
+  return { ...ctx, checkRef: row.external_check_ref, checkPosType: row.pos_type, locationId: row.location_id };
 }
 
 /**
