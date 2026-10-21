@@ -58,6 +58,18 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     return reply.code(status).send({ error: e.message ?? 'bad request', ...(e.errorCode ? { code: e.errorCode } : {}) });
   });
 
+  // Security headers on EVERY response (API, portal, admin, guest page,
+  // static assets). The portal route sets the same values itself; these are
+  // the floor for everything else. HSTS is only honoured by browsers over
+  // HTTPS, so local HTTP development is unaffected.
+  app.addHook('onSend', async (_req, reply) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('Referrer-Policy', 'no-referrer');
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), usb=(), bluetooth=()');
+  });
+
   await app.register(fastifyStatic, { root: path.join(here, '..', 'public') });
 
   // Rate limits. Each limiter has its own named bucket (H1 fix: pay and general
@@ -93,7 +105,19 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   });
 
   // Pretty URLs for the two frontends.
-  app.get('/t/:token', async (_req, reply) => reply.sendFile('t/index.html'));
+  // Guest page CSP: the page is a single inline script, so script-src needs
+  // 'unsafe-inline'; the real containment is the origin allowlist — the page
+  // may only talk to / frame content from the payment providers it uses
+  // (Square card + wallets, Clover tokens, Helcim modal, Google Pay sheet).
+  // img-src allows https: because menu photos are served from POS catalogs.
+  app.get('/t/:token', async (_req, reply) =>
+    reply
+      .header(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://*.squarecdn.com https://*.squareup.com https://*.clover.com https://*.helcim.com https://pay.google.com; connect-src 'self' https://*.squarecdn.com https://*.squareup.com https://*.clover.com https://*.helcim.com https://apple-pay-gateway.apple.com; frame-src https://*.squarecdn.com https://*.squareup.com https://*.helcim.com https://pay.google.com; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+      )
+      .sendFile('t/index.html'),
+  );
   app.get('/dashboard', async (_req, reply) => reply.sendFile('dashboard/index.html'));
   // Restaurant portal: strict CSP (the page's script is external; styles are
   // inline in <style> and style="" attributes, so style-src allows 'unsafe-inline'
