@@ -120,8 +120,11 @@ async function resolveTenderId(mId: string, method: string, token?: string): Pro
 }
 
 async function cl<T>(method: string, path: string, body?: unknown, token?: string): Promise<T> {
-  const t = token ?? config.cloverAppSecret; // app-level fallback only for demo; merchants use OAuth tokens
-  if (!t) throw new Error('Clover token is not set (pass an OAuth token or set CLOVER_APP_SECRET)');
+  // v0.6.5 (D-9): the merchant's OAuth token is REQUIRED. The old fallback
+  // sent CLOVER_APP_SECRET as a Bearer token — the app secret is not a
+  // merchant credential and must never be used as one.
+  const t = token;
+  if (!t) throw new Error('clover is not connected for this location (no POS credential stored)');
   const res = await fetch(REST_BASE + path, {
     method,
     headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },

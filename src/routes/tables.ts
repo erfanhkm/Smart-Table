@@ -4,38 +4,51 @@
 // v0.3 multi-POS: link-check resolves the location's adapter from its
 // pos_type. Accepts `external_check_id` (generic) or the legacy
 // `square_order_id` (Square locations only, portal compat).
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
 import { query } from '../db.js';
 import { config } from '../config.js';
-import { badRequest, forbidden, notFound } from '../http.js';
+import { badRequest, conflict, forbidden, notFound } from '../http.js';
 import { getTables } from '../services/floor.js';
 import { getLocationPos } from '../services/pos/context.js';
 import { PosCheckDetail } from '../services/pos/types.js';
 import { retrieveOrder, SquareError } from '../square.js';
-import { staffOnly } from '../auth.js';
+import { assertPortalLocation, requirePortalRole, scopedLocationId, staffOnly } from '../auth.js';
+
+/** Load a table and pin it to the calling portal user's location (v0.6.5, C-2). */
+async function loadTableScoped(req: FastifyRequest, tableId: string): Promise<{ id: string; location_id: string }> {
+  const t = await query<{ id: string; location_id: string }>(
+    `SELECT id, location_id FROM tables WHERE id = $1`,
+    [tableId],
+  );
+  if (t.rowCount === 0) throw notFound('table not found');
+  assertPortalLocation(req, t.rows[0].location_id);
+  return t.rows[0];
+}
 
 export async function tableRoutes(app: FastifyInstance) {
   app.get('/api/tables', staffOnly, async (req) => {
     const { location_id } = req.query as { location_id?: string };
-    if (!location_id) throw badRequest('location_id is required');
-    return { tables: await getTables(location_id) };
+    const scopedId = scopedLocationId(req, location_id);
+    return { tables: await getTables(scopedId) };
   });
 
   app.post('/api/tables', staffOnly, async (req) => {
     const { location_id, name } = (req.body ?? {}) as { location_id?: unknown; name?: unknown };
-    if (typeof location_id !== 'string' || !location_id) throw badRequest('location_id and name are required');
+    // Portal users create tables only in their own location, owner/manager only (C-2/C-10).
+    requirePortalRole(req, 'owner', 'manager');
+    const scopedId = scopedLocationId(req, typeof location_id === 'string' ? location_id : undefined);
     if (typeof name !== 'string' || !name.trim() || name.trim().length > 64) {
       throw badRequest('name is required (1-64 characters)');
     }
-    const loc = await query(`SELECT id FROM locations WHERE id = $1`, [location_id]);
+    const loc = await query(`SELECT id FROM locations WHERE id = $1`, [scopedId]);
     if (loc.rowCount === 0) throw badRequest('unknown location_id');
     const id = randomUUID();
     const qrToken = randomUUID().replace(/-/g, '');
     await query(`INSERT INTO tables(id, location_id, name, qr_token, state) VALUES ($1,$2,$3,$4,'FREE')`, [
       id,
-      location_id,
+      scopedId,
       name.trim(),
       qrToken,
     ]);
@@ -44,7 +57,9 @@ export async function tableRoutes(app: FastifyInstance) {
 
   // Printable QR PNG for the table tent card (staff-only: the QR token is the table's guest credential).
   app.get('/api/tables/:id/qr', staffOnly, async (req, reply) => {
-    const t = await query(`SELECT qr_token FROM tables WHERE id = $1`, [(req.params as { id: string }).id]);
+    const tableId = (req.params as { id: string }).id;
+    await loadTableScoped(req, tableId);
+    const t = await query(`SELECT qr_token FROM tables WHERE id = $1`, [tableId]);
     if (t.rowCount === 0) throw notFound('table not found');
     const png = await QRCode.toBuffer(`${config.appUrl}/t/${t.rows[0].qr_token}`, { width: 512, margin: 2 });
     return reply.type('image/png').send(png);
@@ -71,6 +86,7 @@ export async function tableRoutes(app: FastifyInstance) {
     );
     if (t.rowCount === 0) throw notFound('table not found');
     const table = t.rows[0];
+    assertPortalLocation(req, table.location_id);
     const ctx = await getLocationPos(table.location_id);
 
     // Legacy portal compat: square_order_id is only honored on Square locations.
@@ -111,15 +127,21 @@ export async function tableRoutes(app: FastifyInstance) {
     }
     if (detail.state !== 'OPEN') throw badRequest('check is not open');
 
+    // v0.6.5 (C-4): check identity is (location_id, pos_type, ref) and the
+    // insert is DO NOTHING. The old DO UPDATE re-pointed another tenant's
+    // check to this table and re-opened it — the exact thing the ordering
+    // route's M1 fix forbids. A conflict here means: same location already
+    // has this ref — another table or a completed check is a hard 409; the
+    // same table re-linking is idempotent and just refreshes totals.
+    const newCheckId = randomUUID();
     await query(
-      `INSERT INTO checks(id, table_id, square_order_id, external_check_ref, pos_type, merchant_id, state, total_cents, currency)
-       VALUES ($1,$2,$3,$4,$5,$6,'OPEN',$7,$8)
-       ON CONFLICT (pos_type, external_check_ref) DO UPDATE SET
-         table_id = EXCLUDED.table_id, merchant_id = EXCLUDED.merchant_id, state = 'OPEN',
-         total_cents = EXCLUDED.total_cents, currency = EXCLUDED.currency`,
+      `INSERT INTO checks(id, table_id, location_id, square_order_id, external_check_ref, pos_type, merchant_id, state, total_cents, currency)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'OPEN',$8,$9)
+       ON CONFLICT (location_id, pos_type, external_check_ref) DO NOTHING`,
       [
-        randomUUID(),
+        newCheckId,
         tableId,
+        table.location_id,
         ctx.posType === 'square' ? checkRef : null,
         checkRef,
         ctx.posType,
@@ -128,12 +150,35 @@ export async function tableRoutes(app: FastifyInstance) {
         detail.currency,
       ],
     );
-    await query(`UPDATE tables SET state = 'SEATED' WHERE id = $1`, [tableId]);
-    await query(
-      `INSERT INTO events(id, table_id, check_id, type)
-       VALUES ($1,$2,(SELECT id FROM checks WHERE pos_type = $3 AND external_check_ref = $4),'seated')`,
-      [randomUUID(), tableId, ctx.posType, checkRef],
+    // Was it created? Compare ids — never trust RETURNING/rowCount with
+    // ON CONFLICT DO NOTHING (pg-mem returns the pre-existing row).
+    const ex = await query<{ id: string; table_id: string | null; state: string }>(
+      `SELECT id, table_id, state FROM checks WHERE location_id = $1 AND pos_type = $2 AND external_check_ref = $3`,
+      [table.location_id, ctx.posType, checkRef],
     );
+    const existing = ex.rows[0];
+    if (!existing) throw conflict('check could not be linked', 'check_link_conflict');
+    let checkId: string;
+    if (existing.id === newCheckId) {
+      checkId = newCheckId;
+    } else {
+      if (existing.table_id !== tableId) {
+        throw conflict('check is already linked to another table', 'check_linked_elsewhere');
+      }
+      if (existing.state === 'COMPLETED') throw conflict('check is already completed', 'check_completed');
+      await query(`UPDATE checks SET total_cents = $1, currency = $2 WHERE id = $3`, [
+        detail.totalCents,
+        detail.currency,
+        existing.id,
+      ]);
+      checkId = existing.id;
+    }
+    await query(`UPDATE tables SET state = 'SEATED' WHERE id = $1`, [tableId]);
+    await query(`INSERT INTO events(id, table_id, check_id, type) VALUES ($1,$2,$3,'seated')`, [
+      randomUUID(),
+      tableId,
+      checkId,
+    ]);
     return { ok: true };
   });
 
@@ -142,8 +187,8 @@ export async function tableRoutes(app: FastifyInstance) {
   // new token + URL; reprint via GET /api/tables/:id/qr.
   app.post('/api/tables/:id/rotate-qr', staffOnly, async (req) => {
     const tableId = (req.params as { id: string }).id;
-    const t = await query(`SELECT id FROM tables WHERE id = $1`, [tableId]);
-    if (t.rowCount === 0) throw notFound('table not found');
+    requirePortalRole(req, 'owner', 'manager');
+    await loadTableScoped(req, tableId);
     const qrToken = randomUUID().replace(/-/g, '');
     await query(`UPDATE tables SET qr_token = $1 WHERE id = $2`, [qrToken, tableId]);
     await query(`INSERT INTO events(id, table_id, type) VALUES ($1,$2,'qr_rotated')`, [randomUUID(), tableId]);
@@ -153,6 +198,8 @@ export async function tableRoutes(app: FastifyInstance) {
   // Reset the table for the next party.
   app.post('/api/tables/:id/free', staffOnly, async (req) => {
     const tableId = (req.params as { id: string }).id;
+    requirePortalRole(req, 'owner', 'manager');
+    await loadTableScoped(req, tableId);
     await query(`UPDATE tables SET state = 'FREE' WHERE id = $1`, [tableId]);
     await query(`INSERT INTO events(id, table_id, type) VALUES ($1,$2,'freed')`, [randomUUID(), tableId]);
     return { ok: true };
@@ -161,6 +208,7 @@ export async function tableRoutes(app: FastifyInstance) {
   // Acknowledge a waiter call (used for the response-time metric).
   app.post('/api/tables/:id/ack-call', staffOnly, async (req) => {
     const tableId = (req.params as { id: string }).id;
+    await loadTableScoped(req, tableId);
     await query(`INSERT INTO events(id, table_id, type) VALUES ($1,$2,'waiter_ack')`, [randomUUID(), tableId]);
     return { ok: true };
   });

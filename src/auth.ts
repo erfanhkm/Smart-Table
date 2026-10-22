@@ -5,6 +5,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from './config.js';
+import { badRequest, forbidden, notFound } from './http.js';
 import { getPortalUser, type PortalIdentity } from './routes/portal.js';
 
 declare module 'fastify' {
@@ -47,3 +48,36 @@ export async function requireStaff(req: FastifyRequest, reply: FastifyReply): Pr
 
 /** Spread into a route definition: app.post(path, staffOnly, handler). */
 export const staffOnly = { onRequest: requireStaff };
+
+// ---- Tenant scoping (v0.6.5, Claude review C-1/C-2/C-10) --------------------
+// Portal users are pinned to their own location. Staff-token callers carry no
+// portalUser and stay global BY DESIGN (the shared staff credential is the
+// venue's own staff device token). Cross-tenant access answers 404 so a
+// portal user can't probe which IDs exist at other restaurants.
+
+/** Assert that a row's location belongs to the calling portal user. */
+export function assertPortalLocation(req: FastifyRequest, locationId: string | null | undefined): void {
+  const u = req.portalUser;
+  if (u && (!locationId || u.location_id !== locationId)) throw notFound('not found');
+}
+
+/** Role gate for portal users (refunds, cash recording, settings, QR, billing writes). */
+export function requirePortalRole(req: FastifyRequest, ...roles: string[]): void {
+  const u = req.portalUser;
+  if (u && !roles.includes(u.role)) throw forbidden(`requires role: ${roles.join(' or ')}`);
+}
+
+/**
+ * The location a request may act on: a portal user's own location (a foreign
+ * location_id in the request is a 404), or the explicitly given one for
+ * staff-token callers.
+ */
+export function scopedLocationId(req: FastifyRequest, given?: string | null): string {
+  const u = req.portalUser;
+  if (u) {
+    if (given && given !== u.location_id) throw notFound('location not found');
+    return u.location_id;
+  }
+  if (!given) throw badRequest('location_id is required');
+  return given;
+}

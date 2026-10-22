@@ -76,8 +76,8 @@ describe('idea 2: group pay item claims', () => {
     app.inject({ method: 'POST', url: `/api/checks/SQORDR1/claims?table_token=${token}`, payload: { item_index: idx, fingerprint: fp, device_id: device } });
   const unclaim = (device: string, idx: number, token = 'tok1') =>
     app.inject({ method: 'DELETE', url: `/api/checks/SQORDR1/claims?table_token=${token}`, payload: { item_index: idx, device_id: device } });
-  const billClaims = async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/t/tok1' });
+  const billClaims = async (device?: string) => {
+    const res = await app.inject({ method: 'GET', url: `/api/t/tok1${device ? `?device_id=${device}` : ''}` });
     assert.equal(res.statusCode, 200);
     return JSON.parse(res.body).check.item_claims;
   };
@@ -85,10 +85,14 @@ describe('idea 2: group pay item claims', () => {
   it('claim, conflict, release, re-claim', async () => {
     let res = await claim('device-A', 0, FP0);
     assert.equal(res.statusCode, 200);
-    let claims = await billClaims();
+    let claims = await billClaims('device-A');
     assert.equal(claims.length, 1);
     assert.equal(claims[0].item_index, 0);
-    assert.equal(claims[0].device_id, 'device-A');
+    // v0.6.5 (C-12): raw device ids never leave the API; the poll returns `mine`.
+    assert.equal(claims[0].device_id, undefined);
+    assert.equal(claims[0].mine, true);
+    claims = await billClaims('device-B');
+    assert.equal(claims[0].mine, false);
 
     res = await claim('device-B', 0, FP0);
     assert.equal(res.statusCode, 409, 'second device must not claim the same item');
@@ -112,8 +116,8 @@ describe('idea 2: group pay item claims', () => {
     assert.equal(res.statusCode, 200);
     res = await claim('device-B', 0, FP0);
     assert.equal(res.statusCode, 200);
-    claims = await billClaims();
-    assert.equal(claims.filter((c: { item_index: number }) => c.item_index === 0)[0].device_id, 'device-B');
+    claims = await billClaims('device-B');
+    assert.equal(claims.filter((c: { item_index: number }) => c.item_index === 0)[0].mine, true);
   });
 
   it('guards: missing token -> 400, wrong token -> 404', async () => {

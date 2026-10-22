@@ -17,8 +17,13 @@ import { encryptSecret } from '../crypto.js';
 import { exchangeOAuthCode, getMerchantProfile, listLocations, squareAuthorizeUrl } from '../square.js';
 import { assertPosType, POS_TYPES, PosType } from '../services/pos/types.js';
 import { storePosCredential } from '../services/pos/context.js';
-import { badRequest } from '../http.js';
-import { staffOnly } from '../auth.js';
+import { getAdapter } from '../services/pos/registry.js';
+import { badRequest, conflict, notFound } from '../http.js';
+import { rateLimit } from '../rate-limit.js';
+import { requirePortalRole, requireStaff, staffOnly } from '../auth.js';
+
+// Credential writes are rare and sensitive: cap them hard (E-1).
+const manualTokenLimiter = rateLimit({ name: 'manual-token', windowMs: 60 * 60_000, max: 10 });
 
 // Short-lived OAuth state tokens (CSRF protection), bound to the staff user
 // who started the flow so the callback can tie the merchant to them.
@@ -107,48 +112,124 @@ export async function oauthRoutes(app: FastifyInstance) {
   // Manual API-token onboarding for non-OAuth POS (Clover, Shopify, Helcim, ...).
   // The merchant pastes the token they created in their POS dashboard; we
   // encrypt it and bind it to (merchant, pos_type). Staff-only.
-  app.post('/api/oauth/manual-token', staffOnly, async (req) => {
-    const b = (req.body ?? {}) as Record<string, unknown>;
-    const posType = assertPosType(b.pos_type);
-    if (posType === 'square') throw badRequest('square uses OAuth; use /api/oauth/start');
-    const accessToken = b.access_token;
-    const merchantRef = b.external_merchant_ref;
-    const locationRef = b.location_ref;
-    const locationName = b.location_name;
-    if (typeof accessToken !== 'string' || accessToken.length < 8 || accessToken.length > 4096) {
-      throw badRequest('access_token is required');
-    }
-    for (const [k, v] of [['external_merchant_ref', merchantRef], ['location_ref', locationRef]] as const) {
-      if (typeof v !== 'string' || !v.trim() || v.length > 255) throw badRequest(`${k} is required`);
-    }
-    if (typeof locationName !== 'string' || !locationName.trim() || locationName.length > 128) {
-      throw badRequest('location_name is required (1-128 characters)');
-    }
-    const currency = typeof b.currency === 'string' && /^[A-Z]{3}$/.test(b.currency) ? b.currency : 'CAD';
+  //
+  // v0.6.5 (E-1, Critical): the original version upserted a merchant from a
+  // CLIENT-SUPPLIED ref and overwrote its stored credential — any portal
+  // user could replace any restaurant's POS token (DoS everywhere, stolen
+  // payments on account-wide tokens like Helcim's). Portal users now bind
+  // a token ONLY to their own location's merchant: owner role, the
+  // location's own pos_type and refs, an explicit replace:true to overwrite
+  // an existing credential, and the token is validated against the POS
+  // before it is stored. The create-merchant+location flow remains for
+  // staff-token (founder) callers only. Rate-limited + audit-logged.
+  app.post(
+    '/api/oauth/manual-token',
+    { onRequest: [requireStaff, manualTokenLimiter] },
+    async (req) => {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const posType = assertPosType(b.pos_type);
+      if (posType === 'square') throw badRequest('square uses OAuth; use /api/oauth/start');
+      const accessToken = b.access_token;
+      if (typeof accessToken !== 'string' || accessToken.length < 8 || accessToken.length > 4096) {
+        throw badRequest('access_token is required');
+      }
+      const u = req.portalUser;
 
-    const ourMerchantId = await upsertMerchant(posType, (merchantRef as string).trim());
-    await storePosCredential({
-      merchantId: ourMerchantId,
-      posType,
-      externalMerchantRef: (merchantRef as string).trim(),
-      accessToken,
-    });
+      if (u) {
+        requirePortalRole(req, 'owner');
+        const loc = await query<{
+          id: string; merchant_id: string; pos_type: string;
+          pos_location_ref: string | null; square_location_id: string | null;
+          external_merchant_ref: string;
+        }>(
+          `SELECT l.id, l.merchant_id, l.pos_type, l.pos_location_ref, l.square_location_id,
+                  m.external_merchant_ref
+           FROM locations l JOIN merchants m ON m.id = l.merchant_id
+           WHERE l.id = $1`,
+          [u.location_id],
+        );
+        if (loc.rowCount === 0) throw notFound('location not found');
+        const mine = loc.rows[0];
+        if (mine.pos_type !== posType) {
+          throw badRequest(`this location is a ${mine.pos_type} location; its POS type cannot be changed here`);
+        }
+        const myRef = mine.pos_location_ref ?? mine.square_location_id ?? '';
+        if (typeof b.location_ref === 'string' && b.location_ref.trim() && b.location_ref.trim() !== myRef) {
+          throw badRequest('location_ref does not match your location');
+        }
+        if (
+          typeof b.external_merchant_ref === 'string' &&
+          b.external_merchant_ref.trim() &&
+          b.external_merchant_ref.trim() !== mine.external_merchant_ref
+        ) {
+          throw badRequest('external_merchant_ref does not match your location');
+        }
+        const existingCred = await query(
+          `SELECT 1 FROM pos_credentials WHERE merchant_id = $1 AND pos_type = $2`,
+          [mine.merchant_id, posType],
+        );
+        if (existingCred.rowCount > 0 && b.replace !== true) {
+          throw conflict(
+            'a POS credential is already stored for this location; send replace: true to overwrite it',
+            'credential_exists',
+          );
+        }
+        // Validate the token against the POS before storing it: a cheap
+        // authenticated read on the location's own refs.
+        try {
+          await getAdapter(posType).listOpenChecks(myRef, accessToken);
+        } catch {
+          throw badRequest('the POS rejected this token; check it and try again');
+        }
+        await storePosCredential({
+          merchantId: mine.merchant_id,
+          posType,
+          externalMerchantRef: mine.external_merchant_ref,
+          accessToken,
+        });
+        console.info(
+          `[oauth] manual-token stored pos=${posType} location=${mine.id} by portal user ${u.id} replace=${existingCred.rowCount > 0}`,
+        );
+        return { ok: true, pos_type: posType, location_id: mine.id };
+      }
 
-    const locId = randomUUID();
-    await query(
-      `INSERT INTO locations(id, merchant_id, pos_type, pos_location_ref, name, currency)
-       VALUES ($1,$2,$3,$4,$5,$6)
-       ON CONFLICT DO NOTHING`,
-      [locId, ourMerchantId, posType, (locationRef as string).trim(), (locationName as string).trim(), currency],
-    );
-    // If the location ref already exists (no unique constraint hit info from
-    // DO NOTHING), fetch the canonical id.
-    const existing = await query<{ id: string }>(
-      `SELECT id FROM locations WHERE merchant_id=$1 AND pos_type=$2 AND pos_location_ref=$3`,
-      [ourMerchantId, posType, (locationRef as string).trim()],
-    );
-    return { ok: true, pos_type: posType, location_id: existing.rows[0]?.id ?? locId };
-  });
+      // Staff-token (founder) flow: create/find the merchant + location.
+      const merchantRef = b.external_merchant_ref;
+      const locationRef = b.location_ref;
+      const locationName = b.location_name;
+      for (const [k, v] of [['external_merchant_ref', merchantRef], ['location_ref', locationRef]] as const) {
+        if (typeof v !== 'string' || !v.trim() || v.length > 255) throw badRequest(`${k} is required`);
+      }
+      if (typeof locationName !== 'string' || !locationName.trim() || locationName.length > 128) {
+        throw badRequest('location_name is required (1-128 characters)');
+      }
+      const currency = typeof b.currency === 'string' && /^[A-Z]{3}$/.test(b.currency) ? b.currency : 'CAD';
+
+      const ourMerchantId = await upsertMerchant(posType, (merchantRef as string).trim());
+      await storePosCredential({
+        merchantId: ourMerchantId,
+        posType,
+        externalMerchantRef: (merchantRef as string).trim(),
+        accessToken,
+      });
+
+      const locId = randomUUID();
+      await query(
+        `INSERT INTO locations(id, merchant_id, pos_type, pos_location_ref, name, currency)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT DO NOTHING`,
+        [locId, ourMerchantId, posType, (locationRef as string).trim(), (locationName as string).trim(), currency],
+      );
+      // If the location ref already exists (no unique constraint hit info from
+      // DO NOTHING), fetch the canonical id.
+      const existing = await query<{ id: string }>(
+        `SELECT id FROM locations WHERE merchant_id=$1 AND pos_type=$2 AND pos_location_ref=$3`,
+        [ourMerchantId, posType, (locationRef as string).trim()],
+      );
+      console.info(`[oauth] manual-token stored pos=${posType} merchant_ref=${(merchantRef as string).trim()} by staff token`);
+      return { ok: true, pos_type: posType, location_id: existing.rows[0]?.id ?? locId };
+    },
+  );
 
   // POS types the portal can offer for manual onboarding.
   app.get('/api/oauth/pos-types', staffOnly, async () => ({

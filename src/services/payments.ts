@@ -45,6 +45,13 @@ export type PaymentSource =
 export interface PayCheckInput {
   /** POS-native check reference (Square order id, Clover order id, Shopify draft id, Helcim invoice id). */
   checkRef: string;
+  /**
+   * Internal checks.id, when the CALLER has already resolved and authorized
+   * the check (guest table-token binding, staff location scoping). payCheck
+   * then resolves by id instead of the bare external ref (v0.6.5, B-6) —
+   * external refs are only unique per location, never globally.
+   */
+  checkId?: string;
   mode: SplitMode;
   amountCents?: number;
   tipCents?: number;
@@ -172,7 +179,11 @@ function posErrorCode(e: unknown): string | null {
 
 export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
   const checkRef = String(input.checkRef ?? '').trim();
-  if (!checkRef || checkRef.length > 255) throw badRequest('invalid check reference');
+  if (input.checkId) {
+    if (checkRef.length > 255) throw badRequest('invalid check reference');
+  } else if (!checkRef || checkRef.length > 255) {
+    throw badRequest('invalid check reference');
+  }
   const key = String(input.idempotencyKey).toLowerCase();
   if (!UUID_V4_RE.test(key)) throw badRequest('idempotency_key must be a UUID v4');
   const tipCents = input.tipCents ?? 0;
@@ -186,10 +197,12 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
   // Resolve the check -> its location -> the location's POS adapter + token.
   // From here on, every POS call goes through ctx.adapter: a Clover location
   // can never reach Square and vice versa.
-  const chk = await query<{ id: string }>(
-    `SELECT id FROM checks WHERE external_check_ref = $1 OR square_order_id = $1`,
-    [checkRef],
-  );
+  const chk = input.checkId
+    ? await query<{ id: string }>(`SELECT id FROM checks WHERE id = $1`, [input.checkId])
+    : await query<{ id: string }>(
+        `SELECT id FROM checks WHERE external_check_ref = $1 OR square_order_id = $1`,
+        [checkRef],
+      );
   if (chk.rowCount === 0) throw badRequest('check is not linked to a table yet — link it first');
   const checkId = chk.rows[0].id;
   const ctx = await getCheckPos(checkId);

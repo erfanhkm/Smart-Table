@@ -10,7 +10,30 @@ import { badRequest, notFound } from '../http.js';
 import { getLocationPos } from '../services/pos/context.js';
 import { assertSquareId, searchOpenOrders } from '../square.js';
 import { parsePaymentBody, payCheck } from '../services/payments.js';
-import { staffOnly } from '../auth.js';
+import { requirePortalRole, scopedLocationId, staffOnly } from '../auth.js';
+
+/** C-11: validate a Google review URL by parsing it — the old regex accepted
+ * https://google.attacker.com/maps. Hosts: google.<tld>[/maps...], g.page,
+ * goo.gl, maps.app.goo.gl only. */
+export function isValidGoogleReviewUrl(url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'https:') return false;
+  const host = u.hostname.toLowerCase();
+  if (host === 'g.page' || host === 'goo.gl' || host === 'maps.app.goo.gl') return true;
+  const parts = host.split('.');
+  const bare = parts[0] === 'www' ? parts.slice(1) : parts;
+  // google.<tld> or maps.google.<tld>, TLD parts short alpha only — this is
+  // what stops google.attacker.com (its "tld" part is 7 chars + extra label).
+  const g = bare[0] === 'maps' ? bare.slice(1) : bare;
+  if (g[0] !== 'google' || g.length < 2 || g.length > 3) return false;
+  if (!g.slice(1).every((p) => /^[a-z]{2,3}$/.test(p))) return false;
+  return u.pathname.startsWith('/maps');
+}
 
 export async function staffRoutes(app: FastifyInstance) {
   app.get('/api/locations', staffOnly, async (req) => {
@@ -101,6 +124,8 @@ export async function staffRoutes(app: FastifyInstance) {
     const id = (req.params as { id: string }).id;
     // Portal users can only change their own location.
     if (u && u.location_id !== id) throw badRequest('not your location');
+    // Settings are an owner/manager action (C-10).
+    requirePortalRole(req, 'owner', 'manager');
     const body = (req.body ?? {}) as {
       qr_ordering_enabled?: unknown;
       loyalty_enabled?: unknown;
@@ -130,7 +155,7 @@ export async function staffRoutes(app: FastifyInstance) {
     }
     if (body.google_review_url !== undefined) {
       const url = typeof body.google_review_url === 'string' ? body.google_review_url.trim() : '';
-      if (url && !/^https:\/\/(www\.)?(google\.[a-z.]+\/maps|g\.page|goo\.gl)\//.test(url)) {
+      if (url && !isValidGoogleReviewUrl(url)) {
         throw badRequest('google_review_url must be a Google Maps / g.page link');
       }
       sets.push(`google_review_url = $${i++}`); vals.push(url || null);
@@ -147,10 +172,11 @@ export async function staffRoutes(app: FastifyInstance) {
 
   // Generic: live open checks from the location's POS.
   // location_id = OUR location id (as returned by /api/locations).
+  // v0.6.5 (C-2): portal users are pinned to their own location.
   app.get('/api/pos-open-checks', staffOnly, async (req) => {
     const { location_id } = req.query as { location_id?: string };
-    if (!location_id) throw badRequest('location_id is required');
-    const ctx = await getLocationPos(location_id).catch(() => null);
+    const scopedId = scopedLocationId(req, location_id);
+    const ctx = await getLocationPos(scopedId).catch(() => null);
     if (!ctx) throw notFound('unknown location_id');
     const checks = await ctx.adapter.listOpenChecks(ctx.locationRef, ctx.token);
     return {
@@ -169,17 +195,17 @@ export async function staffRoutes(app: FastifyInstance) {
   // Legacy (portal compat): Square-shaped open orders; Square locations only.
   app.get('/api/square-open-orders', staffOnly, async (req) => {
     const { location_id } = req.query as { location_id?: string };
-    if (!location_id) throw badRequest('location_id is required');
+    const scopedId = scopedLocationId(req, location_id);
     const loc = await query<{ pos_type: string; square_location_id: string; pos_location_ref: string | null }>(
       `SELECT pos_type, square_location_id, pos_location_ref FROM locations WHERE id = $1`,
-      [location_id],
+      [scopedId],
     );
     if (loc.rowCount === 0) throw notFound('unknown location_id');
     if (loc.rows[0].pos_type !== 'square') {
       throw badRequest('this location is not a Square location; use /api/pos-open-checks');
     }
     const ref = loc.rows[0].pos_location_ref ?? loc.rows[0].square_location_id;
-    const ctx = await getLocationPos(location_id);
+    const ctx = await getLocationPos(scopedId);
     const { orders } = await searchOpenOrders(assertSquareId(ref, 'square_location_id'), ctx.token);
     return {
       orders: (orders ?? []).map((o) => ({
@@ -196,9 +222,37 @@ export async function staffRoutes(app: FastifyInstance) {
   // Staff records a payment that happened outside the POS (cash, ...).
   // Same body as the guest endpoint minus card_nonce (idempotency_key is required here too).
   // :ref is the POS-native check reference.
+  //
+  // v0.6.5 (C-1, Critical): this used to run payCheck against ANY check on
+  // the platform by bare ref — any portal user could close another
+  // restaurant's bill with a fake cash payment. Now: the check is resolved
+  // first, its location (from its table / its own location_id) must be the
+  // caller's, portal users need the owner/manager role, payCheck runs
+  // against the verified internal check id, and the actor is recorded.
   app.post('/api/checks/:ref/record-external-payment', staffOnly, async (req) => {
     const ref = String((req.params as { ref: string }).ref ?? '');
     const p = parsePaymentBody(req.body);
-    return payCheck({ checkRef: ref, ...p, source: { kind: 'external', label: 'Smart Table staff' } });
+    requirePortalRole(req, 'owner', 'manager');
+    const u = req.portalUser;
+    const rows = await query<{ id: string; location_id: string | null }>(
+      `SELECT c.id, COALESCE(c.location_id, t.location_id) AS location_id
+       FROM checks c LEFT JOIN tables t ON t.id = c.table_id
+       WHERE c.external_check_ref = $1 OR c.square_order_id = $1`,
+      [ref],
+    );
+    const row = u ? rows.rows.find((r) => r.location_id === u.location_id) : rows.rows[0];
+    if (!row) throw notFound('check not found');
+    const result = await payCheck({
+      checkRef: ref,
+      checkId: row.id,
+      ...p,
+      source: { kind: 'external', label: 'Smart Table staff' },
+    });
+    // B-11: audit who recorded this outside-rail payment.
+    await query(`UPDATE payments SET recorded_by = $1 WHERE idempotency_key = $2`, [
+      u ? u.id : 'staff-token',
+      p.idempotencyKey,
+    ]).catch(() => undefined);
+    return result;
   });
 }

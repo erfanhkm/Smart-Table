@@ -126,16 +126,17 @@ describe('H3/H4/M1: order idempotency and abuse guards', () => {
     const checkId = randomUUID();
     const ref = `ref-${randomUUID()}`;
     await query(
-      `INSERT INTO checks(id, table_id, external_check_ref, pos_type, merchant_id, state, total_cents, currency)
-       VALUES ($1,$2,$3,'square',$4,'COMPLETED',1000,'CAD')`,
-      [checkId, tableId, ref, merchantId],
+      `INSERT INTO checks(id, table_id, location_id, external_check_ref, pos_type, merchant_id, state, total_cents, currency)
+       VALUES ($1,$2,$5,$3,'square',$4,'COMPLETED',1000,'CAD')`,
+      [checkId, tableId, ref, merchantId, locationId],
     );
     // A duplicate insert with different table/state must NOT change the row.
+    // v0.6.5 (C-4): identity is (location_id, pos_type, external_check_ref).
     await query(
-      `INSERT INTO checks(id, table_id, external_check_ref, pos_type, merchant_id, state, total_cents, currency)
-       VALUES ($1,$2,$3,'square',$4,'OPEN',2000,'CAD')
-       ON CONFLICT (pos_type, external_check_ref) DO NOTHING`,
-      [randomUUID(), otherTableId, ref, merchantId],
+      `INSERT INTO checks(id, table_id, location_id, external_check_ref, pos_type, merchant_id, state, total_cents, currency)
+       VALUES ($1,$2,$5,$3,'square',$4,'OPEN',2000,'CAD')
+       ON CONFLICT (location_id, pos_type, external_check_ref) DO NOTHING`,
+      [randomUUID(), otherTableId, ref, merchantId, locationId],
     );
     const row = await query(`SELECT table_id, state, total_cents FROM checks WHERE external_check_ref = $1`, [ref]);
     assert.equal(row.rows[0].table_id, tableId);

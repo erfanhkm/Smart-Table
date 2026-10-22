@@ -74,8 +74,12 @@ function assertInvoiceId(id: unknown): string {
 }
 
 async function hc<T>(method: string, path: string, body?: unknown, token?: string, idempotencyKey?: string): Promise<T> {
-  const t = token ?? config.helcimApiToken;
-  if (!t) throw new Error('Helcim token is not set (pass an API token or set HELCIM_API_TOKEN)');
+  // v0.6.5 (E-5): the merchant's own token is REQUIRED. The old
+  // `?? config.helcimApiToken` fallback silently ran a production location's
+  // charges against Smart Table's own Helcim account. Demo locations get the
+  // app-level token from pos/context.ts (explicit locations.demo flag).
+  const t = token;
+  if (!t) throw new Error('helcim is not connected for this location (no POS credential stored)');
   const headers: Record<string, string> = {
     'api-token': t,
     accept: 'application/json',
@@ -181,7 +185,7 @@ class HelcimAdapter implements PosAdapter {
    */
   async chargeCard(args: ChargeCardArgs): Promise<PosPaymentResult> {
     const invoiceId = assertInvoiceId(args.checkId);
-    const apiToken = args.card.privateToken ?? args.token ?? config.helcimApiToken;
+    const apiToken = args.card.privateToken ?? args.token;
     if (!apiToken) {
       throw badRequest('card payments are not configured for this merchant (missing Helcim API token)');
     }
@@ -224,7 +228,7 @@ class HelcimAdapter implements PosAdapter {
    * the modal returns a cardToken for chargeCard. [S6] unverified.
    */
   async getCardConfig(_locationRef: string, card: CardCredentials, token?: string): Promise<CardPaymentConfig> {
-    const apiToken = card.privateToken ?? token ?? config.helcimApiToken;
+    const apiToken = card.privateToken ?? token;
     if (!apiToken) {
       throw badRequest('card payments are not configured for this merchant (missing Helcim API token)');
     }

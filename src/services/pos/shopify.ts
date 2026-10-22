@@ -87,8 +87,10 @@ function adminBase(shop: string): string {
 }
 
 async function sh<T>(shop: string, method: string, path: string, body?: unknown, token?: string): Promise<T> {
-  const t = token ?? config.shopifyAdminToken;
-  if (!t) throw new Error('Shopify token is not set (pass an Admin API token or set SHOPIFY_ADMIN_TOKEN)');
+  // v0.6.5 (E-5): the merchant's own token is REQUIRED — no fallback to the
+  // platform's SHOPIFY_ADMIN_TOKEN (demo locations are resolved in context.ts).
+  const t = token;
+  if (!t) throw new Error('shopify is not connected for this location (no POS credential stored)');
   const res = await fetch(adminBase(shop) + path, {
     method,
     headers: {

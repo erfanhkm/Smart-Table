@@ -62,6 +62,9 @@ export async function customerRoutes(app: FastifyInstance) {
       `SELECT * FROM checks WHERE table_id = $1 AND state = 'OPEN' ORDER BY created_at ASC`,
       [table.id],
     );
+    // C-12: the poll may identify the caller's device to flag its own claims;
+    // raw device ids are never returned.
+    const myDevice = String((req.query as { device_id?: unknown }).device_id ?? '').slice(0, 64) || undefined;
     const checks = [];
     for (const row of c.rows) {
       try {
@@ -69,7 +72,7 @@ export async function customerRoutes(app: FastifyInstance) {
         const detail = await ctx.adapter.getCheckDetail(ctx.checkRef, ctx.token);
         const view = billView(detail, row) as ReturnType<typeof billView> & { item_claims: unknown[] };
         // Group Pay (idea 2): live item claims ride along with the bill poll.
-        view.item_claims = await listClaims(row.id);
+        view.item_claims = await listClaims(row.id, myDevice);
         checks.push(view);
       } catch {
         // Skip checks whose POS order vanished; don't break the whole page.
@@ -188,12 +191,22 @@ export async function customerRoutes(app: FastifyInstance) {
     // Validate the payment body (idempotency_key, mode, amounts) before
     // touching the DB, so malformed requests get 400 even for unknown checks.
     const p = parsePaymentBody(body);
-    // Resolve the POS to validate the token shape precisely (payCheck re-validates).
-    let row;
-    try {
-      row = await loadCheckRow(ref);
-    } catch {
-      throw badRequest('check is not linked to a table yet — link it first');
+    // v0.6.5 (C-3, High): pay requires the table's QR token, exactly like the
+    // bill view and claims. A bare POS ref was enough to charge a card
+    // against any check — an enumeration oracle for card testing and a way
+    // to close strangers' bills. The check is then resolved by its verified
+    // internal id, never by the bare ref (B-6).
+    const tableToken = String((req.query as { table_token?: unknown }).table_token ?? '');
+    if (!tableToken) throw badRequest('table_token is required');
+    const row = await assertTableToken(ref, tableToken);
+    // New charges only from a live table; a replayed idempotency key skips
+    // the gate so payCheck can return its stored result.
+    const prior = await query(`SELECT 1 FROM payments WHERE idempotency_key = $1`, [p.idempotencyKey]);
+    if (prior.rowCount === 0) {
+      const tbl = await query<{ state: string }>(`SELECT state FROM tables WHERE id = $1`, [row.table_id]);
+      if (!tbl.rows[0] || (tbl.rows[0].state !== 'SEATED' && tbl.rows[0].state !== 'PAYING')) {
+        throw badRequest('table is not seated');
+      }
     }
     const posType = (await getCheckPos(row.id)).posType;
     const ok =
@@ -218,7 +231,7 @@ export async function customerRoutes(app: FastifyInstance) {
         p.payerLabel = method === 'apple_pay' ? 'Apple Pay' : 'Google Pay';
       }
     }
-    const result = await payCheck({ checkRef: ref, ...p, source: { kind: 'card', nonce } });
+    const result = await payCheck({ checkRef: ref, checkId: row.id, ...p, source: { kind: 'card', nonce } });
     // Group Pay (idea 2): a successful payment releases claims — the payer's
     // own claims in "items" mode; every claim when the whole bill was paid.
     // Claims are coordination only: never fail a completed payment over them.
@@ -528,13 +541,15 @@ export async function customerRoutes(app: FastifyInstance) {
       const detail = await ctx.adapter.getCheckDetail(checkId, ctx.token);
       const checkDbId = randomUUID();
       // M1 fix: DO NOTHING on conflict — never re-point or re-open a check.
+      // v0.6.5 (C-4): identity is (location_id, pos_type, ref).
       await query(
-        `INSERT INTO checks(id, table_id, square_order_id, external_check_ref, pos_type, merchant_id, state, total_cents, currency)
-         VALUES ($1,$2,$3,$4,$5,$6,'OPEN',$7,$8)
-         ON CONFLICT (pos_type, external_check_ref) DO NOTHING`,
+        `INSERT INTO checks(id, table_id, location_id, square_order_id, external_check_ref, pos_type, merchant_id, state, total_cents, currency)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'OPEN',$8,$9)
+         ON CONFLICT (location_id, pos_type, external_check_ref) DO NOTHING`,
         [
           checkDbId,
           table.id,
+          table.location_id,
           ctx.posType === 'square' ? checkId : null,
           checkId,
           ctx.posType,
@@ -562,7 +577,11 @@ export async function customerRoutes(app: FastifyInstance) {
   // :ref is the POS-native check reference.
   app.get('/api/checks/:ref/card-config', async (req) => {
     const ref = String((req.params as { ref: string }).ref ?? '');
-    const row = await loadCheckRow(ref);
+    // v0.6.5 (C-3): same table-token binding as pay — card-config hands out
+    // the location's payment configuration, so a bare ref must not unlock it.
+    const tableToken = String((req.query as { table_token?: unknown }).table_token ?? '');
+    if (!tableToken) throw badRequest('table_token is required');
+    const row = await assertTableToken(ref, tableToken);
     const ctx = await getCheckPos(row.id);
     if (!ctx.adapter.getCardConfig || !ctx.adapter.chargeCard) {
       throw badRequest(`card payments are not supported for ${ctx.posType} locations`);

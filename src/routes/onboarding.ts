@@ -24,14 +24,13 @@ import { staffOnly } from '../auth.js';
 import { getLocationPos } from '../services/pos/context.js';
 import { PosType } from '../services/pos/types.js';
 
-/** App-level demo credential configured for this POS type (demo mode). */
-function demoConfigured(posType: PosType): boolean {
-  switch (posType) {
-    case 'square': return !!config.squareAccessToken;
-    case 'helcim': return !!config.helcimApiToken;
-    case 'shopify': return !!config.shopifyAdminToken;
-    default: return false;
-  }
+/** v0.6.5 (C-5): "connected" means a real credential row exists, or the
+ * location is explicitly flagged demo (founder-controlled). The mere
+ * presence of an app-level env token no longer marks a location connected —
+ * that is exactly the state that used to route a production location's
+ * payments into the platform's own POS account. */
+function demoConfigured(loc: LocationRow): boolean {
+  return loc.demo === true;
 }
 
 function resolveLocationId(req: FastifyRequest, given?: unknown): string {
@@ -53,12 +52,13 @@ interface LocationRow {
   onboarding_dismissed: boolean;
   menu_verified_at: string | null;
   menu_item_count: number | null;
+  demo: boolean;
 }
 
 async function loadLocation(locationId: string): Promise<LocationRow> {
   const r = await query<LocationRow>(
     `SELECT id, merchant_id, pos_type, pos_location_ref, square_location_id,
-            onboarding_dismissed, menu_verified_at, menu_item_count
+            onboarding_dismissed, menu_verified_at, menu_item_count, demo
      FROM locations WHERE id = $1`,
     [locationId],
   );
@@ -72,7 +72,7 @@ async function onboardingState(loc: LocationRow) {
     [loc.merchant_id, loc.pos_type],
   );
   const locationRef = loc.pos_location_ref ?? loc.square_location_id;
-  const posConnected = cred.rowCount > 0 || (!!locationRef && demoConfigured(loc.pos_type as PosType));
+  const posConnected = cred.rowCount > 0 || (!!locationRef && demoConfigured(loc));
   const tables = await query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM tables WHERE location_id = $1`, [loc.id]);
   const tablesCount = parseInt(tables.rows[0]?.n ?? '0', 10);
   const menuVerified = !!loc.menu_verified_at;

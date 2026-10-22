@@ -333,7 +333,7 @@ const tipCentsFor = (pay) => (tipPct === 0 ? 0 : Math.round(pay * (tipPct / 100)
 let cardConfigCache = {};
 async function getCardConfig(checkRef) {
     if (!cardConfigCache[checkRef]) {
-        const res = await fetch(`/api/checks/${encodeURIComponent(checkRef)}/card-config`);
+        const res = await fetch(`/api/checks/${encodeURIComponent(checkRef)}/card-config?table_token=${encodeURIComponent(tableToken)}`);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Card payments are not available at this location.');
         cardConfigCache[checkRef] = data;
@@ -535,7 +535,7 @@ async function getCardToken(checkRef) {
 async function fetchBill() {
     if (receipt || !tableToken) return;
     try {
-        const res = await fetch(`/api/t/${encodeURIComponent(tableToken)}`);
+        const res = await fetch(`/api/t/${encodeURIComponent(tableToken)}?device_id=${encodeURIComponent(deviceId)}`);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Failed to load table info');
         table = data.table; check = data.check; loadFailed = false;
@@ -545,7 +545,7 @@ async function fetchBill() {
         }
         // My selection mirrors my server-side claims (Group Pay).
         items = {};
-        if (check) check.items.forEach((it, idx) => { const c = claimAt(idx); if (c && c.device_id === deviceId) items[idx] = true; });
+        if (check) check.items.forEach((it, idx) => { const c = claimAt(idx); if (c && c.mine) items[idx] = true; });
         orderingEnabled = !!data.ordering_enabled;
         loyaltyEnabled = !!data.loyalty_enabled;
         reconcileAttempt();
@@ -799,7 +799,7 @@ async function processPayment(tokenGetter, methodLabel) {
 
         let res;
         try {
-            res = await fetch(`/api/checks/${encodeURIComponent(orderId)}/pay`, {
+            res = await fetch(`/api/checks/${encodeURIComponent(orderId)}/pay?table_token=${encodeURIComponent(tableToken)}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ mode: a.mode, amount_cents: a.amount, tip_cents: a.tip, card_nonce: nonce, idempotency_key: a.key, device_id: deviceId, payment_method: methodLabel || 'card' }),

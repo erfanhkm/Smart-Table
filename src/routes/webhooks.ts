@@ -161,7 +161,15 @@ export async function webhookRoutes(app: FastifyInstance) {
     if (posType === 'square') {
       return reply.code(404).send({ error: 'use /api/webhooks/square for Square' });
     }
-    const adapter = getAdapter(posType);
+    // D-13: an unimplemented POS type throws a plain Error out of
+    // getAdapter — that must be a 404 to the (unauthenticated) caller,
+    // never a 500.
+    let adapter;
+    try {
+      adapter = getAdapter(posType);
+    } catch {
+      return reply.code(404).send({ error: 'POS not supported' });
+    }
     const raw = ((req as unknown as { rawBody?: string }).rawBody ?? '');
 
     let events;

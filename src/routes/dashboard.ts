@@ -6,7 +6,7 @@ import ExcelJS from 'exceljs';
 import { query } from '../db.js';
 import { getOpenWaiterCalls, getTables } from '../services/floor.js';
 import { badRequest } from '../http.js';
-import { staffOnly } from '../auth.js';
+import { scopedLocationId, staffOnly } from '../auth.js';
 
 interface Ev {
   table_id: string | null;
@@ -183,22 +183,23 @@ async function eventStats(locationId: string, sinceIso: string): Promise<EventSt
 export async function dashboardRoutes(app: FastifyInstance) {
   app.get('/api/dashboard/overview', staffOnly, async (req) => {
     const { location_id } = req.query as { location_id?: string };
-    if (!location_id) throw badRequest('location_id is required');
-    const tables = await getTables(location_id);
-    const waiter_calls = await getOpenWaiterCalls(location_id, 20);
+    // v0.6.5 (C-2): portal users only ever see their own location's floor.
+    const scopedId = scopedLocationId(req, location_id);
+    const tables = await getTables(scopedId);
+    const waiter_calls = await getOpenWaiterCalls(scopedId, 20);
     return { tables, waiter_calls };
   });
 
   app.get('/api/dashboard/metrics', staffOnly, async (req) => {
     const { location_id, days } = req.query as { location_id?: string; days?: string };
-    if (!location_id) throw badRequest('location_id is required');
+    const scopedId = scopedLocationId(req, location_id);
     const windowDays = Math.min(Math.max(parseInt(days ?? '7', 10) || 7, 1), 90);
     const since = new Date(Date.now() - windowDays * 86400000).toISOString();
     return {
       window_days: windowDays,
-      ...(await eventStats(location_id, since)),
-      daily: await dailyBreakdown(location_id, since),
-      tables: await tableBreakdown(location_id, since),
+      ...(await eventStats(scopedId, since)),
+      daily: await dailyBreakdown(scopedId, since),
+      tables: await tableBreakdown(scopedId, since),
     };
   });
 

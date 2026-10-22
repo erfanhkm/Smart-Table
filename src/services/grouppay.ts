@@ -51,11 +51,21 @@ export async function releaseAllClaims(checkId: string): Promise<void> {
   await query(`DELETE FROM item_claims WHERE check_id = $1`, [checkId]);
 }
 
-export async function listClaims(checkId: string) {
-  const r = await query(
+/**
+ * Claims for the bill poll. v0.6.5 (C-12): raw device_id is personal data and
+ * left the API on every poll — other guests learned each other's device ids.
+ * Callers pass their own device id and get back only a `mine` flag.
+ */
+export async function listClaims(checkId: string, forDeviceId?: string) {
+  const r = await query<{ item_index: number; item_fingerprint: string; device_id: string; claimed_at: string }>(
     `SELECT item_index, item_fingerprint, device_id, claimed_at FROM item_claims
      WHERE check_id = $1 ORDER BY claimed_at`,
     [checkId],
   );
-  return r.rows;
+  return r.rows.map((row) => ({
+    item_index: row.item_index,
+    item_fingerprint: row.item_fingerprint,
+    claimed_at: row.claimed_at,
+    mine: !!forDeviceId && row.device_id === forDeviceId,
+  }));
 }

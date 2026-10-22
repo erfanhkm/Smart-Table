@@ -3,7 +3,7 @@
 // partial). Portal users only ever touch their own location; the
 // staff-token caller may act on any location (same pattern as billing).
 import { FastifyInstance, FastifyRequest } from 'fastify';
-import { staffOnly } from '../auth.js';
+import { requirePortalRole, staffOnly } from '../auth.js';
 import { badRequest, forbidden, notFound } from '../http.js';
 import { query } from '../db.js';
 import { listCheckPayments, refundPayment } from '../services/refunds.js';
@@ -55,6 +55,8 @@ export async function refundRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/api/portal/payments/:paymentId/refund', staffOnly, async (req) => {
+    // Refunds are an owner/manager action (C-10).
+    requirePortalRole(req, 'owner', 'manager');
     const paymentId = String((req.params as { paymentId: string }).paymentId ?? '');
     const body = (req.body ?? {}) as Record<string, unknown>;
     const row = (await query<{ check_id: string }>(`SELECT check_id FROM payments WHERE id = $1`, [paymentId])).rows[0];

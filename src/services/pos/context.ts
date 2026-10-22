@@ -6,13 +6,27 @@
 // A Square location therefore ALWAYS gets the Square adapter with the
 // Square token; a Clover location can never see Square credentials.
 //
-// Adapters fall back to app-level demo tokens when no per-merchant
-// credential row exists (single-location demo mode).
+// v0.6.5 (Claude review C-5/E-5/D-9): NO implicit app-level fallback.
+// Adapters throw when they get no token. The single exception is a
+// location explicitly flagged locations.demo = true (founder-controlled):
+// only then does the platform's app-level credential stand in, and only
+// here — never inside an adapter.
 import { query } from '../../db.js';
+import { config } from '../../config.js';
 import { decryptSecret, encryptSecret } from '../../crypto.js';
 import { getAdapter } from './registry.js';
 import { assertPosType, CardCredentials, PosAdapter, PosMenuItem, PosType } from './types.js';
 import { badRequest, notFound } from '../../http.js';
+
+/** App-level credential for an explicitly demo-flagged location. */
+function demoTokenFor(posType: PosType): string | undefined {
+  switch (posType) {
+    case 'square': return config.squareAccessToken || undefined;
+    case 'shopify': return config.shopifyAdminToken || undefined;
+    case 'helcim': return config.helcimApiToken || undefined;
+    default: return undefined; // Clover has no valid app-level merchant token.
+  }
+}
 
 // M4 fix: in-memory menu cache (45s per location). /menu and createCheck both
 // hit the POS catalog; without a cache an attacker can burn the merchant's
@@ -43,7 +57,8 @@ export function invalidateMenuCache(posType: string, locationRef: string): void 
 export interface PosContext {
   adapter: PosAdapter;
   posType: PosType;
-  /** Decrypted per-merchant token, or undefined -> adapter uses its app-level demo token. */
+  /** Decrypted per-merchant token (or the app-level demo credential for a
+   * demo-flagged location). Undefined = not connected: adapters must throw. */
   token: string | undefined;
   /** Card processing credentials (decrypted private token), or empty -> card payments unavailable. */
   card: CardCredentials;
@@ -58,13 +73,14 @@ interface LocationRow {
   pos_type: string;
   pos_location_ref: string | null;
   square_location_id: string | null;
+  demo: boolean;
 }
 
 /** Resolve the adapter + credentials for a location. Throws 404 for unknown locations. */
 export async function getLocationPos(locationId: string): Promise<PosContext> {
   if (typeof locationId !== 'string' || !locationId) throw badRequest('location_id is required');
   const r = await query<LocationRow>(
-    `SELECT id, merchant_id, pos_type, pos_location_ref, square_location_id FROM locations WHERE id = $1`,
+    `SELECT id, merchant_id, pos_type, pos_location_ref, square_location_id, demo FROM locations WHERE id = $1`,
     [locationId],
   );
   if (r.rowCount === 0) throw notFound('unknown location_id');
@@ -84,6 +100,10 @@ export async function getLocationPos(locationId: string): Promise<PosContext> {
     if (cred.rows[0].card_public_token) card.publicToken = cred.rows[0].card_public_token;
     if (cred.rows[0].card_private_token_enc) card.privateToken = decryptSecret(cred.rows[0].card_private_token_enc);
   }
+  // Explicit demo mode only (v0.6.5): a founder-flagged demo location runs
+  // on the platform's app-level credential. Every other location without its
+  // own credential row stays token-less and its adapter calls throw.
+  if (!token && loc.demo) token = demoTokenFor(posType);
   return { adapter: getAdapter(posType), posType, token, card, locationRef, merchantId: loc.merchant_id };
 }
 

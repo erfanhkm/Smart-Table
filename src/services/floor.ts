@@ -8,7 +8,6 @@ export interface TableView {
   id: string;
   name: string;
   state: string;
-  qr_token: string;
   location_id: string;
   open_order_id: string | null;
   paid_cents: number;
@@ -24,8 +23,12 @@ function requireLocation(locationId: unknown, fn: string): string {
 export async function getTables(locationId: string): Promise<TableView[]> {
   const loc = requireLocation(locationId, 'getTables');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // v0.6.5 (C-2): qr_token is the table's guest credential — it is NOT part
+  // of list views anymore. Printing uses GET /api/tables/:id/qr (scoped),
+  // rotation returns the new token once. A list response must never carry
+  // every table's credential.
   const tables = await query<any>(
-    `SELECT t.id, t.name, t.state, t.qr_token, t.location_id FROM tables t
+    `SELECT t.id, t.name, t.state, t.location_id FROM tables t
      WHERE t.location_id = $1
      ORDER BY t.name`,
     [loc],
@@ -56,7 +59,6 @@ export async function getTables(locationId: string): Promise<TableView[]> {
     id: t.id,
     name: t.name,
     state: t.state,
-    qr_token: t.qr_token,
     location_id: t.location_id,
     open_order_id: openByTable.get(t.id) ?? null,
     paid_cents: paidByTable.get(t.id) ?? 0,

@@ -185,8 +185,10 @@ export interface CardCredentials {
  * Conventions:
  * - `locationRef` is the POS-native location/merchant/site id (for Square:
  *   the Square location id). Adapters validate it before use.
- * - `token` is a per-merchant OAuth access token; when omitted the adapter
- *   falls back to the app-level configured token (single-location demo mode).
+ * - `token` is the location's OWN credential, resolved by pos/context.ts:
+ *   the per-merchant row, or the app-level token ONLY for a location
+ *   explicitly flagged demo. Adapters must throw when it is undefined —
+ *   never fall back to an app-level token on their own (v0.6.5, D-9/E-5).
  * - recordExternalPayment records money that moved OUTSIDE the POS
  *   (cash, e-transfer): it must be idempotent on `idempotencyKey`.
  * - chargeCard / getCardConfig are optional: only POS with a guest card

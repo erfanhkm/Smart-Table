@@ -3,7 +3,7 @@
 // on their own location; staff-token callers pass location_id explicitly
 // (same pattern as onboarding.ts).
 import { FastifyInstance, FastifyRequest } from 'fastify';
-import { staffOnly } from '../auth.js';
+import { requirePortalRole, staffOnly } from '../auth.js';
 import { badRequest } from '../http.js';
 import {
   billingHistory,
@@ -56,6 +56,8 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/api/portal/billing/card', staffOnly, async (req) => {
+    // Card on file is an owner/manager action (C-10).
+    requirePortalRole(req, 'owner', 'manager');
     const body = (req.body ?? {}) as Record<string, unknown>;
     const locationId = resolveLocationId(req, body.location_id);
     const sourceId = typeof body.source_id === 'string' ? body.source_id : '';
@@ -67,6 +69,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/api/portal/billing/plan', staffOnly, async (req) => {
+    requirePortalRole(req, 'owner', 'manager');
     const body = (req.body ?? {}) as Record<string, unknown>;
     const locationId = resolveLocationId(req, body.location_id);
     const plan = body.plan;
