@@ -2,16 +2,23 @@
 //
 // Separate from the restaurant owner portal (/portal). This is Erfan's own
 // dashboard: all locations, payment stats, system health, website analytics.
-// Authenticated with ADMIN_USERNAME + ADMIN_PASSWORD_HASH (env vars),
-// falling back to STAFF_API_TOKEN for API access.
+// Authenticated with ADMIN_USERNAME + ADMIN_PASSWORD_HASH (env vars) issuing
+// short-lived session tokens. v0.6.4: STAFF_API_TOKEN no longer grants founder
+// access — the staff token is tenant-wide by design and must never be a
+// skeleton key to billing runs and cross-location data.
 import { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { query } from '../db.js';
-import { isValidStaffToken, extractBearer } from '../auth.js';
+import { extractBearer } from '../auth.js';
 import { verifyPassword } from '../crypto.js';
 import { config } from '../config.js';
-import { badRequest } from '../http.js';
+import { badRequest, unauthorized } from '../http.js';
+import { rateLimit } from '../rate-limit.js';
 import { processAccruedFees } from '../services/billing.js';
+
+// Founder login is the highest-value credential in the system: strict
+// per-IP limiter (10 attempts / 15 min) on top of scrypt (v0.6.4).
+const adminLoginLimiter = rateLimit({ name: 'admin-login', windowMs: 15 * 60 * 1000, max: 10 });
 
 // Short-lived admin sessions (in-memory, single instance).
 const sessions = new Map<string, number>();
@@ -21,14 +28,14 @@ setInterval(() => {
   for (const [k, v] of sessions) if (v < now) sessions.delete(k);
 }, 60 * 60 * 1000).unref();
 
-/** Founder-only: STAFF_API_TOKEN bearer, or a valid admin session token. */
+/** Founder-only: a valid admin session token. Nothing else — see header. */
 async function founderOnly(req: any, reply: any) {
   const token = extractBearer(req.headers.authorization);
   if (!token) return reply.code(401).send({ error: 'unauthorized' });
-  if (isValidStaffToken(token)) return;
   const exp = sessions.get(token);
   if (exp && exp > Date.now()) return;
   sessions.delete(token);
+  req.log?.warn({ ip: req.ip, path: String(req.url ?? '').split('?')[0] }, 'admin auth failed');
   return reply.code(401).send({ error: 'unauthorized' });
 }
 
@@ -41,20 +48,31 @@ function daysAgo(n: number): string {
 export async function adminRoutes(app: FastifyInstance) {
   // ---- Username/password login ----
   // POST /api/admin/login { username, password } -> { token }
-  app.post('/api/admin/login', async (req) => {
+  app.post('/api/admin/login', { onRequest: adminLoginLimiter }, async (req) => {
     const body = (req.body ?? {}) as { username?: unknown; password?: unknown };
     const username = typeof body.username === 'string' ? body.username.trim() : '';
     const password = typeof body.password === 'string' ? body.password : '';
     const expectedUser = config.adminUsername;
     const expectedHash = config.adminPasswordHash;
     if (!expectedUser || !expectedHash) throw badRequest('admin login is not configured');
+    // Over-long passwords are rejected before scrypt so they can't be used to
+    // tie up the (small) scrypt worker pool (v0.6.4).
+    if (password.length > 200) {
+      req.log.warn({ ip: req.ip, username }, 'admin login failed');
+      throw unauthorized('invalid credentials');
+    }
     if (username !== expectedUser) {
       // Constant-time-ish: still verify to avoid user enumeration timing.
       await verifyPassword('dummy', expectedHash).catch(() => false);
-      throw badRequest('invalid credentials');
+      req.log.warn({ ip: req.ip, username }, 'admin login failed');
+      throw unauthorized('invalid credentials');
     }
     const ok = await verifyPassword(password, expectedHash);
-    if (!ok) throw badRequest('invalid credentials');
+    if (!ok) {
+      req.log.warn({ ip: req.ip, username }, 'admin login failed');
+      throw unauthorized('invalid credentials');
+    }
+    req.log.info({ ip: req.ip, username }, 'admin login succeeded');
     const token = randomUUID().replace(/-/g, '');
     sessions.set(token, Date.now() + SESSION_TTL_MS);
     return { ok: true, token };

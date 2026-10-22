@@ -315,7 +315,12 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
         // Subscription-plan locations are never charged per payment.
         let feeCents = 0;
         if (ctx.locationId) {
-          const acct = await ensureBillingAccount(ctx.locationId).catch(() => null);
+          const acct = await ensureBillingAccount(ctx.locationId).catch((e) => {
+            // Never silent (v0.6.4): a billing lookup failure means this charge
+            // goes out with NO fee — that must be visible in the logs.
+            console.error('[payments] ensureBillingAccount failed; charging without a fee:', e);
+            return null;
+          });
           if (acct && effectivePlan(acct) === 'commission') {
             feeCents = feeFor(amount + tipCents, acct.commission_bps);
           }
@@ -348,7 +353,11 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
             feeCents,
             currency: resultCurrency,
             method: posType === 'square' && res.feeCollected ? 'square_app_fee' : 'accrued',
-          }).catch(() => undefined);
+          }).catch((e) => {
+            // Never silent (v0.6.4): if this write fails, money was taken (or a
+            // fee is owed) with no ledger row — reconciliation needs the log.
+            console.error('[payments] recordFee failed after a successful charge:', e);
+          });
         }
         // H5 fix: persist the POS reference outside the transaction (see above).
         await query(
@@ -465,9 +474,14 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
     }
     if (isDefinitivePosError(e)) {
       // The POS rejected the request outright (declined card, bad token, ...): terminal for this key.
-      await query(`UPDATE payments SET status='FAILED' WHERE idempotency_key=$1 AND status='PENDING'`, [key]).catch(
-        () => undefined,
-      );
+      // v0.6.4: the ref guards mirror the key-freeing DELETE below — if a
+      // tender ref was already persisted (H5), a charge may exist at the POS
+      // and the row must stay reconcilable instead of being marked FAILED.
+      await query(
+        `UPDATE payments SET status='FAILED' WHERE idempotency_key=$1 AND status='PENDING'
+         AND pos_tender_ref IS NULL AND external_payment_ref IS NULL AND square_payment_id IS NULL`,
+        [key],
+      ).catch(() => undefined);
       const code = posErrorCode(e);
       throw httpError(402, 'the payment could not be completed', code ?? 'payment_declined');
     }

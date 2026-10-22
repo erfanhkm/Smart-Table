@@ -9,7 +9,10 @@ const nodeEnv = opt('NODE_ENV', 'development');
 
 export const config = {
   nodeEnv,
-  isProd: nodeEnv === 'production',
+  // Fail-closed (v0.6.4): anything that is not explicitly development or test
+  // counts as production. A missing/typo'd NODE_ENV previously disabled every
+  // production guard (webhook verification, db-driver checks, seed refusal).
+  isProd: nodeEnv !== 'development' && nodeEnv !== 'test',
   port: parseInt(opt('PORT', '3000'), 10),
   appUrl: opt('APP_URL', 'http://localhost:3000').replace(/\/$/, ''),
   databaseUrl: opt('DATABASE_URL'),

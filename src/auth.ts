@@ -40,7 +40,8 @@ export async function requireStaff(req: FastifyRequest, reply: FastifyReply): Pr
       return undefined;
     }
   }
-  req.log.warn({ url: req.url, ip: req.ip }, 'staff auth failed');
+  // Path only, never the query string: URLs here can carry table tokens.
+  req.log.warn({ path: req.url.split('?')[0], ip: req.ip }, 'staff auth failed');
   return reply.code(401).header('WWW-Authenticate', 'Bearer').send({ error: 'unauthorized' });
 }
 

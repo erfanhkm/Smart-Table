@@ -44,16 +44,29 @@ export function assertSquareId(id: unknown, label = 'id'): string {
 
 const pathSeg = (id: unknown, label: string): string => encodeURIComponent(assertSquareId(id, label));
 
-async function sq<T>(method: string, path: string, body?: unknown, token?: string): Promise<T> {
-  const t = token ?? requireSquareToken();
+// Hard ceiling on every Square call: a hung connection must fail fast and be
+// treated as "outcome unknown" by callers, never sit inside a DB transaction
+// or hang a guest's payment request (v0.6.4).
+const SQ_TIMEOUT_MS = 10_000;
+
+async function sq<T>(method: string, path: string, body: unknown, token: string | undefined): Promise<T> {
+  // v0.6.4: NO silent fallback to the platform token. A merchant-scoped call
+  // that forgets its token must fail loudly here — with the fallback it would
+  // silently run against Smart Table's own Square account instead.
+  if (!token) {
+    throw new Error(
+      'sq: an explicit Square access token is required (merchant calls pass the merchant token; platform calls pass requireSquareToken())',
+    );
+  }
   const res = await fetch(BASE + path, {
     method,
     headers: {
-      Authorization: `Bearer ${t}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
       'Square-Version': API_VERSION,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(SQ_TIMEOUT_MS),
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data: any = await res.json().catch(() => ({}));
@@ -276,6 +289,7 @@ export async function exchangeOAuthCode(code: string): Promise<{
       grant_type: 'authorization_code',
       redirect_uri: `${config.appUrl}/api/oauth/callback`,
     }),
+    signal: AbortSignal.timeout(SQ_TIMEOUT_MS),
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data: any = await res.json().catch(() => ({}));
@@ -305,7 +319,7 @@ export async function listLocations(token: string): Promise<{ locations?: any[] 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function platformLocation(): Promise<{ id: string; currency: string; name: string }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = await sq('GET', '/v2/locations');
+  const data: any = await sq('GET', '/v2/locations', undefined, requireSquareToken());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const loc = (data?.locations ?? []).find((l: any) => l?.status === 'ACTIVE') ?? data?.locations?.[0];
   if (!loc?.id) throw new Error('platform Square account has no location');
@@ -325,7 +339,7 @@ export async function createSubscriptionPlanVariation(
       id: '#smart-table-plan',
       subscription_plan_data: { name: 'Smart Table' },
     },
-  });
+  }, requireSquareToken());
   const planId = plan?.catalog_object?.id ?? plan?.object?.id;
   if (!planId) throw new Error('subscription plan creation returned no id');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -346,7 +360,7 @@ export async function createSubscriptionPlanVariation(
         ],
       },
     },
-  });
+  }, requireSquareToken());
   const variationId = variation?.catalog_object?.id ?? variation?.object?.id;
   if (!variationId) throw new Error('subscription plan variation creation returned no id');
   return String(variationId);
@@ -359,13 +373,13 @@ export async function createPlatformCustomer(companyName: string, email: string)
     idempotency_key: randomUUID(),
     company_name: companyName || 'Restaurant',
     email_address: email || undefined,
-  });
+  }, requireSquareToken());
   return data?.customer;
 }
 
 /** Add/replace the email on a platform customer (Square Subscriptions refuse customers without one). */
 export async function updatePlatformCustomerEmail(customerId: string, email: string): Promise<void> {
-  await sq('PUT', `/v2/customers/${pathSeg(customerId, 'customer_id')}`, { email_address: email });
+  await sq('PUT', `/v2/customers/${pathSeg(customerId, 'customer_id')}`, { email_address: email }, requireSquareToken());
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -383,12 +397,12 @@ export async function createPlatformCard(input: {
     source_id: input.sourceId,
     verification_token: input.verificationToken || undefined,
     card: { customer_id: input.customerId, cardholder_name: input.cardholderName || undefined },
-  });
+  }, requireSquareToken());
   return data?.card;
 }
 
 export async function disablePlatformCard(cardId: string): Promise<void> {
-  await sq('POST', `/v2/cards/${pathSeg(cardId, 'card_id')}/disable`, {});
+  await sq('POST', `/v2/cards/${pathSeg(cardId, 'card_id')}/disable`, {}, requireSquareToken());
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -407,28 +421,28 @@ export async function createPlatformSubscription(input: {
     plan_variation_id: input.planVariationId,
     card_id: input.cardId,
     timezone: 'America/Vancouver',
-  });
+  }, requireSquareToken());
   return data?.subscription;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function retrievePlatformSubscription(subscriptionId: string): Promise<any> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = await sq('GET', `/v2/subscriptions/${pathSeg(subscriptionId, 'subscription_id')}`);
+  const data: any = await sq('GET', `/v2/subscriptions/${pathSeg(subscriptionId, 'subscription_id')}`, undefined, requireSquareToken());
   return data?.subscription;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function cancelPlatformSubscription(subscriptionId: string): Promise<any> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = await sq('POST', `/v2/subscriptions/${pathSeg(subscriptionId, 'subscription_id')}/cancel`, {});
+  const data: any = await sq('POST', `/v2/subscriptions/${pathSeg(subscriptionId, 'subscription_id')}/cancel`, {}, requireSquareToken());
   return data?.subscription;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function retrievePlatformInvoice(invoiceId: string): Promise<any> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = await sq('GET', `/v2/invoices/${pathSeg(invoiceId, 'invoice_id')}`);
+  const data: any = await sq('GET', `/v2/invoices/${pathSeg(invoiceId, 'invoice_id')}`, undefined, requireSquareToken());
   return data?.invoice;
 }
 
@@ -452,6 +466,6 @@ export async function createPlatformCardCharge(input: {
     amount_money: { amount: input.amountCents, currency: input.currency },
     note: input.note?.slice(0, 500),
     autocomplete: true,
-  });
+  }, requireSquareToken());
   return data?.payment;
 }

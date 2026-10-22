@@ -9,22 +9,44 @@ import { badRequest, unauthorized } from '../http.js';
 
 const TOKEN_TTL_DAYS = 7;
 
-// Simple in-memory login rate limiter: 10 attempts per 5 minutes per IP.
+// Simple in-memory login rate limiter: 10 attempts per 5 minutes, tracked per
+// IP AND per email (v0.6.4: the per-IP counter alone let an attacker rotate
+// IPs against one account; the per-email counter closes that).
 // (Single-process; a distributed limiter comes with production hardening.)
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const loginAttemptsByEmail = new Map<string, { count: number; resetAt: number }>();
 const LOGIN_LIMIT = 10;
 const LOGIN_WINDOW_MS = 5 * 60 * 1000;
 
-function loginAllowed(ip: string): boolean {
+// Prune expired entries so the maps can't grow without bound (v0.6.4).
+setInterval(() => {
   const now = Date.now();
-  const e = loginAttempts.get(ip);
+  for (const [k, v] of loginAttempts) if (now >= v.resetAt) loginAttempts.delete(k);
+  for (const [k, v] of loginAttemptsByEmail) if (now >= v.resetAt) loginAttemptsByEmail.delete(k);
+}, 60 * 1000).unref();
+
+function bumpAndAllowed(map: Map<string, { count: number; resetAt: number }>, key: string): boolean {
+  const now = Date.now();
+  const e = map.get(key);
   if (!e || now >= e.resetAt) {
-    loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+    map.set(key, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
     return true;
   }
   e.count += 1;
   return e.count <= LOGIN_LIMIT;
 }
+
+function loginAllowed(ip: string, email: string): boolean {
+  const ipOk = bumpAndAllowed(loginAttempts, ip);
+  const emailOk = bumpAndAllowed(loginAttemptsByEmail, email);
+  return ipOk && emailOk;
+}
+
+// Precomputed scrypt hash of a throwaway password. Unknown-email logins verify
+// against this so they pay the same scrypt cost as real ones — otherwise the
+// response time reveals which emails have accounts (v0.6.4, mirrors admin.ts).
+const DUMMY_PASSWORD_HASH =
+  'scrypt$82718a0d4fc3d71d0bbd1a295ad48a7d$56c2749fc37bb2420f83ee4258029092ce9140412cb272d321549da40950d310a6faa951282f5e66c20d8be96ffd98fbaa2dc9d48adc19345dcd8534c1cc53e1';
 
 export interface PortalIdentity {
   id: string;
@@ -45,12 +67,12 @@ export async function portalRoutes(app: FastifyInstance): Promise<void> {
   // Public: exchange email+password for a bearer token.
   // Generic error on failure (no user enumeration). Rate-limited per IP.
   app.post('/api/portal/login', async (req: FastifyRequest, reply: FastifyReply) => {
-    if (!loginAllowed(req.ip)) {
-      return reply.code(429).send({ error: 'too many login attempts, try again in a few minutes' });
-    }
     const body = (req.body ?? {}) as Record<string, unknown>;
     const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
     const password = typeof body.password === 'string' ? body.password : '';
+    if (!loginAllowed(req.ip, email || '-')) {
+      return reply.code(429).send({ error: 'too many login attempts, try again in a few minutes' });
+    }
     if (!email || !password || email.length > 320 || password.length > 200) {
       throw badRequest('email and password are required');
     }
@@ -60,7 +82,9 @@ export async function portalRoutes(app: FastifyInstance): Promise<void> {
       [email],
     );
     const user = u.rows[0];
-    const ok = user ? await verifyPassword(password, user.password_hash) : false;
+    // Always run scrypt — against the dummy hash when the email is unknown —
+    // so timing does not reveal which emails exist (v0.6.4).
+    const ok = await verifyPassword(password, user ? user.password_hash : DUMMY_PASSWORD_HASH);
     if (!ok || !user) throw unauthorized('invalid email or password');
 
     const token = randomBytes(32).toString('hex');
@@ -102,7 +126,10 @@ export async function getPortalUser(presented: string): Promise<PortalIdentity |
       [hashToken(presented)],
     );
     return r.rows[0] ?? null;
-  } catch {
-    return null; // e.g. migration 003 not applied yet
+  } catch (e) {
+    // Fail closed, but never silently: a broken lookup (e.g. migration 003 not
+    // applied yet) must be visible in the logs, not look like a bad token.
+    console.error('[portal] getPortalUser lookup failed:', e);
+    return null;
   }
 }
