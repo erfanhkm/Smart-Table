@@ -33,6 +33,7 @@ import {
   SquareError,
 } from '../../square.js';
 import { verifySquareWebhook } from '../../crypto.js';
+import { badRequest } from '../../http.js';
 import { randomUUID } from 'node:crypto';
 import { config } from '../../config.js';
 import {
@@ -89,6 +90,25 @@ function mapDetail(order: AnyOrder): PosCheckDetail {
 }
 
 const firstHeader = (v: string | string[] | undefined): string => (Array.isArray(v) ? v[0] : v ?? '').split(',')[0]?.trim() ?? '';
+
+/**
+ * D-4: does this Square rejection blame the application fee itself?
+ * True when Square says the fee/scope is the problem — the seller lacks
+ * the PAYMENTS_WRITE_ADDITIONAL_RECIPIENTS OAuth scope (Square answers
+ * INSUFFICIENT_PERMISSIONS) or the error text names the app fee. A card
+ * decline never matches: retrying it without the fee would be a second,
+ * pointless charge attempt on a doomed card.
+ */
+function isAppFeeRejection(e: SquareError): boolean {
+  for (const err of e.errors ?? []) {
+    if (err?.code === 'INSUFFICIENT_PERMISSIONS') return true;
+    const text = `${String(err?.code ?? '')} ${String(err?.detail ?? '')}`.toLowerCase();
+    if (text.includes('app_fee') || text.includes('application fee') || text.includes('additional_recipients')) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export const squareAdapter: PosAdapter = {
   posType: 'square',
@@ -156,12 +176,15 @@ export const squareAdapter: PosAdapter = {
     //
     // v0.4 billing: the commission rides along as a Square application fee.
     // A guest payment must NEVER fail because of our fee: if Square
-    // definitively rejects the request while a fee is attached (e.g. the
-    // seller never granted the application-fee OAuth scope), retry ONCE
-    // without the fee under a derived idempotency key and report
+    // definitively rejects the request BECAUSE OF THE FEE (e.g. the seller
+    // never granted the application-fee OAuth scope), retry ONCE without
+    // the fee under a derived idempotency key and report
     // feeCollected=false — the fee then accrues in the ledger instead.
-    // Only definitive 4xx rejections are retried: a validation failure
-    // means no payment was created, so the retry cannot double-charge.
+    // D-4: the retry is ONLY for fee/scope rejections. Retrying a card
+    // decline (or any other definitive error) without the fee would just
+    // charge-attempt the same doomed card twice — declines must surface
+    // immediately so the payments row can be marked FAILED with the
+    // guest-safe decline code.
     const fee = args.appFeeCents && args.appFeeCents > 0 ? args.appFeeCents : 0;
     let payment;
     let feeCollected = false;
@@ -183,7 +206,7 @@ export const squareAdapter: PosAdapter = {
     } catch (e) {
       const definitive =
         e instanceof SquareError && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429;
-      if (fee <= 0 || !definitive) throw e;
+      if (fee <= 0 || !definitive || !isAppFeeRejection(e)) throw e;
       console.error(
         `[billing] Square rejected payment with app fee (order ${args.checkId}); retrying without fee:`,
         e.message,
@@ -212,14 +235,17 @@ export const squareAdapter: PosAdapter = {
   },
 
   async refundPayment(args: RefundPaymentArgs): Promise<PosRefundResult> {
+    // Local determinations in this method throw badRequest (F-2): the
+    // refund state machine treats a 4xx-carrying error as a DEFINITIVE
+    // rejection and anything else as an unknown outcome.
     // Only real card payments can be refunded through Square: an EXTERNAL
     // tender (cash recorded in the POS) never moved money through Square,
     // so there is nothing for Square to give back — staff refund cash at
     // the till. Verified against the payment object itself, not our rows.
     const { payment } = await retrievePayment(args.paymentId, args.token);
-    if (!payment) throw new Error('payment not found in Square');
+    if (!payment) throw badRequest('payment not found in Square');
     if (payment.source_type !== 'CARD') {
-      throw new Error('only card payments can be refunded here — cash is refunded at the till');
+      throw badRequest('only card payments can be refunded here — cash is refunded at the till');
     }
     if (payment.status === 'COMPLETED') {
       // Captured/settled: the Refunds API applies (partial allowed). Square
@@ -234,7 +260,7 @@ export const squareAdapter: PosAdapter = {
         },
         args.token,
       );
-      if (!refund?.id) throw new Error('Square refund creation failed');
+      if (!refund?.id) throw badRequest('Square refund creation failed');
       return { refundId: String(refund.id), status: String(refund.status ?? 'PENDING') };
     }
     if (payment.status === 'APPROVED') {
@@ -243,7 +269,7 @@ export const squareAdapter: PosAdapter = {
       // them, and the Refunds API will not touch them until they settle —
       // which takes seconds. Refuse with a clear "try again shortly".
       if (payment.order_id) {
-        throw new Error(
+        throw badRequest(
           'this payment is still settling with Square (usually under a minute) — refunds open as soon as it settles; try again shortly',
         );
       }
@@ -252,14 +278,14 @@ export const squareAdapter: PosAdapter = {
       const total =
         Number(payment.amount_money?.amount ?? 0) + Number(payment.tip_money?.amount ?? 0);
       if (args.amountCents !== total) {
-        throw new Error(
+        throw badRequest(
           'this payment has not settled yet — until it does, only a full void of the whole payment is possible (partial refunds open once it settles)',
         );
       }
       await cancelPayment(args.paymentId, args.token);
       return { refundId: args.paymentId, status: 'CANCELED' };
     }
-    throw new Error(`payment is ${String(payment.status ?? 'unknown')} in Square and cannot be refunded`);
+    throw badRequest(`payment is ${String(payment.status ?? 'unknown')} in Square and cannot be refunded`);
   },
 
   async getCardConfig(locationRef: string, _card: CardCredentials): Promise<CardPaymentConfig> {

@@ -32,6 +32,7 @@ import {
   createSubscriptionPlanVariation,
   disablePlatformCard,
   platformLocation,
+  searchPlatformSubscriptions,
   retrievePlatformInvoice,
   retrievePlatformSubscription,
   updatePlatformCustomerEmail,
@@ -64,6 +65,27 @@ export function feeFor(chargeCents: number, bps: number): number {
   if (!Number.isSafeInteger(chargeCents) || chargeCents <= 0) return 0;
   const fee = Math.round((chargeCents * bps) / 10000);
   return Math.max(0, Math.min(fee, chargeCents - 1));
+}
+
+// Per-location in-process mutex for billing mutations (E-3): switchPlan and
+// saveCard interleave Square API calls with DB reads/writes, so a double
+// click or a client retry could otherwise create duplicate Square
+// customers, cards or subscriptions. The service runs as a single instance;
+// cross-instance safety comes from the deterministic Square idempotency
+// keys, the atomic fee-ledger claim in processAccruedFees, and
+// search-before-create for subscriptions.
+const billingLocks = new Map<string, Promise<unknown>>();
+export function withBillingLock<T>(locationId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = billingLocks.get(locationId) ?? Promise.resolve();
+  const run = prev.then(fn, fn);
+  billingLocks.set(locationId, run.then(() => undefined, () => undefined));
+  return run;
+}
+
+/** A Square 4xx (other than timeout/rate-limit) is a definitive refusal. */
+function isDefinitiveSquareFailure(e: unknown): boolean {
+  const status = (e as { status?: unknown })?.status;
+  return typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
 export async function ensureBillingAccount(locationId: string): Promise<BillingAccount> {
@@ -172,9 +194,12 @@ export async function recordFee(input: {
   method: 'square_app_fee' | 'accrued';
 }): Promise<void> {
   if (input.feeCents <= 0) return;
+  // ON CONFLICT DO NOTHING + the partial unique index from migration 017
+  // (E-9): one original fee per payment per method, even if a completion
+  // path runs twice (webhook + poll, reconcile + live path).
   await query(
     `INSERT INTO fee_ledger(id, location_id, payment_row_id, pos_payment_ref, charge_cents, fee_cents, currency, method, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`,
     [
       randomUUID(),
       input.locationId,
@@ -194,6 +219,13 @@ export async function saveCard(
   locationId: string,
   input: { sourceId: string; verificationToken?: string; email?: string },
 ): Promise<BillingAccount> {
+  return withBillingLock(locationId, () => saveCardLocked(locationId, input));
+}
+
+async function saveCardLocked(
+  locationId: string,
+  input: { sourceId: string; verificationToken?: string; email?: string },
+): Promise<BillingAccount> {
   if (typeof input.sourceId !== 'string' || !/^cnon:/.test(input.sourceId)) {
     throw badRequest('invalid card token');
   }
@@ -210,7 +242,7 @@ export async function saveCard(
     if (!email) {
       throw badRequest('an email address is required for billing — sign in with your portal account to add a card');
     }
-    const customer = await createPlatformCustomer(loc.rows[0]?.name ?? 'Restaurant', email);
+    const customer = await createPlatformCustomer(loc.rows[0]?.name ?? 'Restaurant', email, locationId);
     if (!customer?.id) throw new Error('Square customer creation failed');
     acct = await updateAccount(locationId, { square_customer_id: String(customer.id) });
   } else if (input.email) {
@@ -245,10 +277,18 @@ async function ensurePlanVariation(priceCents: number, currency: string): Promis
     `INSERT INTO billing_settings(key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING`,
     [key, variationId],
   );
-  return variationId;
+  // A concurrent first call may have stored its own variation id first;
+  // always use the stored one so every subscription references the same
+  // plan variation (the loser's Square catalog object is a harmless orphan).
+  const stored = await query<{ value: string }>(`SELECT value FROM billing_settings WHERE key = $1`, [key]);
+  return stored.rows[0]?.value ?? variationId;
 }
 
 export async function switchPlan(locationId: string, target: BillingPlan): Promise<BillingState> {
+  return withBillingLock(locationId, () => switchPlanLocked(locationId, target));
+}
+
+async function switchPlanLocked(locationId: string, target: BillingPlan): Promise<BillingState> {
   let acct = await ensureBillingAccount(locationId);
   acct = await syncSubscription(acct);
   const nowPlan = effectivePlan(acct);
@@ -272,6 +312,25 @@ export async function switchPlan(locationId: string, target: BillingPlan): Promi
     }
     const loc = await platformLocation();
     const variationId = await ensurePlanVariation(acct.subscription_price_cents, loc.currency);
+    // Search-before-create (E-3): if a previous attempt created the Square
+    // subscription but its response or our DB write was lost, adopt the
+    // existing live subscription instead of stacking a second one that
+    // would double-charge the restaurant every month.
+    const existingSubs = await searchPlatformSubscriptions(acct.square_customer_id).catch(() => []);
+    const liveSub = existingSubs.find(
+      (s) => (s?.status === 'ACTIVE' || s?.status === 'PAUSED') && s?.plan_variation_id === variationId,
+    );
+    if (liveSub?.id) {
+      await updateAccount(locationId, {
+        plan: 'subscription',
+        pending_plan: null,
+        currency: loc.currency,
+        square_subscription_id: String(liveSub.id),
+        subscription_status: liveSub.status ? String(liveSub.status) : 'ACTIVE',
+        subscription_paid_through: liveSub.charged_through_date ?? null,
+      });
+      return getBillingState(locationId);
+    }
     let sub;
     try {
       sub = await createPlatformSubscription({
@@ -411,33 +470,63 @@ export async function processAccruedFees(): Promise<{ locationsCharged: number; 
   let locationsCharged = 0;
   let totalCents = 0;
   for (const row of due) {
-    try {
-      const acct = await ensureBillingAccount(row.location_id);
-      if (!acct.square_card_id || !acct.square_customer_id) continue;
-      const total = Number(row.total);
-      const loc = await platformLocation();
-      const rows = await query<{ id: string; currency: string }>(
-        `SELECT id, currency FROM fee_ledger WHERE location_id = $1 AND status = 'accrued' ORDER BY created_at ASC`,
-        [row.location_id],
+    const acct = await ensureBillingAccount(row.location_id);
+    if (!acct.square_card_id || !acct.square_customer_id) continue;
+    // Atomic claim (E-2): flip this location's accrued rows to 'charging'
+    // under a fresh batch id in ONE statement. Overlapping runs claim
+    // disjoint row sets, rows accrued after the due-snapshot are not swept
+    // into a charge whose total was computed earlier, and the Square
+    // idempotency key is derived from the batch so retrying the same batch
+    // can never double-charge.
+    const batchId = randomUUID();
+    const claim = await query<{ fee_cents: number; currency: string }>(
+      `UPDATE fee_ledger SET status = 'charging', batch_id = $2
+       WHERE location_id = $1 AND status = 'accrued'
+       RETURNING fee_cents, currency`,
+      [row.location_id, batchId],
+    );
+    if (claim.rows.length === 0) continue; // another run claimed them first
+    const total = claim.rows.reduce((s, r) => s + Number(r.fee_cents), 0);
+    if (total <= 0) {
+      // Net credit / zero balance: nothing to charge, release the claim.
+      await query(
+        `UPDATE fee_ledger SET status = 'accrued', batch_id = NULL WHERE batch_id = $1 AND status = 'charging'`,
+        [batchId],
       );
+      continue;
+    }
+    try {
+      const loc = await platformLocation();
       const payment = await createPlatformCardCharge({
         customerId: acct.square_customer_id,
         cardId: acct.square_card_id,
         locationId: loc.id,
         amountCents: total,
-        currency: rows.rows[0]?.currency ?? loc.currency,
-        idempotencyKey: randomUUID(),
+        currency: claim.rows[0]?.currency ?? loc.currency,
+        idempotencyKey: `fees-${batchId}`,
         note: 'Smart Table commission (accrued guest-payment fees)',
       });
-      if (!payment?.id) continue;
+      if (!payment?.id) throw new Error('Square accrued-fee charge returned no payment');
       await query(
-        `UPDATE fee_ledger SET status = 'charged', platform_charge_ref = $2 WHERE location_id = $1 AND status = 'accrued'`,
-        [row.location_id, String(payment.id)],
+        `UPDATE fee_ledger SET status = 'charged', platform_charge_ref = $2 WHERE batch_id = $1 AND status = 'charging'`,
+        [batchId, String(payment.id)],
       );
       locationsCharged += 1;
       totalCents += total;
     } catch (e) {
-      console.error(`[billing] accrued fee charge failed for location ${row.location_id}:`, e);
+      if (isDefinitiveSquareFailure(e)) {
+        // The card definitively refused: release the rows so a later run
+        // (after the restaurant updates its card) can collect them.
+        await query(
+          `UPDATE fee_ledger SET status = 'accrued', batch_id = NULL WHERE batch_id = $1 AND status = 'charging'`,
+          [batchId],
+        ).catch(() => undefined);
+      }
+      // Unknown outcome (timeout / 5xx / network): the rows STAY in
+      // 'charging' under this batch — never re-charged blindly. The charge
+      // can be resolved by looking the Square payment up by its
+      // idempotency key (`fees-<batchId>`).
+      console.error(`[billing] accrued fee charge failed for location ${row.location_id} (batch ${batchId}):`, e);
     }
   }
   return { locationsCharged, totalCents };

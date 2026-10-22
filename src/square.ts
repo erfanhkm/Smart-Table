@@ -2,7 +2,7 @@
 // Every call below was verified live against the Square sandbox on 2026-10-12:
 // CreateOrder -> CreatePayment(source_id=EXTERNAL) -> auto-COMPLETED,
 // and the split flow: 2x partial external payments (autocomplete=false) + PayOrder -> COMPLETED.
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { config, requireSquareToken } from './config.js';
 import { badRequest } from './http.js';
 
@@ -367,14 +367,32 @@ export async function createSubscriptionPlanVariation(
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function createPlatformCustomer(companyName: string, email: string): Promise<any> {
+export async function createPlatformCustomer(companyName: string, email: string, referenceId?: string): Promise<any> {
+  // Deterministic idempotency key per location (E-3): if the create
+  // succeeded at Square but the response/DB write was lost, the retry
+  // returns the SAME customer instead of creating a duplicate. The
+  // location id is also stored as reference_id so the customer can be
+  // found again by search.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data: any = await sq('POST', '/v2/customers', {
-    idempotency_key: randomUUID(),
+    idempotency_key: referenceId ? `st-cust-${referenceId}` : randomUUID(),
+    reference_id: referenceId || undefined,
     company_name: companyName || 'Restaurant',
     email_address: email || undefined,
   }, requireSquareToken());
   return data?.customer;
+}
+
+/** All subscriptions belonging to a platform customer (search-before-create, E-3). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function searchPlatformSubscriptions(customerId: string): Promise<any[]> {
+  assertSquareId(customerId, 'customer_id');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await sq('POST', '/v2/subscriptions/search', {
+    query: { filter: { customer_ids: [customerId] } },
+  }, requireSquareToken());
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return Array.isArray(data?.subscriptions) ? data.subscriptions : [];
 }
 
 /** Add/replace the email on a platform customer (Square Subscriptions refuse customers without one). */
@@ -391,9 +409,13 @@ export async function createPlatformCard(input: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 }): Promise<any> {
   assertSquareId(input.customerId, 'customer_id');
+  // Deterministic per (customer, card token): replaying the same save
+  // returns the same card instead of stacking duplicates (E-3); a
+  // different card token yields a different key, so replacement still works.
+  const cardKey = `st-card-${createHash('sha256').update(`${input.customerId}:${input.sourceId}`).digest('hex').slice(0, 32)}`;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data: any = await sq('POST', '/v2/cards', {
-    idempotency_key: randomUUID(),
+    idempotency_key: cardKey,
     source_id: input.sourceId,
     verification_token: input.verificationToken || undefined,
     card: { customer_id: input.customerId, cardholder_name: input.cardholderName || undefined },

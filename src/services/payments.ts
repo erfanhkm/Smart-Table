@@ -82,6 +82,7 @@ interface PaymentRow {
   remaining_after_cents: number | null;
   check_state: string | null;
   currency: string | null;
+  pos_tender_ref: string | null;
 }
 
 const TIP_MSG = 'tip_cents must be an integer between 0 and the amount being paid';
@@ -164,17 +165,53 @@ function replayFrom(row: PaymentRow): PayCheckResult | null {
   return null;
 }
 
+/** Adapters whose check detail cannot list tenders (mirrors reconcile's NO_TENDER_ADAPTERS). */
+const TENDER_BLIND_POS = new Set(['shopify', 'helcim']);
+
 /** A 4xx (other than timeout/rate-limit) from any POS client is a definitive rejection. */
 function isDefinitivePosError(e: unknown): boolean {
   const status = (e as { status?: unknown })?.status;
   return typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
-/** POS error code safe to show to clients, when the error carries one. */
-function posErrorCode(e: unknown): string | null {
+/** Raw POS error code from the error object (server logs only — never sent to guests). */
+function rawPosErrorCode(e: unknown): string | null {
   if (e instanceof SquareError) return squareErrorCode(e);
   const code = (e as { code?: unknown })?.code;
   return typeof code === 'string' && /^[A-Z0-9_]{1,64}$/.test(code) ? code : null;
+}
+
+/**
+ * B-2: guests only ever see this small stable enum — raw POS/provider
+ * decline codes (Square's GENERIC_DECLINE, ADDRESS_VERIFICATION_FAILURE,
+ * ...) are provider internals and stay in the server log. An unmapped raw
+ * code yields null, and the caller falls back to 'payment_declined'.
+ */
+const GUEST_SAFE_ERROR_CODES: Record<string, string> = {
+  CARD_DECLINED: 'card_declined',
+  GENERIC_DECLINE: 'card_declined',
+  DO_NOT_HONOR: 'card_declined',
+  FRAUD_REJECTED: 'card_declined',
+  TRANSACTION_REJECTED: 'card_declined',
+  INSUFFICIENT_FUNDS: 'insufficient_funds',
+  CVV_FAILURE: 'cvv_failed',
+  INVALID_CVV: 'cvv_failed',
+  INVALID_EXPIRATION: 'card_expired',
+  EXPIRATION_FAILURE: 'card_expired',
+  EXPIRED_CARD: 'card_expired',
+  INVALID_CARD: 'invalid_card',
+  INVALID_CARD_DATA: 'invalid_card',
+  CARD_NOT_SUPPORTED: 'card_not_supported',
+  UNSUPPORTED_CARD: 'card_not_supported',
+  AUTHENTICATION_REQUIRED: 'authentication_required',
+  VERIFICATION_REQUIRED: 'authentication_required',
+  LIMIT_EXCEEDED: 'limit_exceeded',
+  CARD_VELOCITY_EXCEEDED: 'limit_exceeded',
+};
+
+function posErrorCode(e: unknown): string | null {
+  const raw = rawPosErrorCode(e);
+  return raw ? (GUEST_SAFE_ERROR_CODES[raw] ?? null) : null;
 }
 
 export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
@@ -275,6 +312,28 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
       }
       if (!currency) throw new Error('POS check has no currency');
 
+      // D-1 resume guard: a resumed PENDING row that already carries a
+      // persisted POS tender ref means the first attempt DID create the
+      // charge — the ref is written the moment the charge lands, outside
+      // the transaction. Such a request must never reach the adapter's
+      // charge again: some adapters (Clover) have no native idempotency
+      // on their charge endpoint, so a blind retry double-charges the
+      // guest. The outcome is resolved from the live POS detail instead.
+      const resumeResolved = input.source.kind === 'card' && resumed && !!curRow.pos_tender_ref;
+
+      // E-4: tender-blind adapters report the FULL total as remaining
+      // even after earlier payments settled (their detail has no tender
+      // list). Cap the remaining by our own settled payments so a later
+      // payer can never be charged for money already collected.
+      if (!resumeResolved && TENDER_BLIND_POS.has(posType) && check.total_cents > 0) {
+        const settled = await client.query<{ s: string }>(
+          `SELECT COALESCE(SUM(amount_cents + tip_cents), 0) AS s FROM payments
+           WHERE check_id = $1 AND status IN ('AUTHORIZED','COMPLETED')`,
+          [checkId],
+        );
+        remaining = Math.max(0, check.total_cents - Number(settled.rows[0]?.s ?? 0));
+      }
+
       // For a resumed key, a failed validation may mean "the first attempt already charged": never answer
       // with a plain 400 that invites a second charge under a new key.
       const invalid = (msg: string): Error =>
@@ -286,13 +345,19 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
             )
           : badRequest(msg);
 
-      if (remaining <= 0) throw invalid('check is already fully paid');
-      let amount = requested ?? remaining;
-      if (input.mode === 'full') amount = remaining;
-      if (!Number.isInteger(amount) || amount <= 0 || amount > remaining) {
-        throw invalid(`amount_cents must be between 1 and ${remaining}`);
+      let amount: number;
+      if (resumeResolved) {
+        // The amount that matters is the one the first attempt charged.
+        amount = curRow.amount_cents;
+      } else {
+        if (remaining <= 0) throw invalid('check is already fully paid');
+        amount = requested ?? remaining;
+        if (input.mode === 'full') amount = remaining;
+        if (!Number.isInteger(amount) || amount <= 0 || amount > remaining) {
+          throw invalid(`amount_cents must be between 1 and ${remaining}`);
+        }
+        if (tipCents > amount) throw badRequest(TIP_MSG);
       }
-      if (tipCents > amount) throw badRequest(TIP_MSG);
 
       // Non-Square adapters record external payments atomically (no split
       // authorize/PayOrder flow): they only support full-balance payments.
@@ -310,7 +375,55 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
       let newRemaining: number;
       let resultCurrency = currency;
 
-      if (input.source.kind === 'card') {
+      if (resumeResolved) {
+        // D-1: resolve the stranded charge WITHOUT charging again. The
+        // shared completion tail below finalizes the row/check/table from
+        // these values, exactly as if the charge had just returned.
+        chargeCreated = true; // money exists at the POS; a failure from here must never mark the row FAILED
+        externalPaymentId = curRow.pos_tender_ref!;
+        if (TENDER_BLIND_POS.has(posType)) {
+          const settled = await client.query<{ s: string }>(
+            `SELECT COALESCE(SUM(amount_cents + tip_cents), 0) AS s FROM payments
+             WHERE check_id = $1 AND status IN ('AUTHORIZED','COMPLETED')`,
+            [checkId],
+          );
+          newRemaining = Math.max(
+            0,
+            (check.total_cents || 0) - Number(settled.rows[0]?.s ?? 0) - (curRow.amount_cents + curRow.tip_cents),
+          );
+        } else {
+          newRemaining = remaining;
+        }
+        // Commission fee, if the first attempt died before recording it
+        // (mirrors reconcile F-7; an existing fee row makes this a no-op).
+        if (ctx.locationId) {
+          try {
+            const priorFee = await query<{ n: number }>(
+              `SELECT COUNT(*)::int AS n FROM fee_ledger WHERE payment_row_id = $1 AND method IN ('square_app_fee','accrued')`,
+              [reservation.id],
+            );
+            if ((priorFee.rows[0]?.n ?? 0) === 0) {
+              const acct = await ensureBillingAccount(ctx.locationId);
+              if (effectivePlan(acct) === 'commission') {
+                const fee = feeFor(curRow.amount_cents + curRow.tip_cents, acct.commission_bps);
+                if (fee > 0) {
+                  await recordFee({
+                    locationId: ctx.locationId,
+                    paymentRowId: reservation.id,
+                    posPaymentRef: externalPaymentId,
+                    chargeCents: curRow.amount_cents + curRow.tip_cents,
+                    feeCents: fee,
+                    currency,
+                    method: posType === 'square' ? 'square_app_fee' : 'accrued',
+                  });
+                }
+              }
+            }
+          } catch (feeErr) {
+            console.error('[payments] resume fee recording failed:', feeErr);
+          }
+        }
+      } else if (input.source.kind === 'card') {
         // ---- Card payment via the location's adapter ----
         // The adapter charges the provider SDK token and closes the POS
         // check when the payment covers the balance. priorPaymentIds lets
@@ -427,6 +540,13 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
         externalPaymentId = res.paymentId;
         newRemaining = res.remainingCents;
         resultCurrency = res.currency || currency;
+        // H5 parity with the card/Square branches: persist the POS ref
+        // outside the transaction so a rollback leaves the row reconcilable.
+        await query(
+          `UPDATE payments SET pos_tender_ref = $2, amount_cents = $3, tip_cents = $4
+           WHERE idempotency_key = $1 AND status = 'PENDING'`,
+          [key, res.paymentId, amount, tipCents],
+        ).catch(() => undefined);
       }
 
       const completes = newRemaining <= 0;
@@ -495,6 +615,9 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
          AND pos_tender_ref IS NULL AND external_payment_ref IS NULL AND square_payment_id IS NULL`,
         [key],
       ).catch(() => undefined);
+      // B-2: the raw provider code stays in the server log; the guest only
+      // ever receives the mapped guest-safe code.
+      console.error(`[payments] POS definitively rejected payment (key ${key}): raw code ${rawPosErrorCode(e) ?? 'n/a'} — ${e instanceof Error ? e.message.slice(0, 200) : ''}`);
       const code = posErrorCode(e);
       throw httpError(402, 'the payment could not be completed', code ?? 'payment_declined');
     }

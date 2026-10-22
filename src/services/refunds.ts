@@ -19,7 +19,7 @@
 //    report stays truthful.
 import { randomUUID } from 'node:crypto';
 import { query } from '../db.js';
-import { badRequest, conflict, notFound } from '../http.js';
+import { badRequest, conflict, isClientError, notFound } from '../http.js';
 import { getCheckPos } from './pos/context.js';
 import { SquareError } from '../square.js';
 
@@ -205,15 +205,31 @@ export async function refundPayment(input: {
     await reverseFees(payment, already + amount);
     return summarize(rowId, res.refundId, amount, false);
   } catch (e) {
+    // F-2 state machine: FAILED only on a DEFINITIVE rejection — an error
+    // carrying a 4xx status (our own adapter determinations throw
+    // badRequest; POS clients throw status-carrying errors), other than
+    // timeout/rate-limit. Anything else (network failure, timeout,
+    // 408/429, POS 5xx) leaves the outcome UNKNOWN: the refund may have
+    // landed at the POS, so the row stays PENDING and the caller gets the
+    // same 409 the replay path uses — never a FAILED that would invite a
+    // second refund of the same money.
+    const rawStatus = (e as { status?: unknown })?.status ?? (e as { statusCode?: unknown })?.statusCode;
+    const status = typeof rawStatus === 'number' ? rawStatus : undefined;
+    const definitive = status !== undefined && status >= 400 && status < 500 && status !== 408 && status !== 429;
+    if (!definitive) {
+      console.error(`[refunds] refund outcome unknown for payment ${payment.id} (row ${rowId} left PENDING):`, e);
+      throw conflict('this refund is still being confirmed with the POS; check the payment before retrying', 'refund_state_unknown');
+    }
     await query(`UPDATE refunds SET status = 'FAILED' WHERE id = $1`, [rowId]).catch(() => undefined);
     if (e instanceof SquareError) {
       const detail = String(e.errors?.[0]?.detail ?? 'Square rejected the refund');
       throw badRequest(`refund failed: ${detail.slice(0, 200)}`);
     }
-    if (e instanceof Error && e.message.length <= 200 && !e.message.includes('fetch')) {
-      // Adapter-raised, user-safe messages (e.g. cash tender, wrong status).
-      throw badRequest(`refund failed: ${e.message}`);
+    if (isClientError(e)) {
+      // Our own adapter determination (cash tender, wrong status, ...):
+      // its message is written for staff, surface it as-is.
+      throw e;
     }
-    throw e;
+    throw badRequest('refund failed: the POS rejected the refund');
   }
 }

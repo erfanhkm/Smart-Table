@@ -21,6 +21,7 @@
 // Run: npx tsx scripts/reconcile.ts  (cron: every 15 min in production)
 import { query, withTx } from '../db.js';
 import { getCheckPos } from './pos/context.js';
+import { effectivePlan, ensureBillingAccount, feeFor, recordFee } from './billing.js';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { PosTender } from './pos/types.js';
@@ -28,8 +29,10 @@ import { PosTender } from './pos/types.js';
 const STUCK_AFTER_MIN = 10;
 const GIVE_UP_AFTER_H = 24;
 // Adapters whose getCheckDetail cannot report tenders: amount matching is
-// meaningless there, so we never mark FAILED for them.
-const NO_TENDER_ADAPTERS = new Set(['shopify']);
+// meaningless there, so we never mark FAILED for them. Helcim qualifies
+// (F-1): its check detail carries no tender list, so a Helcim row can only
+// ever resolve by exact reference — never by amount, never auto-FAILED.
+const NO_TENDER_ADAPTERS = new Set(['shopify', 'helcim']);
 
 interface PendingRow {
   id: string;
@@ -85,9 +88,15 @@ export async function reconcilePendingPayments(): Promise<{ reconciled: number; 
           matched = detail.tenders.find((t: PosTender) => t.id === p.pos_tender_ref);
         }
         // 2. Amount fallback — only when the adapter reports tenders and we
-        //    have a real (non-zero) amount to match on.
+        //    have a real (non-zero) amount to match on. F-1: a tender
+        //    reports the TOTAL tendered (amount + tip), so match on the sum
+        //    — matching the bare amount misses every tipped payment — and
+        //    require the match to be UNIQUE: two fresh tenders with the
+        //    same total are ambiguous evidence, not a match.
         if (!matched && canSeeTenders && p.amount_cents > 0) {
-          matched = freshTenders.find((t: PosTender) => t.amountCents === p.amount_cents);
+          const wanted = p.amount_cents + p.tip_cents;
+          const candidates = freshTenders.filter((t: PosTender) => t.amountCents === wanted);
+          if (candidates.length === 1) matched = candidates[0];
         }
 
         if (matched) {
@@ -105,6 +114,43 @@ export async function reconcilePendingPayments(): Promise<{ reconciled: number; 
             stillPending++; // someone else resolved it; skip
             continue;
           }
+          // F-7: record the commission fee for the settled payment, with
+          // the same rules as the live path. The live path writes its fee
+          // row on an autocommit connection precisely so it survives the
+          // rollback that stranded this payment — so the row usually
+          // exists already and the (payment_row_id, method) unique index
+          // (migration 017) makes this a no-op. It only lands when the
+          // live write itself failed. If ANY fee row exists for this
+          // payment, skip: guessing a second method could double-collect.
+          try {
+            const priorFee = await query<{ n: number }>(
+              `SELECT COUNT(*)::int AS n FROM fee_ledger WHERE payment_row_id = $1 AND method IN ('square_app_fee','accrued')`,
+              [p.id],
+            );
+            if ((priorFee.rows[0]?.n ?? 0) === 0 && ctx.locationId) {
+              const acct = await ensureBillingAccount(ctx.locationId);
+              if (effectivePlan(acct) === 'commission') {
+                const fee = feeFor(p.amount_cents + p.tip_cents, acct.commission_bps);
+                if (fee > 0) {
+                  await recordFee({
+                    locationId: ctx.locationId,
+                    paymentRowId: p.id,
+                    posPaymentRef: matched.id,
+                    chargeCents: p.amount_cents + p.tip_cents,
+                    feeCents: fee,
+                    currency: detail.currency,
+                    // Square's first attempt carries the fee in-flight;
+                    // presuming collected can only ever LOSE a fee, never
+                    // double-charge the restaurant. Other POS accrue.
+                    method: ctx.posType === 'square' ? 'square_app_fee' : 'accrued',
+                  });
+                }
+              }
+            }
+          } catch (feeErr) {
+            // Never silent: a settled payment with no fee row is lost revenue.
+            console.error(`[reconcile] fee recording failed for payment ${p.id}:`, feeErr);
+          }
           if (closed) {
             await client.query(`UPDATE checks SET state='COMPLETED' WHERE id=$1`, [p.check_id]);
             const chk = await client.query<{ table_id: string | null }>(
@@ -118,9 +164,13 @@ export async function reconcilePendingPayments(): Promise<{ reconciled: number; 
           }
           console.log(`[reconcile] ${p.idempotency_key}: POS tender ${matched.id} -> ${closed ? 'COMPLETED' : 'AUTHORIZED'}`);
           reconciled++;
-        } else if (ageH > GIVE_UP_AFTER_H && canSeeTenders) {
+        } else if (ageH > GIVE_UP_AFTER_H && canSeeTenders && !p.pos_tender_ref) {
           // H5 fix: FAILED only after a POSITIVE check (adapter reports tenders
           // and none matches). Never FAILED when we can't see tenders.
+          // F-1 fix: also never FAILED when we hold a stored tender
+          // reference — the charge DID succeed at the POS (the ref was
+          // written the moment it landed); an unmatched ref after 24h is
+          // contradictory evidence for a human, not proof of no payment.
           await client.query(
             `UPDATE payments SET status='FAILED', reconcile_attempts = 0, last_reconcile_at = now()
              WHERE id=$1 AND status='PENDING'`,
@@ -128,6 +178,17 @@ export async function reconcilePendingPayments(): Promise<{ reconciled: number; 
           );
           console.log(`[reconcile] ${p.idempotency_key}: no POS tender after ${ageH.toFixed(1)}h -> FAILED`);
           failed++;
+        } else if (ageH > GIVE_UP_AFTER_H && p.pos_tender_ref && !matched) {
+          // F-1: stored tender ref, still unmatched after 24h — flag for
+          // manual review and keep backing off; never auto-resolve either way.
+          await client.query(
+            `UPDATE payments SET reconcile_attempts = reconcile_attempts + 1, last_reconcile_at = now(),
+               last_reconcile_error = 'MANUAL REVIEW: stored POS tender ref not present in check detail after 24h'
+             WHERE id = $1`,
+            [p.id],
+          );
+          console.error(`[reconcile] MANUAL REVIEW ${p.idempotency_key}: stored tender ref ${p.pos_tender_ref} not in POS detail after ${ageH.toFixed(1)}h — left PENDING`);
+          stillPending++;
         } else {
           await client.query(
             `UPDATE payments SET reconcile_attempts = reconcile_attempts + 1, last_reconcile_at = now()
