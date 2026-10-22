@@ -710,6 +710,18 @@ function updatePayButton() {
 }
 
 function render(force = false) {
+    // Guard (Claude H-1): a throw mid-render must never freeze the guest on a
+    // stale bill — log it, clear the render key so the next poll retries, and
+    // show the safe fallback if nothing has rendered yet.
+    try { renderInner(force); } catch (err) {
+        console.error('render failed', err);
+        lastRenderKey = null;
+        const container = $('main-content');
+        if (container && !container.innerHTML) container.innerHTML = '<div class="empty-state"><h3>' + t('couldNotLoad') + '</h3><p>' + t('couldNotLoadBody') + '</p></div>';
+    }
+}
+
+function renderInner(force = false) {
     const active = document.activeElement;
     const typing = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
     const key = JSON.stringify([lang, table, check, claimsByIdx, loadFailed, !!receipt, notice, paying, mode, people, items, tipPct, currentAttempt(), view, cart, menuLoaded, orderingEnabled, loyaltyEnabled, rated, ratingDone, ratingResult, loyaltyResult, loyaltySubmitting]);
@@ -749,7 +761,7 @@ function render(force = false) {
     const tendersHtml = check.tenders && check.tenders.length ? `
         <div style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--border);">
             <div style="font-size:0.8rem;font-weight:600;color:var(--text-muted);margin-bottom:6px;">${t('alreadyPaid')}</div>
-            ${check.tenders.map((t) => `<div class="item-row" style="color:var(--green);"><span>${t('paymentWord')} (${esc(t.type || t('cardWord'))})</span><span class="tabular">-${formatMoney(t.amount_cents, check.currency)}</span></div>`).join('')}
+            ${check.tenders.map((td) => `<div class="item-row" style="color:var(--green);"><span>${t('paymentWord')} (${esc(td.type || t('cardWord'))})</span><span class="tabular">-${formatMoney(td.amount_cents, check.currency)}</span></div>`).join('')}
         </div>` : '';
 
     let controls = '';
