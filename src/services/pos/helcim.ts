@@ -35,6 +35,7 @@
 //        docs not yet reviewed).
 //   [S5] remaining amount on partially-paid DUE invoices (status stays DUE
 //        after partial payment; no explicit "remaining" field documented).
+import { createHash } from 'node:crypto';
 import { config } from '../../config.js';
 import { badRequest } from '../../http.js';
 import {
@@ -53,6 +54,9 @@ import {
 
 const API_BASE = 'https://api.helcim.com/v2';
 const NUM_ID_RE = /^\d+$/;
+
+// E-low: 60s cache for HelcimPay verify sessions (see getCardConfig).
+const helcimConfigCache = new Map<string, { config: CardPaymentConfig; expiresAt: number }>();
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyObj = any;
@@ -89,6 +93,7 @@ async function hc<T>(method: string, path: string, body?: unknown, token?: strin
   if (idempotencyKey) headers['idempotency-key'] = idempotencyKey.replace(/[^A-Za-z0-9]/g, '').slice(0, 25).padEnd(25, '0');
   const res = await fetch(API_BASE + path, {
     method,
+    signal: AbortSignal.timeout(10_000),
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -154,7 +159,13 @@ class HelcimAdapter implements PosAdapter {
         totalCents: d.totalCents,
         remainingCents: d.remainingCents,
         currency: d.currency,
-        openedAt: inv?.dateCreated ? new Date(String(inv.dateCreated).replace(' ', 'T')).toISOString() : null,
+        // E-low: an unparseable dateCreated must not crash the whole list
+        // (toISOString throws RangeError on an invalid Date).
+        openedAt: (() => {
+          if (!inv?.dateCreated) return null;
+          const d = new Date(String(inv.dateCreated).replace(' ', 'T'));
+          return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+        })(),
       };
     });
   }
@@ -201,7 +212,11 @@ class HelcimAdapter implements PosAdapter {
       {
         cardData: { cardToken: args.cardToken },
         // Helcim takes major units (e.g. 24.00); keep two decimals.
-        amount: Number((args.amountCents / 100).toFixed(2)),
+        // E-7: the tip is FOLDED into the purchase amount — Helcim
+        // purchases carry no separate tip field in this integration, and
+        // the old code charged amount-only while our payment row and fee
+        // math recorded amount+tip (the tip was never collected).
+        amount: Number(((args.amountCents + args.tipCents) / 100).toFixed(2)),
         currency: args.currency,
         invoiceNumber,
         ecommerce: true,
@@ -209,13 +224,23 @@ class HelcimAdapter implements PosAdapter {
       apiToken,
       args.idempotencyKey,
     );
-    // responseCode "0" == APPROVED (per devdocs + community SDKs).
-    if (String(purchase?.responseCode ?? '') !== '0') {
+    // E-7: success requires BOTH signals we know — responseCode "0"
+    // (APPROVED, per devdocs + community SDKs) AND a real transactionId.
+    // A response missing either is an UNKNOWN SHAPE: the money may have
+    // moved, so it must surface as outcome-unknown (5xx = non-definitive,
+    // the payment row stays PENDING for reconciliation), never as a
+    // decline. A present, non-"0" responseCode is a definitive decline.
+    const responseCode = purchase?.responseCode;
+    const transactionId = purchase?.transactionId;
+    if (responseCode !== undefined && responseCode !== null && String(responseCode) !== '0') {
       throw new HelcimError(402, purchase);
+    }
+    if (String(responseCode ?? '') !== '0' || !transactionId) {
+      throw new HelcimError(502, { message: 'unrecognized Helcim purchase response shape — outcome unknown', purchase });
     }
     const detail = await this.getCheckDetail(invoiceId, args.token);
     return {
-      paymentId: String(purchase?.transactionId ?? `helcim-${invoiceId}`),
+      paymentId: String(transactionId),
       remainingCents: detail.remainingCents,
       currency: detail.currency,
       replayed: false,
@@ -232,16 +257,24 @@ class HelcimAdapter implements PosAdapter {
     if (!apiToken) {
       throw badRequest('card payments are not configured for this merchant (missing Helcim API token)');
     }
+    // E-low: cache the HelcimPay session briefly — initializing a fresh
+    // provider session on every (token-bound but frequent) card-config
+    // call is wasteful and rate-limit-prone. 60s per merchant token.
+    const cacheKey = createHash('sha256').update(apiToken).digest('hex');
+    const hit = helcimConfigCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) return hit.config;
     const init: AnyObj = await hc('POST', '/helcim-pay/initialize', { paymentType: 'verify' }, apiToken);
     const checkoutToken = String(init?.checkoutToken ?? '');
     if (!checkoutToken) throw new Error('HelcimPay.js initialize returned no checkoutToken');
-    return {
+    const cfg: CardPaymentConfig = {
       provider: 'helcim',
       publishableKey: checkoutToken,
       extra: {
         helcimPayJs: 'https://secure.helcim.app/helcim-pay/services/start.js',
       },
     };
+    helcimConfigCache.set(cacheKey, { config: cfg, expiresAt: Date.now() + 60_000 });
+    return cfg;
   }
 
   async recordExternalPayment(

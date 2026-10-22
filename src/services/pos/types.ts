@@ -136,6 +136,9 @@ export interface ChargeCardArgs {
    * Callers read these from our payments table.
    */
   priorPaymentIds: string[];
+  /** The guest's IP as seen by our server (D-11) — some POS fraud APIs
+   * (Clover Ecommerce) want the end-customer IP, not our server's. */
+  clientIp?: string;
   /** v0.4 billing: platform commission to collect in-flight when the POS supports it (Square application fee). 0/undefined = no fee. */
   appFeeCents?: number;
   /** Card processing credentials (Ecommerce private token, Helcim API token...). */

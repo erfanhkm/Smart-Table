@@ -61,12 +61,16 @@ export async function refundRoutes(app: FastifyInstance): Promise<void> {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const row = (await query<{ check_id: string }>(`SELECT check_id FROM payments WHERE id = $1`, [paymentId])).rows[0];
     if (!row) throw notFound('payment not found');
-    assertScope(req, await locationOfCheck(row.check_id));
+    const locationId = await locationOfCheck(row.check_id);
+    assertScope(req, locationId);
     return refundPayment({
       paymentRowId: paymentId,
       amountCents: typeof body.amount_cents === 'number' ? body.amount_cents : undefined,
       reason: typeof body.reason === 'string' ? body.reason.slice(0, 190) : undefined,
       idempotencyKey: typeof body.idempotency_key === 'string' ? body.idempotency_key : '',
+      // F-9: the service re-asserts the scope and records the actor.
+      expectedLocationId: locationId ?? undefined,
+      actor: req.portalUser?.id ?? 'staff-token',
     });
   });
 }

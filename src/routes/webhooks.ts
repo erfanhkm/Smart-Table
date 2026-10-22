@@ -19,6 +19,7 @@ import { config } from '../config.js';
 import { verifySquareWebhook } from '../crypto.js';
 import { assertPosType, PosType } from '../services/pos/types.js';
 import { getAdapter } from '../services/pos/registry.js';
+import { getCheckPos } from '../services/pos/context.js';
 
 export const WEBHOOK_PATH = '/api/webhooks/square';
 
@@ -60,6 +61,24 @@ export function paymentStatusRank(s: string): number {
 }
 
 /** Apply one normalized check.closed event to our tables. */
+/**
+ * D-5: a generic "check updated" webhook event is NOT proof of payment
+ * (Clover's payload carries CRUD verbs, not order state). Re-fetch the
+ * order from the POS and close only when the POS itself says CLOSED.
+ */
+async function applyCheckUpdated(posType: PosType, checkRef: string): Promise<void> {
+  const c = await query<{ id: string; state: string }>(
+    `SELECT id, state FROM checks WHERE pos_type = $1 AND external_check_ref = $2`,
+    [posType, checkRef],
+  );
+  if (c.rowCount === 0 || c.rows[0].state !== 'OPEN') return;
+  const ctx = await getCheckPos(c.rows[0].id);
+  const detail = await ctx.adapter.getCheckDetail(checkRef, ctx.token);
+  if (detail.state === 'CLOSED') {
+    await applyCheckClosed(posType, checkRef);
+  }
+}
+
 async function applyCheckClosed(posType: PosType, checkRef: string): Promise<void> {
   const c = await query(
     `UPDATE checks SET state='COMPLETED' WHERE pos_type=$1 AND external_check_ref=$2 RETURNING id, table_id`,
@@ -208,8 +227,20 @@ export async function webhookRoutes(app: FastifyInstance) {
         }
         applied++;
       }
-      // check.updated needs no action (bills are read live); payment.recorded
-      // is reconciled via the payments table + reconciliation job.
+      if (e.type === 'check.updated' && e.checkId) {
+        // D-5: never trust the payload for closure — re-fetch and decide.
+        try {
+          await applyCheckUpdated(posType, e.checkId);
+        } catch (err) {
+          await query(`DELETE FROM webhook_events WHERE square_event_id=$1`, [`${posType}:${e.eventId}`]).catch(
+            () => undefined,
+          );
+          throw err;
+        }
+        applied++;
+      }
+      // payment.recorded is reconciled via the payments table + the
+      // reconciliation job.
     }
     return { ok: true, applied };
   });

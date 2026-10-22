@@ -269,7 +269,11 @@ export async function searchOpenOrders(locationId: string, token?: string): Prom
 export function squareAuthorizeUrl(state: string): string {
   const clientId = config.squareAppId;
   if (!clientId) throw new Error('SQUARE_APP_ID is not set');
-  const scopes = ['ORDERS_READ', 'ORDERS_WRITE', 'PAYMENTS_READ', 'PAYMENTS_WRITE', 'MERCHANT_PROFILE_READ'].join('+');
+  // PAYMENTS_WRITE_ADDITIONAL_RECIPIENTS (D-4): required by Square for
+  // app_fee_money (our commission). Sellers who connected before this scope
+  // was added must reconnect to grant it; until they do, the adapter's
+  // fee-only retry drops the in-flight fee and it accrues instead.
+  const scopes = ['ORDERS_READ', 'ORDERS_WRITE', 'PAYMENTS_READ', 'PAYMENTS_WRITE', 'PAYMENTS_WRITE_ADDITIONAL_RECIPIENTS', 'MERCHANT_PROFILE_READ'].join('+');
   const redirect = encodeURIComponent(`${config.appUrl}/api/oauth/callback`);
   return `${BASE}/oauth2/authorize?client_id=${clientId}&scope=${scopes}&session=false&state=${encodeURIComponent(state)}&redirect_uri=${redirect}`;
 }
@@ -295,6 +299,42 @@ export async function exchangeOAuthCode(code: string): Promise<{
   const data: any = await res.json().catch(() => ({}));
   if (!res.ok || data.errors) throw new SquareError(res.status, data.errors ?? []);
   return data;
+}
+
+/**
+ * D-7: exchange a Square OAuth refresh token for a fresh access token.
+ * Square access tokens expire ~30 days after issue; without this, every
+ * connected Square restaurant would start failing payments on schedule.
+ * Square does not rotate the refresh token on refresh (the response may
+ * still carry one — callers persist whatever comes back).
+ */
+export async function refreshSquareAccessToken(refreshToken: string): Promise<{
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: string | null;
+}> {
+  if (!config.squareAppId || !config.squareAppSecret) throw new Error('SQUARE_APP_ID/SECRET not set');
+  const res = await fetch(`${BASE}/oauth2/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Square-Version': API_VERSION },
+    body: JSON.stringify({
+      client_id: config.squareAppId,
+      client_secret: config.squareAppSecret,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    }),
+    signal: AbortSignal.timeout(SQ_TIMEOUT_MS),
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await res.json().catch(() => ({}));
+  if (!res.ok || data.errors || !data?.access_token) {
+    throw new SquareError(res.status, data?.errors ?? [{ code: 'REFRESH_FAILED', detail: 'Square token refresh failed' }]);
+  }
+  return {
+    accessToken: String(data.access_token),
+    refreshToken: String(data.refresh_token ?? refreshToken),
+    expiresAt: data.expires_at ? String(data.expires_at) : null,
+  };
 }
 
 export async function getMerchantProfile(token: string): Promise<{ merchant: SquareOrder }> {

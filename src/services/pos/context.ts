@@ -14,6 +14,8 @@
 import { query } from '../../db.js';
 import { config } from '../../config.js';
 import { decryptSecret, encryptSecret } from '../../crypto.js';
+import { ensureFreshSquareToken } from './token-refresh.js';
+import { getMenuCached } from './menu-cache.js';
 import { getAdapter } from './registry.js';
 import { assertPosType, CardCredentials, PosAdapter, PosMenuItem, PosType } from './types.js';
 import { badRequest, notFound } from '../../http.js';
@@ -28,30 +30,18 @@ function demoTokenFor(posType: PosType): string | undefined {
   }
 }
 
-// M4 fix: in-memory menu cache (45s per location). /menu and createCheck both
-// hit the POS catalog; without a cache an attacker can burn the merchant's
-// POS API quota (which also serves payments).
-const MENU_TTL_MS = 45_000;
-const menuCache = new Map<string, { items: PosMenuItem[]; expiresAt: number }>();
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, v] of menuCache) if (v.expiresAt <= now) menuCache.delete(k);
-}, 60_000).unref();
+// M4 fix: the menu cache itself lives in menu-cache.ts (shared with the
+// adapters — D-10); these wrappers keep the context-shaped API.
+export { invalidateMenuCache } from './menu-cache.js';
 
-/** Get the location's menu, cached for MENU_TTL_MS. */
+/** Get the location's menu, cached for 45s (menu-cache.ts). */
 export async function getCachedMenu(ctx: PosContext): Promise<PosMenuItem[]> {
   if (!ctx.adapter.getMenu) throw badRequest(`ordering is not supported for ${ctx.posType} locations yet`);
-  const key = `${ctx.posType}:${ctx.locationRef}`;
-  const hit = menuCache.get(key);
-  if (hit && hit.expiresAt > Date.now()) return hit.items;
-  const items = await ctx.adapter.getMenu(ctx.locationRef, ctx.token);
-  menuCache.set(key, { items, expiresAt: Date.now() + MENU_TTL_MS });
+  const items = await getMenuCached(ctx.adapter, ctx.posType, ctx.locationRef, ctx.token);
+  // D-6: the LOCATION's currency is authoritative for display — stamp it
+  // over whatever the adapter guessed (Clover items carry no currency).
+  if (ctx.currency) return items.map((i) => ({ ...i, currency: ctx.currency as string }));
   return items;
-}
-
-/** Invalidate the cached menu for a location (call after catalog changes). */
-export function invalidateMenuCache(posType: string, locationRef: string): void {
-  menuCache.delete(`${posType}:${locationRef}`);
 }
 
 export interface PosContext {
@@ -65,6 +55,10 @@ export interface PosContext {
   /** POS-native location/merchant/site reference for this location. */
   locationRef: string;
   merchantId: string;
+  /** The location's own currency (authoritative — D-6). */
+  currency: string | null;
+  /** True only for the founder-flagged demo location. */
+  demo: boolean;
 }
 
 interface LocationRow {
@@ -74,13 +68,14 @@ interface LocationRow {
   pos_location_ref: string | null;
   square_location_id: string | null;
   demo: boolean;
+  currency: string | null;
 }
 
 /** Resolve the adapter + credentials for a location. Throws 404 for unknown locations. */
 export async function getLocationPos(locationId: string): Promise<PosContext> {
   if (typeof locationId !== 'string' || !locationId) throw badRequest('location_id is required');
   const r = await query<LocationRow>(
-    `SELECT id, merchant_id, pos_type, pos_location_ref, square_location_id, demo FROM locations WHERE id = $1`,
+    `SELECT id, merchant_id, pos_type, pos_location_ref, square_location_id, demo, currency FROM locations WHERE id = $1`,
     [locationId],
   );
   if (r.rowCount === 0) throw notFound('unknown location_id');
@@ -91,20 +86,47 @@ export async function getLocationPos(locationId: string): Promise<PosContext> {
 
   let token: string | undefined;
   const card: CardCredentials = {};
-  const cred = await query<{ access_token_enc: string; card_public_token: string | null; card_private_token_enc: string | null }>(
-    `SELECT access_token_enc, card_public_token, card_private_token_enc FROM pos_credentials WHERE merchant_id = $1 AND pos_type = $2`,
+  const cred = await query<{
+    access_token_enc: string;
+    refresh_token_enc: string | null;
+    token_expires_at: string | null;
+    card_public_token: string | null;
+    card_private_token_enc: string | null;
+  }>(
+    `SELECT access_token_enc, refresh_token_enc, token_expires_at, card_public_token, card_private_token_enc FROM pos_credentials WHERE merchant_id = $1 AND pos_type = $2`,
     [loc.merchant_id, posType],
   );
   if (cred.rowCount > 0) {
     if (cred.rows[0].access_token_enc) token = decryptSecret(cred.rows[0].access_token_enc);
     if (cred.rows[0].card_public_token) card.publicToken = cred.rows[0].card_public_token;
     if (cred.rows[0].card_private_token_enc) card.privateToken = decryptSecret(cred.rows[0].card_private_token_enc);
+    // D-7: refresh an expired / near-expiry Square token before use —
+    // Square access tokens die ~30 days after connect and nothing else
+    // renewed them. A failed refresh falls back to the stored token (the
+    // POS call then fails visibly rather than silently skipping renewal).
+    if (token && posType === 'square') {
+      token = await ensureFreshSquareToken({
+        merchantId: loc.merchant_id,
+        currentToken: token,
+        refreshTokenEnc: cred.rows[0].refresh_token_enc,
+        expiresAt: cred.rows[0].token_expires_at,
+      });
+    }
   }
   // Explicit demo mode only (v0.6.5): a founder-flagged demo location runs
   // on the platform's app-level credential. Every other location without its
   // own credential row stays token-less and its adapter calls throw.
   if (!token && loc.demo) token = demoTokenFor(posType);
-  return { adapter: getAdapter(posType), posType, token, card, locationRef, merchantId: loc.merchant_id };
+  return {
+    adapter: getAdapter(posType),
+    posType,
+    token,
+    card,
+    locationRef,
+    merchantId: loc.merchant_id,
+    currency: loc.currency,
+    demo: !!loc.demo,
+  };
 }
 
 /** Resolve from a check row: the check's location determines the POS. */

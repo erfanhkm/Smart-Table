@@ -4,11 +4,39 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { query } from './db.js';
+import { query, withAdvisoryLock } from './db.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 export async function migrate(migrationsDir = path.join(here, '..', 'migrations')): Promise<void> {
+  // F-11: serialize migrations across instances with an advisory lock so
+  // two booting instances can't apply the same file concurrently. The lock
+  // is held for the whole run. pg-mem has no advisory locks — there the
+  // probe throws and we proceed unlocked (tests are single-instance).
+  let lockSupported = true;
+  try {
+    await withAdvisoryLock('smart-table-migrate-probe', async () => undefined);
+  } catch {
+    lockSupported = false;
+  }
+  if (!lockSupported) {
+    await migrateUnlocked(migrationsDir);
+    return;
+  }
+  const done = await withAdvisoryLock('smart-table-migrate', () => migrateUnlocked(migrationsDir));
+  if (done === null) {
+    // Another instance is migrating right now: wait for it, then re-check
+    // (schema_migrations makes the second pass a no-op for applied files).
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      const retry = await withAdvisoryLock('smart-table-migrate', () => migrateUnlocked(migrationsDir));
+      if (retry !== null) return;
+    }
+    await migrateUnlocked(migrationsDir);
+  }
+}
+
+async function migrateUnlocked(migrationsDir: string): Promise<void> {
   await query(`CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT now())`);
   const files = (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort();
   for (const file of files) {

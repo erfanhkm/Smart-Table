@@ -97,9 +97,22 @@ export async function ensureBillingAccount(locationId: string): Promise<BillingA
   return r.rows[0];
 }
 
+// E-low: updateAccount interpolates column NAMES into SQL. All callers
+// are internal today, but the allow-list makes the interpolation safe by
+// construction — an unexpected key is a programming error, not SQL.
+const BILLING_ACCOUNT_COLUMNS = new Set([
+  'plan', 'pending_plan', 'commission_bps', 'currency', 'square_customer_id', 'square_card_id',
+  'card_brand', 'card_last4',
+  'square_subscription_id', 'square_plan_variation_id', 'subscription_status',
+  'subscription_paid_through',
+]);
+
 async function updateAccount(locationId: string, fields: Record<string, unknown>): Promise<BillingAccount> {
   const keys = Object.keys(fields);
   if (keys.length === 0) return ensureBillingAccount(locationId);
+  for (const k of keys) {
+    if (!BILLING_ACCOUNT_COLUMNS.has(k)) throw new Error(`updateAccount: column not allowed: ${k}`);
+  }
   const sets = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
   const r = await query<BillingAccount>(
     `UPDATE billing_accounts SET ${sets}, updated_at = now() WHERE location_id = $1 RETURNING *`,
@@ -112,12 +125,30 @@ const today = (): string => new Date().toISOString().slice(0, 10);
 
 /** The plan that actually applies right now, from stored fields only (no network). */
 export function effectivePlan(acct: BillingAccount): BillingPlan {
+  if (acct.plan !== 'subscription') return acct.plan;
+  // Pending switch back to commission takes effect once the paid period ends.
   if (
-    acct.plan === 'subscription' &&
     acct.pending_plan === 'commission' &&
     acct.subscription_paid_through &&
     acct.subscription_paid_through < today()
   ) {
+    return 'commission';
+  }
+  // E-8: a LAPSED subscription must not silently keep the location on the
+  // subscription plan (commission would never be charged): the plan only
+  // counts while Square reports the subscription ACTIVE and the paid
+  // period covers today. (syncSubscription refreshes these fields from
+  // Square whenever the billing state is viewed; between syncs a just-
+  // lapsed sub can read as subscription until the next view — the stored
+  // paid_through bound keeps that window honest.)
+  const status = (acct.subscription_status ?? '').toUpperCase();
+  const lapsed =
+    (status !== '' && status !== 'ACTIVE') ||
+    (acct.subscription_paid_through !== null && acct.subscription_paid_through < today());
+  if (lapsed) {
+    console.warn(
+      `[billing] location ${acct.location_id}: subscription lapsed (status=${status || 'unknown'}, paid_through=${acct.subscription_paid_through}) — billing as commission`,
+    );
     return 'commission';
   }
   return acct.plan;
@@ -159,9 +190,18 @@ export interface BillingState {
   has_card: boolean;
 }
 
+// E-low: getBillingState used to make a LIVE Square call (syncSubscription)
+// on every portal view. Sync at most once a minute per location — the
+// subscription state does not change faster than that in practice, and
+// plan switches call syncSubscription directly.
+const lastSyncAt = new Map<string, number>();
+
 export async function getBillingState(locationId: string): Promise<BillingState> {
   let acct = await ensureBillingAccount(locationId);
-  acct = await syncSubscription(acct);
+  if (Date.now() - (lastSyncAt.get(locationId) ?? 0) > 60_000) {
+    acct = await syncSubscription(acct);
+    lastSyncAt.set(locationId, Date.now());
+  }
   // CASE sums instead of FILTER aggregates (pg-mem silently ignores FILTER),
   // and the month boundary is computed in JS (pg-mem has no date_trunc).
   const monthStart = new Date();
@@ -341,8 +381,10 @@ async function switchPlanLocked(locationId: string, target: BillingPlan): Promis
       });
     } catch (e) {
       if (e instanceof SquareError) {
-        const detail = String(e.errors?.[0]?.detail ?? 'Square rejected the subscription');
-        throw badRequest(`could not start the subscription: ${detail.slice(0, 200)}`);
+        // E-low: Square's raw error detail stays in the server log — the
+        // client gets a generic message (provider internals are not UI).
+        console.error('[billing] Square subscription creation failed:', e.errors ?? e);
+        throw badRequest('could not start the subscription — please try again or contact support');
       }
       throw e;
     }

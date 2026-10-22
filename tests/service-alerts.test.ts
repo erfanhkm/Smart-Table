@@ -92,11 +92,11 @@ describe('idea 1: service recovery alerts', () => {
 
   it('third waiter call within 10 minutes raises a waiter_repeat alert', async () => {
     for (let i = 0; i < 2; i++) {
-      const res = await app.inject({ method: 'POST', url: `/api/tables/${TABLE}/call-waiter` });
+      const res = await app.inject({ method: 'POST', url: `/api/t/tok1/call-waiter` });
       assert.equal(res.statusCode, 200);
     }
     assert.equal((await openAlerts()).length, 0);
-    const res = await app.inject({ method: 'POST', url: `/api/tables/${TABLE}/call-waiter` });
+    const res = await app.inject({ method: 'POST', url: `/api/t/tok1/call-waiter` });
     assert.equal(res.statusCode, 200);
     const alerts = await openAlerts();
     assert.equal(alerts.length, 1);

@@ -44,6 +44,11 @@ export async function tableRoutes(app: FastifyInstance) {
     }
     const loc = await query(`SELECT id FROM locations WHERE id = $1`, [scopedId]);
     if (loc.rowCount === 0) throw badRequest('unknown location_id');
+    // C-15: cumulative per-location ceiling (per-call caps alone let a
+    // location grow tables without bound). 200 is far above any real
+    // dining room.
+    const cnt = await query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM tables WHERE location_id = $1`, [scopedId]);
+    if ((cnt.rows[0]?.n ?? 0) >= 200) throw badRequest('table limit reached for this location (200)');
     const id = randomUUID();
     const qrToken = randomUUID().replace(/-/g, '');
     await query(`INSERT INTO tables(id, location_id, name, qr_token, state) VALUES ($1,$2,$3,$4,'FREE')`, [

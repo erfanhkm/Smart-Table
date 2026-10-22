@@ -17,7 +17,17 @@ async function createPool(): Promise<Pool> {
   if (!config.databaseUrl) {
     throw new Error('DATABASE_URL is not set (or run with PG_MEM=1 for in-memory DB)');
   }
-  return new Pool({ connectionString: config.databaseUrl });
+  // F-3: explicit pool + server-side session timeouts. A wedged query or a
+  // transaction left open by a crashed request must never hold locks (or
+  // pool connections) forever: statements die at 15s, lock waits at 5s,
+  // idle-in-transaction sessions at 20s.
+  return new Pool({
+    connectionString: config.databaseUrl,
+    max: 10,
+    connectionTimeoutMillis: 5_000,
+    idleTimeoutMillis: 30_000,
+    options: '-c statement_timeout=15000 -c lock_timeout=5000 -c idle_in_transaction_session_timeout=20000',
+  });
 }
 
 function getPool(): Promise<Pool> {
@@ -51,8 +61,52 @@ export async function withTx<T>(fn: (client: PoolClient) => Promise<T>): Promise
     await client.query('COMMIT');
     return out;
   } catch (e) {
-    await client.query('ROLLBACK');
+    // F-11: a failed ROLLBACK must never mask the original error.
+    await client.query('ROLLBACK').catch((rbErr) => {
+      console.error('[db] ROLLBACK failed (original error preserved):', rbErr);
+    });
     throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Run fn while holding a session-level Postgres advisory lock on a
+ * dedicated connection. Returns null when the lock is already held
+ * (try-lock semantics) so callers can skip overlapping work. Used by
+ * migrations (F-11), the reconciler (F-6) and refunds (F-9).
+ *
+ * pg-mem has no advisory locks (nor hashtext): with runIfUnsupported the
+ * lock ACQUISITION failure runs fn unlocked instead of throwing. fn's
+ * own errors always propagate — they are never mistaken for a lock
+ * failure and fn never runs twice.
+ */
+export async function withAdvisoryLock<T>(
+  name: string,
+  fn: () => Promise<T>,
+  opts: { runIfUnsupported?: boolean } = {},
+): Promise<T | null> {
+  const pool = await getPool();
+  const client = await pool.connect();
+  try {
+    let locked: boolean;
+    try {
+      const res = await client.query<{ locked: boolean }>(
+        `SELECT pg_try_advisory_lock(hashtext($1)) AS locked`,
+        [name],
+      );
+      locked = !!res.rows[0]?.locked;
+    } catch (e) {
+      if (opts.runIfUnsupported) return await fn();
+      throw e;
+    }
+    if (!locked) return null;
+    try {
+      return await fn();
+    } finally {
+      await client.query(`SELECT pg_advisory_unlock(hashtext($1))`, [name]).catch(() => undefined);
+    }
   } finally {
     client.release();
   }

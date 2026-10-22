@@ -93,6 +93,7 @@ async function sh<T>(shop: string, method: string, path: string, body?: unknown,
   if (!t) throw new Error('shopify is not connected for this location (no POS credential stored)');
   const res = await fetch(adminBase(shop) + path, {
     method,
+    signal: AbortSignal.timeout(10_000),
     headers: {
       'X-Shopify-Access-Token': t,
       'Content-Type': 'application/json',
@@ -300,15 +301,22 @@ export const shopifyAdapter: PosAdapter = {
     if (!secret) throw new Error('SHOPIFY_WEBHOOK_SECRET is not set');
     const sent = firstHeader(args.headers['x-shopify-hmac-sha256']);
     const digest = createHmac('sha256', secret).update(args.rawBody, 'utf8').digest('base64');
-    if (!sent || !timingSafeEqual(Buffer.from(sent), Buffer.from(digest))) {
+    // E-low: timingSafeEqual throws on length mismatch — compare lengths
+    // first so a malformed header is a clean rejection, not an exception.
+    const sentBuf = Buffer.from(sent ?? '');
+    const digestBuf = Buffer.from(digest);
+    if (!sent || sentBuf.length !== digestBuf.length || !timingSafeEqual(sentBuf, digestBuf)) {
       throw new Error('invalid Shopify webhook signature');
     }
     const topic = firstHeader(args.headers['x-shopify-topic']);
     const b = (args.body ?? {}) as AnyObj;
-    // Draft-order webhooks carry draft_order.id; order webhooks carry order.id.
-    // Note: completing a draft creates a NEW order id — callers should link
-    // via the draft id stored at completion time.
-    const draftId = b?.draft_order?.id ?? b?.id;
+    // E-low: the checkId must be the DRAFT id (our stored ref). For
+    // draft_orders/* topics the payload IS the draft, so b.id is right;
+    // for orders/* topics b.id is the ORDER id — a different id space
+    // that can never match a stored check (the old ?? b.id fallback made
+    // those events silently dead). Only a nested draft_order.id links.
+    const isDraftTopic = topic.startsWith('draft_orders/');
+    const draftId = isDraftTopic ? (b?.draft_order?.id ?? b?.id) : b?.draft_order?.id;
     const typeMap: Record<string, PosEventType> = {
       'draft_orders/create': 'check.updated',
       'draft_orders/update': 'check.updated',
@@ -348,6 +356,7 @@ export const shopifyAdapter: PosAdapter = {
     if (!key || !secret) throw new Error('SHOPIFY_API_KEY / SHOPIFY_API_SECRET are not set');
     const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
       method: 'POST',
+      signal: AbortSignal.timeout(10_000),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ client_id: key, client_secret: secret, code: args.code }),
     });

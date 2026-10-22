@@ -45,6 +45,7 @@ import {
   PosOpenCheckSummary,
   PosPaymentResult,
 } from './types.js';
+import { getMenuCached } from './menu-cache.js';
 
 const REST_BASE =
   config.cloverEnv === 'production' ? 'https://api.clover.com' : 'https://apisandbox.dev.clover.com';
@@ -70,13 +71,17 @@ const TOKEN_BASE =
   config.cloverEnv === 'production' ? 'https://token.clover.com' : 'https://token-sandbox.dev.clover.com';
 
 /** Call the Clover Ecommerce API (charges, refunds). Uses the per-merchant Ecommerce private token. */
-async function ecom<T>(method: string, path: string, body: unknown, privateToken: string): Promise<T> {
+async function ecom<T>(method: string, path: string, body: unknown, privateToken: string, clientIp?: string): Promise<T> {
   const res = await fetch(ECOM_BASE + path, {
     method,
+    signal: AbortSignal.timeout(10_000),
     headers: {
       Authorization: `Bearer ${privateToken}`,
       'Content-Type': 'application/json',
-      'x-forwarded-for': '127.0.0.1', // Ecommerce API wants the client IP; best effort server-side
+      // D-11: the Ecommerce API wants the END CUSTOMER's IP for fraud
+      // scoring — the guest's real IP is plumbed from the pay request;
+      // the loopback placeholder remains only when no IP was supplied.
+      'x-forwarded-for': clientIp || '127.0.0.1',
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -110,12 +115,13 @@ async function resolveTenderId(mId: string, method: string, token?: string): Pro
   const norm = (s: unknown) => String(s ?? '').toLowerCase();
   const want = norm(method).replace(/^test_/, '');
   const enabled = els.filter((t) => t?.enabled !== false && t?.id);
+  // D-12: an EXPLICIT tender match is required. The old fallbacks (any
+  // 'cash' tender, then simply the FIRST enabled tender) could record an
+  // external payment against a completely unrelated tender type.
   const pick =
     enabled.find((t) => norm(t.label) === want) ??
-    enabled.find((t) => norm(t.label).includes(want) || want.includes(norm(t.label))) ??
-    enabled.find((t) => norm(t.label) === 'cash') ??
-    enabled[0];
-  if (!pick?.id) throw badRequest('no usable tender found for merchant');
+    enabled.find((t) => norm(t.label).includes(want) || want.includes(norm(t.label)));
+  if (!pick?.id) throw badRequest(`no ${method} tender is enabled for this merchant`);
   return String(pick.id);
 }
 
@@ -127,6 +133,7 @@ async function cl<T>(method: string, path: string, body?: unknown, token?: strin
   if (!t) throw new Error('clover is not connected for this location (no POS credential stored)');
   const res = await fetch(REST_BASE + path, {
     method,
+    signal: AbortSignal.timeout(10_000),
     headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -188,14 +195,22 @@ export const cloverAdapter: PosAdapter = {
     const mId = pathSeg(locationRef, 'merchant_id');
     // [V2] confirm server-side state filtering; until then filter client-side.
     // Pull today's orders and keep the open ones.
+    // D-15: PAGE through the window (100/page, up to 500) — a busy
+    // restaurant's 101st open order used to be silently invisible to
+    // link-check.
     const sinceMs = Date.now() - 24 * 60 * 60 * 1000;
-    const data: AnyObj = await cl(
-      'GET',
-      `/v3/merchants/${mId}/orders?filter=createdTime>=${sinceMs}&limit=100&expand=payments`,
-      undefined,
-      token,
-    );
-    const orders: AnyObj[] = data?.elements ?? [];
+    const orders: AnyObj[] = [];
+    for (let offset = 0; offset < 500; offset += 100) {
+      const data: AnyObj = await cl(
+        'GET',
+        `/v3/merchants/${mId}/orders?filter=createdTime>=${sinceMs}&limit=100&offset=${offset}&expand=payments`,
+        undefined,
+        token,
+      );
+      const page: AnyObj[] = data?.elements ?? [];
+      orders.push(...page);
+      if (page.length < 100) break;
+    }
     return orders
       .filter((o) => mapState(o?.state) === 'OPEN')
       .map((o) => {
@@ -303,6 +318,7 @@ export const cloverAdapter: PosAdapter = {
         ...(args.tipCents > 0 ? { tip_amount: args.tipCents } : {}),
       },
       privateToken,
+      args.clientIp,
     );
     const paymentId = String(pay?.id ?? pay?.paymentId ?? '');
     if (!paymentId) throw new Error('Clover order pay returned no payment id');
@@ -364,7 +380,7 @@ export const cloverAdapter: PosAdapter = {
         name: String(it?.name ?? 'Item'),
         description: null,
         priceCents: Number(it?.price ?? 0),
-        currency: 'USD', // [V5] sandbox merchant currency; confirm per merchant
+        currency: 'CAD', // [V5] placeholder only — getCachedMenu stamps the location's real currency over this (D-6)
         category: null,
         imageUrl: null,
       }))
@@ -378,7 +394,10 @@ export const cloverAdapter: PosAdapter = {
     if (!args.items.length) throw new Error('order must have at least one item');
     // M2 fix: validate EVERYTHING before creating the order, so a bad item
     // never leaves an empty orphan order in the POS. Cap total units.
-    const menu = await this.getMenu!(args.locationRef, args.token);
+    // D-10: validate against the SHARED menu cache (menu-cache.ts) — a
+    // direct getMenu() here bypassed the 45s cache that protects the
+    // merchant's POS API quota.
+    const menu = await getMenuCached(this, 'clover', args.locationRef, args.token);
     const byId = new Map(menu.map((m) => [m.id, m]));
     let totalUnits = 0;
     for (const i of args.items) {
@@ -430,24 +449,35 @@ export const cloverAdapter: PosAdapter = {
       throw new Error('webhook verification is not configured');
     }
     // Payload: { appId, merchants: { <mId>: [{ objectId: "O:<orderId>", type, ts }] } }
+    // D-5 fixes:
+    //  - checkId must be the COMPOSITE ref "<mId>:<orderId>" that our
+    //    checks rows store (the merchants-map key carries the mId) — the
+    //    bare order id could never match a stored ref.
+    //  - eventId includes the payload ts: without it, every occurrence of
+    //    the same CRUD type on the same object deduped into the first.
+    //  - The event type is a CRUD verb on the object, NOT the order's
+    //    payment state: a DELETE means the order was deleted, not paid.
+    //    Never derive closure from the payload — order events are emitted
+    //    as check.updated and the route re-fetches the order to decide.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const evt: any = body;
     const events: PosEvent[] = [];
     const merchants: AnyObj = evt?.merchants ?? {};
-    for (const entries of Object.values(merchants) as AnyObj[]) {
+    for (const [mId, entries] of Object.entries(merchants) as [string, AnyObj[]][]) {
       for (const e of entries as AnyObj[]) {
         const objectId: string = String(e?.objectId ?? '');
         const [kind, id] = objectId.split(':');
         if (!id) continue;
+        const ts = e?.ts ?? e?.updatedTime ?? '';
         if (kind === 'O') {
           events.push({
-            type: e?.type === 'DELETE' ? 'check.closed' : 'check.updated',
-            checkId: id,
-            eventId: `${objectId}:${e?.type ?? 'UNKNOWN'}`,
+            type: 'check.updated',
+            checkId: `${mId}:${id}`,
+            eventId: `${objectId}:${e?.type ?? 'UNKNOWN'}:${ts}`,
             rawType: `orders.${e?.type ?? 'UNKNOWN'}`,
           });
         } else if (kind === 'P') {
-          events.push({ type: 'payment.recorded', checkId: '', eventId: `${objectId}:${e?.type ?? 'UNKNOWN'}`, rawType: `payments.${e?.type ?? 'UNKNOWN'}` });
+          events.push({ type: 'payment.recorded', checkId: '', eventId: `${objectId}:${e?.type ?? 'UNKNOWN'}:${ts}`, rawType: `payments.${e?.type ?? 'UNKNOWN'}` });
         }
       }
     }
@@ -473,6 +503,7 @@ export const cloverAdapter: PosAdapter = {
       config.cloverEnv === 'production' ? 'https://api.clover.com' : 'https://apisandbox.dev.clover.com';
     const res = await fetch(`${tokenHost}/oauth/v2/token`, {
       method: 'POST',
+      signal: AbortSignal.timeout(10_000),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ client_id: config.cloverAppId, client_secret: config.cloverAppSecret, code }),
     });
@@ -481,20 +512,24 @@ export const cloverAdapter: PosAdapter = {
     if (!res.ok) throw new CloverError(res.status, data);
     const accessToken: string = data.access_token;
     if (!accessToken) throw new Error('Clover OAuth: no access_token in response');
-    // Merchant profile for display name; currency confirmed in sandbox [V5].
-    let name = mId || 'Clover merchant';
-    try {
-      const m: AnyObj = await cl('GET', `/v3/merchants/${pathSeg(mId || 'me', 'merchant_id')}`, undefined, accessToken);
-      if (m?.name) name = String(m.name);
-    } catch {
-      /* non-fatal: keep fallback name */
+    // D-8: the merchant-profile fetch is now FATAL and ASSERTS identity.
+    // It used to be a swallowed try/catch: a token issued for a DIFFERENT
+    // merchant than the callback's merchantRef would have been stored
+    // against the wrong merchant without anyone noticing. The profile's
+    // own id must equal the claimed merchantRef.
+    const profile: AnyObj = await cl('GET', `/v3/merchants/${mId || 'me'}`, undefined, accessToken);
+    const profileId = String(profile?.id ?? '');
+    if (!profileId) throw new Error('Clover OAuth: merchant profile returned no id');
+    if (mId && profileId !== mId) {
+      throw new Error(`Clover OAuth merchant mismatch: callback claimed ${mId} but the token belongs to ${profileId}`);
     }
+    const name = profile?.name ? String(profile.name) : profileId;
     return {
-      merchantRef: mId,
+      merchantRef: mId || profileId,
       accessToken,
       refreshToken: data.refresh_token ?? null,
       expiresAt: data.access_token_expiration ? new Date(data.access_token_expiration * 1000).toISOString() : null,
-      locations: mId ? [{ ref: mId, name, currency: 'CAD' }] : [],
+      locations: [{ ref: profileId, name, currency: 'CAD' }],
     };
   },
 };

@@ -1,4 +1,4 @@
-/* Smart Table — Restaurant Portal (v0.6.6)
+/* Smart Table — Restaurant Portal (v0.6.7)
  * Served from /portal/app.js with a strict Content-Security-Policy
  * (no inline script). The network layer below has no DOM *rendering*
  * dependencies; it uses sessionStorage only for the auth token. */
@@ -951,10 +951,17 @@ async function recordCashPayment() {
         alert(`That is more than the remaining balance (${money(bill.remaining_cents, bill.currency)}).`);
         return;
       }
+      // E-6: tender-blind POS (Shopify/Helcim) can't record a partial
+      // external payment — recording one completes the POS check in
+      // full. Staff must see that before confirming, not discover it.
+      const posClosureNote = (bill.pos_type === 'shopify' || bill.pos_type === 'helcim')
+        ? `\nNote: on ${bill.pos_type === 'shopify' ? 'Shopify' : 'Helcim'}, recording a payment marks the ENTIRE check as paid in the POS, regardless of the amount entered.`
+        : '';
       if (!confirm(
         `Record ${money(cents, bill.currency)} cash for ${drawerTable.name}?\n` +
         `Check total: ${money(bill.total_cents, bill.currency)}\n` +
-        `Remaining after: ${money(bill.remaining_cents - cents, bill.currency)}`,
+        `Remaining after: ${money(bill.remaining_cents - cents, bill.currency)}` +
+        posClosureNote,
       )) return;
       attempt = { sig, key: crypto.randomUUID() };
       saveCashAttempt(attempt);

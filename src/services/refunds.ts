@@ -18,8 +18,8 @@
 //    as negative fee_ledger rows (method 'reversal') so every SUM-based
 //    report stays truthful.
 import { randomUUID } from 'node:crypto';
-import { query } from '../db.js';
-import { badRequest, conflict, isClientError, notFound } from '../http.js';
+import { query, withAdvisoryLock } from '../db.js';
+import { badRequest, conflict, forbidden, isClientError, notFound } from '../http.js';
 import { getCheckPos } from './pos/context.js';
 import { SquareError } from '../square.js';
 
@@ -123,6 +123,12 @@ export async function refundPayment(input: {
   amountCents?: number;
   reason?: string;
   idempotencyKey: string;
+  /** F-9 (defense in depth): the location the CALLER was authorized for —
+   * the service asserts the payment actually belongs to it, so a future
+   * route bug can't refund across locations. */
+  expectedLocationId?: string;
+  /** F-9: who is issuing the refund (portal user id or 'staff-token'). */
+  actor?: string;
 }): Promise<RefundResult> {
   const key = input.idempotencyKey;
   if (typeof key !== 'string' || key.length < 8 || key.length > 200) {
@@ -132,6 +138,9 @@ export async function refundPayment(input: {
   const payment = (await query<PaymentRow>(`SELECT * FROM payments WHERE id = $1`, [input.paymentRowId])).rows[0];
   if (!payment) throw notFound('payment not found');
   const ctx = await getCheckPos(payment.check_id);
+  if (input.expectedLocationId && ctx.locationId !== input.expectedLocationId) {
+    throw forbidden('payment does not belong to your location');
+  }
   const totalCharged = payment.amount_cents + payment.tip_cents;
 
   const summarize = async (refundRowId: string, posRef: string | null, amount: number, replayed: boolean): Promise<RefundResult> => {
@@ -168,29 +177,43 @@ export async function refundPayment(input: {
     throw badRequest(`refunds are not available for ${ctx.posType} yet`);
   }
 
-  const already = await refundedSoFar(payment.id);
-  const refundable = totalCharged - already;
-  const amount = input.amountCents ?? refundable;
-  if (!Number.isInteger(amount) || amount <= 0) throw badRequest('amount_cents must be a positive integer');
-  if (amount > refundable) throw badRequest(`amount_cents exceeds the refundable remainder (${refundable})`);
+  // F-9: the refundable computation + reservation run under a per-payment
+  // advisory lock — without it, two concurrent refunds with DIFFERENT
+  // keys could both pass the remainder check and over-refund together.
+  // The POS call itself stays outside the lock.
+  const reserved = await withAdvisoryLock(`refund:${payment.id}`, async () => {
+    const alreadyNow = await refundedSoFar(payment.id);
+    const refundableNow = totalCharged - alreadyNow;
+    const amountNow = input.amountCents ?? refundableNow;
+    if (!Number.isInteger(amountNow) || amountNow <= 0) throw badRequest('amount_cents must be a positive integer');
+    if (amountNow > refundableNow) throw badRequest(`amount_cents exceeds the refundable remainder (${refundableNow})`);
 
-  // Reserve the refund row before calling the POS.
-  const rowId = existing?.id ?? randomUUID();
-  if (existing) {
-    await query(`UPDATE refunds SET status = 'PENDING', amount_cents = $2 WHERE id = $1`, [rowId, amount]);
-  } else {
-    await query(
-      `INSERT INTO refunds(id, payment_row_id, check_id, location_id, amount_cents, currency, reason, idempotency_key)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (idempotency_key) DO NOTHING`,
-      [rowId, payment.id, payment.check_id, ctx.locationId, amount, payment.currency ?? 'CAD', input.reason ?? null, key],
-    );
-    const stored = (await query<RefundRow>(`SELECT * FROM refunds WHERE idempotency_key = $1`, [key])).rows[0];
-    if (!stored || stored.id !== rowId) {
-      // A concurrent request with the same key won the race.
-      if (stored?.status === 'COMPLETED') return summarize(stored.id, stored.pos_refund_ref, stored.amount_cents, true);
-      throw conflict('this refund is still being confirmed with the POS; check the payment before retrying', 'refund_state_unknown');
+    // Reserve the refund row before calling the POS.
+    const newRowId = existing?.id ?? randomUUID();
+    if (existing) {
+      await query(`UPDATE refunds SET status = 'PENDING', amount_cents = $2 WHERE id = $1`, [newRowId, amountNow]);
+    } else {
+      await query(
+        `INSERT INTO refunds(id, payment_row_id, check_id, location_id, amount_cents, currency, reason, idempotency_key, refunded_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (idempotency_key) DO NOTHING`,
+        [newRowId, payment.id, payment.check_id, ctx.locationId, amountNow, payment.currency ?? 'CAD', input.reason ?? null, key, input.actor ?? null],
+      );
+      const stored = (await query<RefundRow>(`SELECT * FROM refunds WHERE idempotency_key = $1`, [key])).rows[0];
+      if (!stored || stored.id !== newRowId) {
+        // A concurrent request with the same key won the race.
+        if (stored && stored.status === 'COMPLETED') return { kind: 'replay' as const, row: stored };
+        throw conflict('this refund is still being confirmed with the POS; check the payment before retrying', 'refund_state_unknown');
+      }
     }
+    return { kind: 'reserved' as const, rowId: newRowId, amount: amountNow, already: alreadyNow };
+  }, { runIfUnsupported: true });
+  if (reserved === null) {
+    throw conflict('another refund for this payment is in progress — wait a moment and retry', 'refund_state_unknown');
   }
+  if (reserved.kind === 'replay') {
+    return summarize(reserved.row.id, reserved.row.pos_refund_ref, reserved.row.amount_cents, true);
+  }
+  const { rowId, amount, already } = reserved;
 
   try {
     const res = await ctx.adapter.refundPayment({
@@ -222,8 +245,10 @@ export async function refundPayment(input: {
     }
     await query(`UPDATE refunds SET status = 'FAILED' WHERE id = $1`, [rowId]).catch(() => undefined);
     if (e instanceof SquareError) {
-      const detail = String(e.errors?.[0]?.detail ?? 'Square rejected the refund');
-      throw badRequest(`refund failed: ${detail.slice(0, 200)}`);
+      // F-8: Square's raw error detail is logged, never echoed to the
+      // client — provider internals are not a user-facing message.
+      console.error(`[refunds] Square rejected refund for payment ${payment.id}:`, e.errors ?? e);
+      throw badRequest('refund failed: the POS rejected the refund');
     }
     if (isClientError(e)) {
       // Our own adapter determination (cash tender, wrong status, ...):

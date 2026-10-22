@@ -58,6 +58,8 @@ export interface PayCheckInput {
   idempotencyKey: string;
   source: PaymentSource;
   payerLabel?: string;
+  /** D-11: the guest's IP (from the HTTP request) for POS fraud APIs. */
+  clientIp?: string;
 }
 
 export interface PayCheckResult {
@@ -312,6 +314,22 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
       }
       if (!currency) throw new Error('POS check has no currency');
 
+      // D-6: the LOCATION's currency is authoritative. A POS check whose
+      // currency disagrees means the location is bound to a POS account
+      // in another currency — charging would settle in the wrong currency
+      // while our books record the location's. Refuse (the demo location
+      // is exempt: its sandbox account is USD while the location is CAD,
+      // and it never moves real money).
+      if (ctx.currency && currency.toUpperCase() !== ctx.currency.toUpperCase()) {
+        if (ctx.demo) {
+          console.warn(`[pay] demo location currency mismatch: location=${ctx.currency} POS=${currency} (allowed for demo)`);
+        } else {
+          throw badRequest(
+            `this check is in ${currency} but the location bills in ${ctx.currency} — the POS account currency does not match the location`,
+          );
+        }
+      }
+
       // D-1 resume guard: a resumed PENDING row that already carries a
       // persisted POS tender ref means the first attempt DID create the
       // charge — the ref is written the moment the charge lands, outside
@@ -462,6 +480,7 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
           card: ctx.card,
           token,
           appFeeCents: posType === 'square' ? feeCents : 0,
+          clientIp: input.clientIp,
         });
         chargeCreated = true;
         externalPaymentId = res.paymentId;

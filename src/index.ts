@@ -19,6 +19,7 @@ import { onboardingRoutes } from './routes/onboarding.js';
 import { billingRoutes } from './routes/billing.js';
 import { refundRoutes } from './routes/refunds.js';
 import { processAccruedFees } from './services/billing.js';
+import { refreshExpiringTokens } from './services/pos/token-refresh.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -31,7 +32,20 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // proxy-addr calls it from the closest hop (0) outward, trusting the first N.
   const hops = config.trustProxy;
   const app = Fastify({
-    logger: opts.logger ?? true,
+    // F-5: request logs must never contain guest table tokens — the /t/:token
+    // path segment and the ?table_token= query value are bearer secrets.
+    logger: (opts.logger ?? true)
+      ? {
+          serializers: {
+            req(req: { method?: string; url?: string; hostname?: string }) {
+              const url = String(req.url ?? '')
+                .replace(/\/t\/[^/?#]+/g, '/t/…')
+                .replace(/([?&]table_token=)[^&#]+/g, '$1…');
+              return { method: req.method, url, host: req.hostname };
+            },
+          },
+        }
+      : false,
     trustProxy: hops > 0 ? (_addr: string, hop: number) => hop < hops : false,
   });
 
@@ -92,8 +106,10 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   });
 
   // Rate limits. Each limiter has its own named bucket (H1 fix: pay and general
-  // never share a counter). Guest routes are keyed per table token where possible
-  // so guests behind one venue Wi-Fi IP don't block each other.
+  // never share a counter). These global limiters key by IP; guest WRITE
+  // routes additionally carry a per-table-token limiter (C-8, in
+  // routes/customer.ts) so guests behind one venue Wi-Fi IP don't block
+  // each other and one token can't spray writes.
   // Webhooks get a loose per-IP limit instead of a full exemption (M5 fix).
   const payLimiter = rateLimit({ name: 'pay', windowMs: 60_000, max: 20 });
   const generalLimiter = rateLimit({ name: 'general', windowMs: 60_000, max: 200 });
@@ -112,44 +128,72 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     await (isPay ? payLimiter : generalLimiter)(req, reply);
   });
 
-  app.get('/healthz', async () => ({ ok: true, env: config.squareEnv }));
+  // F-11: healthz reports liveness only — the Square environment is
+  // deployment detail that doesn't belong on a public endpoint.
+  app.get('/healthz', async () => ({ ok: true }));
 
   // Apple Pay domain verification (v0.3 wallets). Square issues this file per
   // domain when the merchant registers the domain for Apple Pay on the web;
   // its contents come from the APPLE_PAY_DOMAIN_ASSOCIATION env var. 404 when
   // unconfigured — Apple Pay then stays unavailable, Google Pay is unaffected.
+  // F-11: the association file is read ONCE and cached — it changes only
+  // when a new domain is registered with Square (a redeploy).
+  let applePayAssociationCache: string | null = null;
   app.get('/.well-known/apple-developer-merchantid-domain-association', async (_req, reply) => {
     // Prefer the committed file (public/.well-known/...): a 9 KB value
     // pasted into a dashboard env field silently lost ~330 characters
     // mid-string once (2026-10-20) and Square kept rejecting the domain
     // with 'partial response'. A file in git is byte-exact. The env var
     // remains as a fallback.
-    let content = '';
-    try {
-      content = fs
-        .readFileSync(path.join(here, '..', 'public', '.well-known', 'apple-developer-merchantid-domain-association'), 'utf8')
-        .trim();
-    } catch { /* fall through to env */ }
-    if (!content) content = config.applePayDomainAssociation;
-    if (!content) return reply.code(404).send({ error: 'not configured' });
-    return reply.type('text/plain').send(content);
+    if (applePayAssociationCache === null) {
+      let content = '';
+      try {
+        content = fs
+          .readFileSync(path.join(here, '..', 'public', '.well-known', 'apple-developer-merchantid-domain-association'), 'utf8')
+          .trim();
+      } catch { /* fall through to env */ }
+      if (!content) content = config.applePayDomainAssociation;
+      applePayAssociationCache = content;
+    }
+    if (!applePayAssociationCache) return reply.code(404).send({ error: 'not configured' });
+    return reply.type('text/plain').send(applePayAssociationCache);
   });
 
   // Pretty URLs for the two frontends.
-  // Guest page CSP: the page is a single inline script, so script-src needs
-  // 'unsafe-inline'; the real containment is the origin allowlist — the page
-  // may only talk to / frame content from the payment providers it uses
-  // (Square card + wallets, Clover tokens, Helcim modal, Google Pay sheet).
-  // img-src allows https: because menu photos are served from POS catalogs.
+  // Guest page CSP (F-4): the app script now lives in /t/app.js, so
+  // script-src no longer needs 'unsafe-inline'. The origin allowlist is the
+  // containment — the page may only load scripts from / talk to / frame
+  // content from the payment providers it uses (Square card + wallets,
+  // Clover tokens, Helcim modal, Google Pay sheet). img-src allows https:
+  // because menu photos are served from POS catalogs.
   app.get('/t/:token', async (_req, reply) =>
     reply
       .header(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self' 'unsafe-inline' https://*.squarecdn.com https://*.squareup.com https://*.clover.com https://*.helcim.com https://pay.google.com; connect-src 'self' https://*.squarecdn.com https://*.squareup.com https://*.clover.com https://*.helcim.com https://apple-pay-gateway.apple.com; frame-src https://*.squarecdn.com https://*.squareup.com https://*.helcim.com https://pay.google.com; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+        "default-src 'self'; script-src 'self' https://*.squarecdn.com https://*.squareup.com https://*.clover.com https://*.helcim.com https://pay.google.com; connect-src 'self' https://*.squarecdn.com https://*.squareup.com https://*.clover.com https://*.helcim.com https://apple-pay-gateway.apple.com; frame-src https://*.squarecdn.com https://*.squareup.com https://*.helcim.com https://pay.google.com; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
       )
       .sendFile('t/index.html'),
   );
-  app.get('/dashboard', async (_req, reply) => reply.sendFile('dashboard/index.html'));
+  // F-4 follow-through: the guest app script is an external file now, but
+  // the /t/:token route above would happily swallow /t/app.js and return
+  // the HTML page for it (wrong MIME -> browsers refuse to execute). The
+  // explicit static route wins over the parametric one (same pattern as
+  // /portal/app.js).
+  app.get('/t/app.js', async (_req, reply) =>
+    reply.header('X-Content-Type-Options', 'nosniff').type('text/javascript').sendFile('t/app.js'),
+  );
+  // F-11: /dashboard previously shipped with no CSP at all. Its script is
+  // inline today, so script-src keeps 'unsafe-inline' (same posture as the
+  // guest page until its script is externalized); everything else is
+  // self-only and unframable.
+  app.get('/dashboard', async (_req, reply) =>
+    reply
+      .header(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+      )
+      .sendFile('dashboard/index.html'),
+  );
   // Restaurant portal: strict CSP (the page's script is external; styles are
   // inline in <style> and style="" attributes, so style-src allows 'unsafe-inline'
   // — safe for styles, unlike scripts), not framable — it has Record Cash / Free Table buttons.
@@ -203,6 +247,19 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
         .catch((e) => app.log.error(e, '[billing] accrued fee processing failed'));
     setTimeout(runBilling, 60_000).unref();
     setInterval(runBilling, 6 * 60 * 60 * 1000).unref();
+    // D-7 backstop: refresh Square OAuth tokens before they expire (the
+    // on-demand refresh in getLocationPos is the primary path; this sweep
+    // catches idle restaurants and logs unrefreshable credentials).
+    const runTokenRefresh = () =>
+      refreshExpiringTokens()
+        .then((r) => {
+          if (r.refreshed > 0 || r.failed > 0 || r.unrefreshable > 0) {
+            app.log.warn(r, '[token-refresh] sweep finished with items needing attention');
+          }
+        })
+        .catch((e) => app.log.error(e, '[token-refresh] sweep failed'));
+    setTimeout(runTokenRefresh, 90_000).unref();
+    setInterval(runTokenRefresh, 6 * 60 * 60 * 1000).unref();
   }
   return app;
 }

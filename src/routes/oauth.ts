@@ -72,6 +72,26 @@ export async function oauthRoutes(app: FastifyInstance) {
     const merchantId: string = tok.merchant_id ?? merchant.id;
     const expiresAt: string | null = tok.expires_at ? new Date(tok.expires_at).toISOString() : null;
 
+    // E-10: bind the callback to the flow's starting location. The state
+    // record carried the starter's locationId but it was never checked —
+    // any valid OAuth completion overwrote tokens and re-created location
+    // rows regardless of who started it. If the starting location already
+    // belongs to a DIFFERENT Square merchant, refuse before storing
+    // anything: the authorizing account is not this restaurant's.
+    if (st.locationId) {
+      const existing = await query<{ external_merchant_ref: string | null }>(
+        `SELECT m.external_merchant_ref FROM locations l
+         JOIN merchants m ON m.id = l.merchant_id WHERE l.id = $1`,
+        [st.locationId],
+      );
+      const boundRef = existing.rows[0]?.external_merchant_ref;
+      if (boundRef && boundRef !== merchantId) {
+        throw badRequest(
+          'this Square account belongs to a different restaurant than the one that started the connection',
+        );
+      }
+    }
+
     const ourMerchantId = await upsertMerchant('square', merchantId);
     await query(
       `UPDATE merchants SET access_token_enc=$1, refresh_token_enc=$2, token_expires_at=$3,
