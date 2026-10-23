@@ -301,6 +301,19 @@
         @media (prefers-reduced-motion: no-preference) {
             html { scroll-behavior: smooth; }
         }
+
+        /* In-action screenshot gallery: uniform cards, fixed-aspect stages, no distortion */
+        .shots-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 24px; }
+        .shots-row-phones { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; margin-top: 20px; }
+        .shot-card { margin: 0; background: #fff; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; box-shadow: 0 10px 28px rgba(8, 16, 28, 0.07); }
+        .shots-row-phones .shot-card { width: 320px; max-width: 100%; }
+        .shot-stage { background: var(--navy); }
+        .shot-stage img { width: 100%; height: auto; display: block; }
+        .shot-card figcaption { color: var(--text-muted); font-size: 0.92rem; padding: 14px 18px 16px; }
+        @media (max-width: 640px) {
+            .shots-row-phones .shot-card { width: calc(50% - 10px); }
+            .shots-row-phones .shot-card figcaption { padding: 10px 12px 12px; font-size: 0.82rem; }
+        }
     </style>
 <!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "50093eb2d5dc4982bad58e9e46723827"}'></script><!-- End Cloudflare Web Analytics -->
 </head>
@@ -480,28 +493,28 @@
                 <source src="/media/teaser.mp4" type="video/mp4">
                 Your browser does not support embedded video — the screenshots below show the same tour.
             </video>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 24px;">
-                <figure style="margin: 0;">
-                    <img src="/media/portal-order-detail.webp" width="2880" height="1800" alt="Smart Table portal Live Orders with an itemized check detail panel" loading="lazy" style="width: 100%; display: block; border-radius: 16px; border: 1px solid var(--border);">
-                    <figcaption style="color: var(--text-muted); font-size: 0.92rem; margin-top: 10px;">Live Orders — every open check, itemized, with cash recording and refunds built in.</figcaption>
+            <div class="shots-grid">
+                <figure class="shot-card">
+                    <div class="shot-stage"><img src="/media/portal-order-detail.webp" width="2880" height="1800" alt="Smart Table portal Live Orders with an itemized check detail panel" loading="lazy"></div>
+                    <figcaption>Live Orders — every open check, itemized, with cash recording and refunds built in.</figcaption>
                 </figure>
-                <figure style="margin: 0;">
-                    <img src="/media/portal-reports.webp" width="2880" height="1800" alt="Smart Table reports with a daily breakdown of checks, revenue and average tip" loading="lazy" style="width: 100%; display: block; border-radius: 16px; border: 1px solid var(--border);">
-                    <figcaption style="color: var(--text-muted); font-size: 0.92rem; margin-top: 10px;">Reports — settlement times, settled checks and a daily revenue breakdown.</figcaption>
+                <figure class="shot-card">
+                    <div class="shot-stage"><img src="/media/portal-reports.webp" width="2880" height="1800" alt="Smart Table reports with a daily breakdown of checks, revenue and average tip" loading="lazy"></div>
+                    <figcaption>Reports — settlement times, settled checks and a daily revenue breakdown.</figcaption>
                 </figure>
-                <figure style="margin: 0;">
-                    <img src="/media/portal-billing.webp" width="2880" height="1800" alt="Smart Table billing page showing the 2 percent commission plan, the 99 dollar Base plan and Pro coming soon" loading="lazy" style="width: 100%; display: block; border-radius: 16px; border: 1px solid var(--border);">
-                    <figcaption style="color: var(--text-muted); font-size: 0.92rem; margin-top: 10px;">Billing — one clear plan per location, every fee listed. No surprises.</figcaption>
+                <figure class="shot-card">
+                    <div class="shot-stage"><img src="/media/portal-billing.webp" width="2880" height="1800" alt="Smart Table billing page showing the 2 percent commission plan, the 99 dollar Base plan and Pro coming soon" loading="lazy"></div>
+                    <figcaption>Billing — one clear plan per location, every fee listed. No surprises.</figcaption>
                 </figure>
             </div>
-            <div style="display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; margin-top: 24px;">
-                <figure style="margin: 0; width: 300px; max-width: 44vw;">
-                    <img src="/media/guest-bill-mobile.webp" width="1170" height="2532" alt="Guest pay page on a phone showing an itemized bill and split payment options" loading="lazy" style="width: 100%; display: block; border-radius: 16px; border: 1px solid var(--border);">
-                    <figcaption style="color: var(--text-muted); font-size: 0.92rem; margin-top: 10px;">What guests see — the itemized bill, split four ways.</figcaption>
+            <div class="shots-row-phones">
+                <figure class="shot-card">
+                    <div class="shot-stage"><img src="/media/guest-bill-mobile.webp" width="1170" height="2532" alt="Guest pay page on a phone showing an itemized bill and split payment options" loading="lazy"></div>
+                    <figcaption>What guests see — the itemized bill, split four ways.</figcaption>
                 </figure>
-                <figure style="margin: 0; width: 300px; max-width: 44vw;">
-                    <img src="/media/guest-pay-mobile.webp" width="1170" height="2532" alt="Guest pay page on a phone showing tip options and the total pay button" loading="lazy" style="width: 100%; display: block; border-radius: 16px; border: 1px solid var(--border);">
-                    <figcaption style="color: var(--text-muted); font-size: 0.92rem; margin-top: 10px;">Tip, tap, paid — the whole payment takes seconds.</figcaption>
+                <figure class="shot-card">
+                    <div class="shot-stage"><img src="/media/guest-pay-mobile.webp" width="1170" height="2532" alt="Guest pay page on a phone showing tip options and the total pay button" loading="lazy"></div>
+                    <figcaption>Tip, tap, paid — the whole payment takes seconds.</figcaption>
                 </figure>
             </div>
         </div>
