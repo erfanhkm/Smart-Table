@@ -190,7 +190,14 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // explicit static route wins over the parametric one (same pattern as
   // /portal/app.js).
   app.get('/t/app.js', async (_req, reply) =>
-    reply.header('X-Content-Type-Options', 'nosniff').type('text/javascript').sendFile('t/app.js'),
+    reply
+      .header('X-Content-Type-Options', 'nosniff')
+      // v0.7.2: app scripts must revalidate — the static plugin's 1h maxAge
+      // served a stale portal app.js after the v0.7.1 fix deploy, so the
+      // fix looked like it never shipped. no-cache still allows 304s.
+      .header('Cache-Control', 'no-cache')
+      .type('text/javascript')
+      .sendFile('t/app.js'),
   );
   // F-11: /dashboard previously shipped with no CSP at all. Its script is
   // inline today, so script-src keeps 'unsafe-inline' (same posture as the
@@ -223,7 +230,11 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
       .sendFile('portal/index.html'),
   );
   app.get('/portal/app.js', async (_req, reply) =>
-    reply.header('X-Content-Type-Options', 'nosniff').type('text/javascript').sendFile('portal/app.js'),
+    reply
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Cache-Control', 'no-cache') // v0.7.2: see /t/app.js above
+      .type('text/javascript')
+      .sendFile('portal/app.js'),
   );
 
   // The portal subdomain's root used to 404 — send it to the portal login

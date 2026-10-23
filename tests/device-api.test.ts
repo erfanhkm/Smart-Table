@@ -239,6 +239,15 @@ describe('portal Devices view (source shape)', () => {
     assert.ok(!fn.includes('devRes.devices'), 'raw Response field access must be gone');
     assert.ok(!fn.includes('tabRes.tables'), 'raw Response field access must be gone');
   });
+
+  it('app.js is cache-busted + revalidating (v0.7.2: a stale cached script hid the fix)', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const html = await readFile(new URL('../public/portal/index.html', import.meta.url), 'utf8');
+    assert.ok(html.includes('/portal/app.js?v='), 'portal script tag must carry a version query');
+    const idx = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
+    const route = idx.slice(idx.indexOf("app.get('/portal/app.js'"));
+    assert.ok(route.slice(0, 400).includes("'Cache-Control', 'no-cache'"), 'portal app.js route must set no-cache');
+  });
 });
 
 describe('heartbeat + registry + revoke + re-pair', () => {
