@@ -1311,8 +1311,16 @@ async function renderDevices() {
       request(`/api/portal/devices?location_id=${loc}`),
       request(`/api/tables?location_id=${loc}`),
     ]);
-    const devices = devRes.devices || [];
-    const tables = tabRes.tables || [];
+    if (!devRes.ok) throw new Error('Could not load devices.');
+    if (!tabRes.ok) throw new Error('Could not load tables.');
+    // request() returns the raw fetch Response — bodies must go through
+    // readJson() (v0.7.1 fix: v0.7.0 read .devices/.tables off the Response
+    // itself, got undefined for both, and rendered an empty registry with a
+    // misleading "every table already has a paired device" message).
+    const devData = await readJson(devRes);
+    const tabData = await readJson(tabRes);
+    const devices = (devData && devData.devices) || [];
+    const tables = (tabData && (Array.isArray(tabData) ? tabData : tabData.tables)) || [];
     const paired = new Set(devices.map((d) => d.table_id));
     const pairable = tables.filter((t) => !paired.has(t.id));
     let html = `<div class="card">
@@ -1348,7 +1356,9 @@ async function renderDevices() {
             method: 'POST',
             body: { table_id: $('pair-table').value },
           });
-          $('pair-result').innerHTML = `<p>Pairing code: <strong style="font-size:1.35em;letter-spacing:.18em">${esc(res.code)}</strong><br>Enter it on the device before ${esc(new Date(res.expires_at).toLocaleTimeString())}.</p>`;
+          const data = await readJson(res);
+          if (!res.ok) throw new Error((data && data.error) || 'Could not generate a code.');
+          $('pair-result').innerHTML = `<p>Pairing code: <strong style="font-size:1.35em;letter-spacing:.18em">${esc(data.code)}</strong><br>Enter it on the device before ${esc(new Date(data.expires_at).toLocaleTimeString())}.</p>`;
         } catch (e) {
           $('pair-result').innerHTML = `<p class="status-bad">${esc(e.message || e)}</p>`;
         } finally {

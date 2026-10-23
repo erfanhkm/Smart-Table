@@ -224,6 +224,23 @@ describe('print jobs', () => {
   });
 });
 
+describe('portal Devices view (source shape)', () => {
+  it('parses API responses via readJson — never reads fields off the raw Response', async () => {
+    // v0.7.0 regression: request() returns a fetch Response; reading
+    // .devices/.tables off it yielded undefined and the view rendered an
+    // empty registry claiming every table was already paired.
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile(new URL('../public/portal/app.js', import.meta.url), 'utf8');
+    const start = src.indexOf('async function renderDevices()');
+    const end = src.indexOf('/* --------', start);
+    const fn = src.slice(start, end > start ? end : start + 6000);
+    assert.ok(fn.includes('await readJson(devRes)'), 'devices response must be parsed');
+    assert.ok(fn.includes('await readJson(tabRes)'), 'tables response must be parsed');
+    assert.ok(!fn.includes('devRes.devices'), 'raw Response field access must be gone');
+    assert.ok(!fn.includes('tabRes.tables'), 'raw Response field access must be gone');
+  });
+});
+
 describe('heartbeat + registry + revoke + re-pair', () => {
   it('heartbeat lands in the portal registry; partial updates keep old fields', async () => {
     const hb = await app.inject({
