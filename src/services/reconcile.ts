@@ -19,7 +19,7 @@
 // - Poison rows back off exponentially (M6 fix).
 //
 // Run: npx tsx scripts/reconcile.ts  (cron: every 15 min in production)
-import { query, withTx, withAdvisoryLock } from '../db.js';
+import { forUpdate, query, withTx, withAdvisoryLock } from '../db.js';
 import { getCheckPos, TENDER_BLIND_POS } from './pos/context.js';
 import { effectivePlan, ensureBillingAccount, feeFor, recordFee } from './billing.js';
 import { randomUUID } from 'node:crypto';
@@ -43,6 +43,7 @@ interface PendingRow {
   pos_tender_ref: string | null;
   reconcile_attempts: number;
   created_at: string;
+  last_reconcile_at: string | null;
 }
 
 export async function reconcilePendingPayments(): Promise<{ reconciled: number; failed: number; stillPending: number }> {
@@ -64,17 +65,35 @@ async function reconcileRun(): Promise<{ reconciled: number; failed: number; sti
   let reconciled = 0, failed = 0, stillPending = 0;
 
   // M6 fix: poison rows back off — a row that errored N times waits 2^N minutes.
-  const { rows } = await query<PendingRow>(
+  // F2-2: the backoff used to be computed in SQL as
+  // make_interval(mins => LEAST(2 ^ reconcile_attempts, 240)) — on real
+  // Postgres `2 ^ n` is double precision and make_interval(mins => double)
+  // does not exist, so EVERY run failed there (pg-mem tolerated it, which
+  // is why the suite never noticed; and pg-mem's parser rejects the
+  // integer-cast form real Postgres needs). The due check now happens in
+  // JS: portable to both, and the exponent is capped before it can
+  // overflow anything.
+  // (Both cutoffs are computed in JS and passed as plain timestamps:
+  // make_interval with a bound parameter parses on neither pg-mem nor —
+  // with the old expression — real Postgres.)
+  const stuckBefore = new Date(Date.now() - STUCK_AFTER_MIN * 60000).toISOString();
+  const { rows: candidates } = await query<PendingRow>(
     `SELECT id, check_id, amount_cents, tip_cents, idempotency_key, pos_tender_ref,
-            reconcile_attempts, created_at
+            reconcile_attempts, created_at, last_reconcile_at
      FROM payments
      WHERE status = 'PENDING'
-       AND created_at < now() - make_interval(mins => $1)
-       AND (last_reconcile_at IS NULL
-            OR last_reconcile_at < now() - make_interval(mins => LEAST(2 ^ reconcile_attempts, 240)))
-     ORDER BY created_at ASC LIMIT 100`,
-    [STUCK_AFTER_MIN],
+       AND created_at < $1
+     ORDER BY created_at ASC LIMIT 500`,
+    [stuckBefore],
   );
+  const nowMs = Date.now();
+  const rows = candidates
+    .filter((p) => {
+      if (!p.last_reconcile_at) return true;
+      const backoffMin = Math.min(2 ** Math.min(p.reconcile_attempts, 8), 240);
+      return new Date(p.last_reconcile_at).getTime() < nowMs - backoffMin * 60000;
+    })
+    .slice(0, 100);
 
   for (const p of rows) {
     const outcome = await reconcileRow(p);
@@ -123,6 +142,10 @@ async function reconcileRow(p: PendingRow): Promise<'reconciled' | 'failed' | 'p
       // Per-row write transaction: re-check PENDING under the row lock,
       // then settle the payment (+ check/table when closed).
       const settled = await withTx(async (client) => {
+        // F2-15: lock the check row first, in the same order payCheck
+        // takes it, so a delayed reconcile can't interleave with a live
+        // payment on the same check.
+        await client.query(`SELECT id FROM checks WHERE id = $1${forUpdate()}`, [p.check_id]);
         // H6 fix: guard the UPDATE with AND status='PENDING'.
         const upd = await client.query(
           `UPDATE payments SET status = $2, external_payment_ref = COALESCE(external_payment_ref, $3),
@@ -134,14 +157,34 @@ async function reconcileRow(p: PendingRow): Promise<'reconciled' | 'failed' | 'p
         );
         if ((upd.rowCount ?? 0) === 0) return false; // someone else resolved it
         if (closed) {
+          // F2-15: promote sibling AUTHORIZED rows, exactly like
+          // payCheck's completion tail — a check reconcile closes must
+          // not leave its other payments half-settled.
+          await client.query(
+            `UPDATE payments SET status='COMPLETED' WHERE check_id=$1 AND status='AUTHORIZED'`,
+            [p.check_id],
+          );
           await client.query(`UPDATE checks SET state='COMPLETED' WHERE id=$1`, [p.check_id]);
           const chk = await client.query<{ table_id: string | null }>(
             `SELECT table_id FROM checks WHERE id=$1`, [p.check_id]);
           const tableId = chk.rows[0]?.table_id;
           if (tableId) {
-            await client.query(`UPDATE tables SET state='PAID' WHERE id=$1`, [tableId]);
-            await client.query(`INSERT INTO events(id, table_id, check_id, type) VALUES($1,$2,$3,'paid')`,
-              [randomUUID(), tableId, p.check_id]);
+            // F2-9: this reconcile may run hours late — only flip the
+            // table when it's still working THIS check's party: still in
+            // SEATED/PAYING and with no OTHER open check (a re-seated
+            // table's new party has one). This check itself was marked
+            // COMPLETED just above, so it doesn't count. A table that
+            // fails the guard is untouched, and no phantom 'paid' event
+            // is written for it.
+            const tu = await client.query(
+              `UPDATE tables SET state='PAID' WHERE id=$1 AND state IN ('SEATED','PAYING')
+               AND NOT EXISTS (SELECT 1 FROM checks WHERE table_id = $1 AND state = 'OPEN')`,
+              [tableId],
+            );
+            if ((tu.rowCount ?? 0) > 0) {
+              await client.query(`INSERT INTO events(id, table_id, check_id, type) VALUES($1,$2,$3,'paid')`,
+                [randomUUID(), tableId, p.check_id]);
+            }
           }
         }
         return true;
@@ -188,9 +231,28 @@ async function reconcileRow(p: PendingRow): Promise<'reconciled' | 'failed' | 'p
       return 'reconciled';
     }
 
+    if (ageH > GIVE_UP_AFTER_H && canSeeTenders && !p.pos_tender_ref && freshTenders.length > 0) {
+      // F2-3: unrecorded tenders EXIST on this check but none matched this
+      // row uniquely — ambiguous evidence (equal-split twins produce
+      // identical amounts; a lost amount write leaves amount_cents = 0).
+      // The old code marked such rows FAILED after 24h even though the
+      // money was taken. Ambiguity is a human's call: flag and keep
+      // backing off, exactly like the stored-ref case below.
+      await query(
+        `UPDATE payments SET reconcile_attempts = reconcile_attempts + 1, last_reconcile_at = now(),
+           last_reconcile_error = 'MANUAL REVIEW: unmatched POS tenders present after 24h (ambiguous or amount unknown)'
+         WHERE id = $1`,
+        [p.id],
+      );
+      console.error(`[reconcile] MANUAL REVIEW ${p.idempotency_key}: ${freshTenders.length} unmatched tender(s) after ${ageH.toFixed(1)}h — left PENDING`);
+      return 'pending';
+    }
+
     if (ageH > GIVE_UP_AFTER_H && canSeeTenders && !p.pos_tender_ref) {
-      // H5 fix: FAILED only after a POSITIVE check (adapter reports tenders
-      // and none matches). Never FAILED when we can't see tenders.
+      // H5 fix: FAILED only after a POSITIVE check — the adapter reports
+      // tenders and there are NO unrecorded tenders at all on the check
+      // (the branch above handles "some exist but none matched"). Never
+      // FAILED when we can't see tenders.
       // F-1 fix: also never FAILED when we hold a stored tender
       // reference — the charge DID succeed at the POS (the ref was
       // written the moment it landed); an unmatched ref after 24h is

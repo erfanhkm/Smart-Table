@@ -30,6 +30,12 @@ export interface PosTender {
   /** POS-native payment id (opaque). */
   id: string;
   type: string;
+  /**
+   * TOTAL tendered, tip INCLUDED (F2-13): reconcile matches stranded
+   * payments on amount + tip, so every adapter must fold its tip field
+   * in here (Square's amount_money already includes it; Clover adds
+   * tipAmount).
+   */
   amountCents: number;
 }
 

@@ -19,7 +19,7 @@ import { onboardingRoutes } from './routes/onboarding.js';
 import { billingRoutes } from './routes/billing.js';
 import { refundRoutes } from './routes/refunds.js';
 import { deviceRoutes } from './routes/device.js';
-import { processAccruedFees, sweepMissingFees } from './services/billing.js';
+import { processAccruedFees, resolveStuckFeeCharges, sweepMissingFees, syncAllSubscriptions } from './services/billing.js';
 import { refreshExpiringTokens } from './services/pos/token-refresh.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -268,9 +268,14 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // account exists.
   if (!config.usePgMem) {
     const runBilling = () =>
-      // F1-6: first sweep for settled payments whose fee row never landed,
-      // then collect whatever is due.
-      sweepMissingFees()
+      // F2-1: refresh every stored subscription from Square FIRST — plan
+      // decisions below (and every guest payment) read the stored state,
+      // and a renewal nobody looked at must not flip a subscriber to
+      // commission. Then the F1-6 missing-fee sweep, collection, and the
+      // F2-5 stuck-batch resolver.
+      syncAllSubscriptions()
+        .catch((e) => app.log.error(e, '[billing] scheduled subscription sync failed'))
+        .then(() => sweepMissingFees())
         .then((s) => {
           if (s.recorded > 0 || s.squareMissing > 0) {
             app.log.warn(s, '[billing] missing-fee sweep found gaps');
@@ -283,7 +288,14 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
             app.log.info(r, '[billing] accrued commission collected');
           }
         })
-        .catch((e) => app.log.error(e, '[billing] accrued fee processing failed'));
+        .catch((e) => app.log.error(e, '[billing] accrued fee processing failed'))
+        .then(() => resolveStuckFeeCharges())
+        .then((r) => {
+          if (r.resolved > 0 || r.manualReview > 0) {
+            app.log.warn(r, '[billing] stuck fee-charge batches need attention');
+          }
+        })
+        .catch((e) => app.log.error(e, '[billing] stuck fee-charge resolver failed'));
     setTimeout(runBilling, 60_000).unref();
     setInterval(runBilling, 6 * 60 * 60 * 1000).unref();
     // D-7 backstop: refresh Square OAuth tokens before they expire (the

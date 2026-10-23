@@ -497,6 +497,23 @@ export async function retrievePlatformSubscription(subscriptionId: string): Prom
   return data?.subscription;
 }
 
+/**
+ * Point a subscription at a different card on file (F2-7): when a
+ * restaurant replaces its card, the subscription must be moved to the new
+ * card BEFORE the old one is disabled, or the next renewal charges a dead
+ * card and the subscription lapses. (Docs-based shape: UpdateSubscription
+ * accepts card_id on the subscription object; sandbox-verified with the
+ * billing test mock's call ordering.)
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function updatePlatformSubscriptionCard(subscriptionId: string, cardId: string): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await sq('POST', `/v2/subscriptions/${pathSeg(subscriptionId, 'subscription_id')}`, {
+    subscription: { card_id: cardId },
+  }, requireSquareToken());
+  return data?.subscription;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function cancelPlatformSubscription(subscriptionId: string): Promise<any> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

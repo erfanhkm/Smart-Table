@@ -20,8 +20,8 @@
 //   Switching back to subscription while a canceled subscription is still
 //   in its paid window is rejected (Square would double-charge the overlap).
 import { randomUUID } from 'node:crypto';
-import { query } from '../db.js';
-import { badRequest } from '../http.js';
+import { query, withAdvisoryLock } from '../db.js';
+import { badRequest, conflict, httpError } from '../http.js';
 import { config } from '../config.js';
 import {
   cancelPlatformSubscription,
@@ -36,6 +36,7 @@ import {
   retrievePlatformInvoice,
   retrievePlatformSubscription,
   updatePlatformCustomerEmail,
+  updatePlatformSubscriptionCard,
   SquareError,
 } from '../square.js';
 
@@ -55,6 +56,9 @@ export interface BillingAccount {
   square_subscription_id: string | null;
   subscription_status: string | null;
   subscription_paid_through: string | null;
+  /** F2-6: accrued-fee charge backoff state (migration 023). */
+  fee_charge_failures: number;
+  fee_charge_next_attempt_at: string | null;
 }
 
 export const DEFAULT_COMMISSION_BPS = 200; // 2.00%
@@ -67,19 +71,23 @@ export function feeFor(chargeCents: number, bps: number): number {
   return Math.max(0, Math.min(fee, chargeCents - 1));
 }
 
-// Per-location in-process mutex for billing mutations (E-3): switchPlan and
-// saveCard interleave Square API calls with DB reads/writes, so a double
-// click or a client retry could otherwise create duplicate Square
-// customers, cards or subscriptions. The service runs as a single instance;
-// cross-instance safety comes from the deterministic Square idempotency
-// keys, the atomic fee-ledger claim in processAccruedFees, and
-// search-before-create for subscriptions.
-const billingLocks = new Map<string, Promise<unknown>>();
-export function withBillingLock<T>(locationId: string, fn: () => Promise<T>): Promise<T> {
-  const prev = billingLocks.get(locationId) ?? Promise.resolve();
-  const run = prev.then(fn, fn);
-  billingLocks.set(locationId, run.then(() => undefined, () => undefined));
-  return run;
+// Per-location mutex for billing mutations (E-3): switchPlan and saveCard
+// interleave Square API calls with DB reads/writes, so a double click or a
+// client retry could otherwise create duplicate Square customers, cards or
+// subscriptions.
+// F2-11: the lock is now a Postgres advisory lock (session-level, held on
+// one connection for the whole operation), not an in-process promise
+// chain — a rolling deploy briefly runs two instances, and an in-process
+// map can't exclude the other one. On pg-mem (tests) the advisory lock is
+// unsupported and the operation runs anyway (runIfUnsupported), matching
+// the old single-instance behavior. Contention answers a clean 409
+// instead of queueing behind a possibly-slow Square call chain.
+export async function withBillingLock<T>(locationId: string, fn: () => Promise<T>): Promise<T> {
+  const r = await withAdvisoryLock(`billing:${locationId}`, fn, { runIfUnsupported: true });
+  if (r === null) {
+    throw conflict('another billing change is in progress for this location — wait a moment and retry', 'billing_busy');
+  }
+  return r;
 }
 
 /** A Square 4xx (other than timeout/rate-limit) is a definitive refusal. */
@@ -105,6 +113,7 @@ const BILLING_ACCOUNT_COLUMNS = new Set([
   'card_brand', 'card_last4',
   'square_subscription_id', 'square_plan_variation_id', 'subscription_status',
   'subscription_paid_through',
+  'fee_charge_failures', 'fee_charge_next_attempt_at',
 ]);
 
 async function updateAccount(locationId: string, fields: Record<string, unknown>): Promise<BillingAccount> {
@@ -124,6 +133,18 @@ async function updateAccount(locationId: string, fields: Record<string, unknown>
 const today = (): string => new Date().toISOString().slice(0, 10);
 
 /** The plan that actually applies right now, from stored fields only (no network). */
+// F2-1/F2-12: the lapse warning used to fire on EVERY guest payment for a
+// lapsed location — once per location per day is plenty.
+const lapseWarnedOn = new Map<string, string>();
+function warnLapsed(acct: BillingAccount, status: string): void {
+  const day = today();
+  if (lapseWarnedOn.get(acct.location_id) === day) return;
+  lapseWarnedOn.set(acct.location_id, day);
+  console.warn(
+    `[billing] location ${acct.location_id}: subscription lapsed (status=${status || 'unknown'}, paid_through=${acct.subscription_paid_through}) — billing as commission`,
+  );
+}
+
 export function effectivePlan(acct: BillingAccount): BillingPlan {
   if (acct.plan !== 'subscription') return acct.plan;
   // Pending switch back to commission takes effect once the paid period ends.
@@ -134,24 +155,35 @@ export function effectivePlan(acct: BillingAccount): BillingPlan {
   ) {
     return 'commission';
   }
-  // E-8: a LAPSED subscription must not silently keep the location on the
-  // subscription plan (commission would never be charged): the plan only
-  // counts while Square reports the subscription ACTIVE and the paid
-  // period covers today. (syncSubscription refreshes these fields from
-  // Square whenever the billing state is viewed; between syncs a just-
-  // lapsed sub can read as subscription until the next view — the stored
-  // paid_through bound keeps that window honest.)
+  // Coverage is decided by the PAID PERIOD first (F2-12): a subscription
+  // that Square canceled (or the owner canceled for a pending switch)
+  // still covers every day it was paid for — reading a non-ACTIVE status
+  // as an instant lapse charged commission on top of already-paid days.
+  // DEACTIVATED is the exception: it is Square's terminal state (the
+  // subscription is over, full stop), so it lapses regardless of dates
+  // (E-8's original case).
   const status = (acct.subscription_status ?? '').toUpperCase();
-  const lapsed =
-    (status !== '' && status !== 'ACTIVE') ||
-    (acct.subscription_paid_through !== null && acct.subscription_paid_through < today());
-  if (lapsed) {
-    console.warn(
-      `[billing] location ${acct.location_id}: subscription lapsed (status=${status || 'unknown'}, paid_through=${acct.subscription_paid_through}) — billing as commission`,
-    );
-    return 'commission';
+  const paidThrough = acct.subscription_paid_through;
+  if (status !== 'DEACTIVATED' && paidThrough !== null && paidThrough >= today()) return 'subscription';
+  // E-8 (kept): a LAPSED subscription must not silently stay on the
+  // subscription plan forever (commission would never be charged).
+  // F2-1: but a stored paid_through can be a few days stale when Square
+  // has already renewed — syncSubscription now runs on the billing timer
+  // (syncAllSubscriptions), and an ACTIVE subscription gets a 3-day grace
+  // past the stored date before we bill commission on top of it. A truly
+  // lapsed sub (renewal failed) flips within those 3 days; a renewed one
+  // is corrected by the next sync.
+  if (status === 'ACTIVE') {
+    if (paidThrough === null) return 'subscription'; // just created; Square hasn't reported a period yet
+    const staleDays = Math.floor((Date.parse(today()) - Date.parse(paidThrough)) / 86400000);
+    if (staleDays <= 3) return 'subscription';
   }
-  return acct.plan;
+  // No Square evidence either way (no status, no period — a plan flag set
+  // before any sync): respect the owner's chosen plan; the scheduled sync
+  // fills the fields in and the rules above take over from there.
+  if (status === '' && paidThrough === null) return 'subscription';
+  warnLapsed(acct, status);
+  return 'commission';
 }
 
 /** Pull the live subscription state from Square and fold it into the account row. */
@@ -160,7 +192,10 @@ export async function syncSubscription(acct: BillingAccount): Promise<BillingAcc
   let sub;
   try {
     sub = await retrievePlatformSubscription(acct.square_subscription_id);
-  } catch {
+  } catch (e) {
+    // F2-14: never silent — a sync that keeps failing leaves the stored
+    // state stale, which is exactly how F2-1 double-charges happen.
+    console.error(`[billing] subscription sync failed for location ${acct.location_id} (sub ${acct.square_subscription_id}):`, e);
     return acct; // Square unreachable: serve stored state rather than failing the page
   }
   if (!sub) return acct;
@@ -182,10 +217,36 @@ export async function syncSubscription(acct: BillingAccount): Promise<BillingAcc
   return updateAccount(acct.location_id, fields);
 }
 
+/**
+ * F2-1: keep every stored subscription fresh on a schedule — before this,
+ * syncSubscription ran only when an owner opened the billing page or
+ * switched plans, so a Square renewal nobody looked at left the stored
+ * paid_through stale and effectivePlan flipped the location to commission
+ * ON TOP of its live subscription. Called from the billing timer.
+ */
+export async function syncAllSubscriptions(): Promise<{ synced: number }> {
+  const r = await query<BillingAccount>(
+    `SELECT * FROM billing_accounts WHERE square_subscription_id IS NOT NULL`,
+  );
+  let synced = 0;
+  for (const acct of r.rows) {
+    try {
+      await syncSubscription(acct);
+      synced += 1;
+    } catch (e) {
+      console.error(`[billing] scheduled subscription sync failed for location ${acct.location_id}:`, e);
+    }
+  }
+  return { synced };
+}
+
 export interface BillingState {
   account: BillingAccount;
   effective_plan: BillingPlan;
   accrued_cents: number;
+  /** F2-14: fees claimed by an in-flight collection batch — previously
+   * invisible in BOTH the accrued and collected figures while stuck. */
+  processing_cents: number;
   collected_this_month_cents: number;
   has_card: boolean;
 }
@@ -207,9 +268,10 @@ export async function getBillingState(locationId: string): Promise<BillingState>
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
-  const agg = await query<{ accrued: string; collected: string }>(
+  const agg = await query<{ accrued: string; collected: string; processing: string }>(
     `SELECT
        COALESCE(SUM(CASE WHEN status = 'accrued' THEN fee_cents ELSE 0 END), 0) AS accrued,
+       COALESCE(SUM(CASE WHEN status = 'charging' THEN fee_cents ELSE 0 END), 0) AS processing,
        COALESCE(SUM(CASE WHEN status IN ('collected','charged') AND created_at >= $2 THEN fee_cents ELSE 0 END), 0) AS collected
      FROM fee_ledger WHERE location_id = $1`,
     [locationId, monthStart.toISOString()],
@@ -218,6 +280,7 @@ export async function getBillingState(locationId: string): Promise<BillingState>
     account: acct,
     effective_plan: effectivePlan(acct),
     accrued_cents: Number(agg.rows[0]?.accrued ?? 0),
+    processing_cents: Number(agg.rows[0]?.processing ?? 0),
     collected_this_month_cents: Number(agg.rows[0]?.collected ?? 0),
     has_card: !!acct.square_card_id,
   };
@@ -266,7 +329,8 @@ async function saveCardLocked(
   locationId: string,
   input: { sourceId: string; verificationToken?: string; email?: string },
 ): Promise<BillingAccount> {
-  if (typeof input.sourceId !== 'string' || !/^cnon:/.test(input.sourceId)) {
+  // Length-bounded like the guest-side token patterns (F1-17/F2 Low).
+  if (typeof input.sourceId !== 'string' || !/^cnon:[A-Za-z0-9_-]{1,200}$/.test(input.sourceId)) {
     throw badRequest('invalid card token');
   }
   let acct = await ensureBillingAccount(locationId);
@@ -303,7 +367,26 @@ async function saveCardLocked(
     card_last4: card.last_4 ? String(card.last_4) : null,
   });
   if (oldCardId && oldCardId !== card.id) {
-    await disablePlatformCard(oldCardId).catch(() => undefined);
+    // F2-7: an active subscription still points at the OLD card — move it
+    // to the new card FIRST. If that update fails, keep the old card
+    // enabled (disabling it would guarantee a failed renewal and a
+    // lapsed subscription); the subscription keeps charging the old card
+    // until a later save succeeds.
+    let safeToDisable = !acct.square_subscription_id;
+    if (acct.square_subscription_id) {
+      try {
+        await updatePlatformSubscriptionCard(acct.square_subscription_id, String(card.id));
+        safeToDisable = true;
+      } catch (e) {
+        console.error(
+          `[billing] could not move subscription ${acct.square_subscription_id} to the new card; keeping the old card enabled:`,
+          e,
+        );
+      }
+    }
+    if (safeToDisable) {
+      await disablePlatformCard(oldCardId).catch(() => undefined);
+    }
   }
   return acct;
 }
@@ -356,10 +439,21 @@ async function switchPlanLocked(locationId: string, target: BillingPlan): Promis
     // subscription but its response or our DB write was lost, adopt the
     // existing live subscription instead of stacking a second one that
     // would double-charge the restaurant every month.
-    const existingSubs = await searchPlatformSubscriptions(acct.square_customer_id).catch(() => []);
-    const liveSub = existingSubs.find(
-      (s) => (s?.status === 'ACTIVE' || s?.status === 'PAUSED') && s?.plan_variation_id === variationId,
-    );
+    // F2-8: a FAILED search must abort the switch, not silently read as
+    // "no existing subscription" — Square being flaky is exactly when a
+    // previous create may have succeeded unseen. And the match no longer
+    // requires the same plan_variation_id: after a price change the stored
+    // variation differs, and the old check created a second live
+    // subscription next to the first. Any live subscription for this
+    // customer is THE subscription.
+    let existingSubs;
+    try {
+      existingSubs = await searchPlatformSubscriptions(acct.square_customer_id);
+    } catch (e) {
+      console.error(`[billing] subscription search failed for location ${locationId}; aborting plan switch:`, e);
+      throw httpError(503, 'could not verify existing subscriptions with Square — please try again', 'billing_sync_failed');
+    }
+    const liveSub = existingSubs.find((s) => s?.status === 'ACTIVE' || s?.status === 'PAUSED');
     if (liveSub?.id) {
       await updateAccount(locationId, {
         plan: 'subscription',
@@ -405,11 +499,18 @@ async function switchPlanLocked(locationId: string, target: BillingPlan): Promis
     if (acct.pending_plan) await updateAccount(locationId, { pending_plan: null });
     return getBillingState(locationId);
   }
-  if (acct.square_subscription_id && acct.subscription_status === 'ACTIVE') {
+  // F2-8: cancel ANY non-terminal subscription — the old code canceled
+  // only ACTIVE, so a PAUSED subscription survived the switch and could
+  // resume charging a restaurant that had moved to commission.
+  const subStatus = (acct.subscription_status ?? '').toUpperCase();
+  if (acct.square_subscription_id && subStatus !== 'CANCELED' && subStatus !== 'DEACTIVATED') {
     const sub = await cancelPlatformSubscription(acct.square_subscription_id);
     await updateAccount(locationId, {
       pending_plan: 'commission',
-      subscription_status: sub?.status ? String(sub.status) : 'CANCELED',
+      // F2-12: never fabricate 'CANCELED' when Square returned no status —
+      // a fabricated terminal status read as an instant lapse in
+      // effectivePlan and charged commission inside the paid window.
+      subscription_status: sub?.status ? String(sub.status) : acct.subscription_status,
       subscription_paid_through: sub?.canceled_date ?? sub?.charged_through_date ?? acct.subscription_paid_through,
     });
   } else {
@@ -498,22 +599,50 @@ export async function processAccruedFees(): Promise<{ locationsCharged: number; 
   const accrued = await query<{ location_id: string; fee_cents: number; created_at: string }>(
     `SELECT location_id, fee_cents, created_at FROM fee_ledger WHERE status = 'accrued'`,
   );
-  const byLocation = new Map<string, { total: number; oldest: string }>();
+  // F2-4: node-postgres returns TIMESTAMPTZ as a JS Date; pg-mem returns a
+  // string. Comparing a Date against an ISO string with <= coerces the
+  // Date to its toString() ("Fri Oct 23 2026 …") and the 25-day branch
+  // silently never fired in production. Normalize everything to epoch ms.
+  const tsOf = (v: unknown): number => new Date(v as string).getTime();
+  const byLocation = new Map<string, { total: number; oldest: number }>();
   for (const r of accrued.rows) {
-    const cur = byLocation.get(r.location_id) ?? { total: 0, oldest: r.created_at };
+    const ts = tsOf(r.created_at);
+    const cur = byLocation.get(r.location_id) ?? { total: 0, oldest: ts };
     cur.total += r.fee_cents;
-    if (r.created_at < cur.oldest) cur.oldest = r.created_at;
+    if (ts < cur.oldest) cur.oldest = ts;
     byLocation.set(r.location_id, cur);
   }
-  const cutoff = new Date(Date.now() - 25 * 86400000).toISOString();
+  const cutoff = Date.now() - 25 * 86400000;
   const due = [...byLocation.entries()]
     .filter(([, v]) => v.total > 0 && (v.total >= 5000 || v.oldest <= cutoff))
     .map(([location_id, v]) => ({ location_id, total: v.total, oldest: v.oldest }));
+  // F2-6: a definitively declined card used to be retried on EVERY run
+  // (every 6h, plus 60s after each deploy). Failures now back off
+  // exponentially per location (6h, 12h, 24h, capped 48h); a success
+  // resets the counter.
+  const noteFailure = async (acct: BillingAccount): Promise<void> => {
+    const failures = (acct.fee_charge_failures ?? 0) + 1;
+    const backoffMs = Math.min(6 * 3600000 * 2 ** (failures - 1), 48 * 3600000);
+    await updateAccount(acct.location_id, {
+      fee_charge_failures: failures,
+      fee_charge_next_attempt_at: new Date(Date.now() + backoffMs).toISOString(),
+    }).catch((e) => console.error('[billing] could not record fee-charge backoff:', e));
+  };
+  const releaseClaim = async (batchId: string): Promise<void> => {
+    await query(
+      `UPDATE fee_ledger SET status = 'accrued', batch_id = NULL, claimed_at = NULL WHERE batch_id = $1 AND status = 'charging'`,
+      [batchId],
+    ).catch(() => undefined);
+  };
+
   let locationsCharged = 0;
   let totalCents = 0;
   for (const row of due) {
     const acct = await ensureBillingAccount(row.location_id);
     if (!acct.square_card_id || !acct.square_customer_id) continue;
+    if (acct.fee_charge_next_attempt_at && new Date(acct.fee_charge_next_attempt_at).getTime() > Date.now()) {
+      continue; // F2-6 backoff window
+    }
     // Atomic claim (E-2): flip this location's accrued rows to 'charging'
     // under a fresh batch id in ONE statement. Overlapping runs claim
     // disjoint row sets, rows accrued after the due-snapshot are not swept
@@ -522,7 +651,7 @@ export async function processAccruedFees(): Promise<{ locationsCharged: number; 
     // can never double-charge.
     const batchId = randomUUID();
     const claim = await query<{ fee_cents: number; currency: string }>(
-      `UPDATE fee_ledger SET status = 'charging', batch_id = $2
+      `UPDATE fee_ledger SET status = 'charging', batch_id = $2, claimed_at = now()
        WHERE location_id = $1 AND status = 'accrued'
        RETURNING fee_cents, currency`,
       [row.location_id, batchId],
@@ -531,15 +660,13 @@ export async function processAccruedFees(): Promise<{ locationsCharged: number; 
     const total = claim.rows.reduce((s, r) => s + Number(r.fee_cents), 0);
     if (total <= 0) {
       // Net credit / zero balance: nothing to charge, release the claim.
-      await query(
-        `UPDATE fee_ledger SET status = 'accrued', batch_id = NULL WHERE batch_id = $1 AND status = 'charging'`,
-        [batchId],
-      );
+      await releaseClaim(batchId);
       continue;
     }
+    let payment;
     try {
       const loc = await platformLocation();
-      const payment = await createPlatformCardCharge({
+      payment = await createPlatformCardCharge({
         customerId: acct.square_customer_id,
         cardId: acct.square_card_id,
         locationId: loc.id,
@@ -548,30 +675,126 @@ export async function processAccruedFees(): Promise<{ locationsCharged: number; 
         idempotencyKey: `fees-${batchId}`,
         note: 'Smart Table commission (accrued guest-payment fees)',
       });
-      if (!payment?.id) throw new Error('Square accrued-fee charge returned no payment');
-      await query(
-        `UPDATE fee_ledger SET status = 'charged', platform_charge_ref = $2 WHERE batch_id = $1 AND status = 'charging'`,
-        [batchId, String(payment.id)],
-      );
-      locationsCharged += 1;
-      totalCents += total;
     } catch (e) {
       if (isDefinitiveSquareFailure(e)) {
         // The card definitively refused: release the rows so a later run
-        // (after the restaurant updates its card) can collect them.
-        await query(
-          `UPDATE fee_ledger SET status = 'accrued', batch_id = NULL WHERE batch_id = $1 AND status = 'charging'`,
-          [batchId],
-        ).catch(() => undefined);
+        // (after the restaurant updates its card) can collect them — with
+        // F2-6 backoff, not on the very next run.
+        await releaseClaim(batchId);
+        await noteFailure(acct);
       }
       // Unknown outcome (timeout / 5xx / network): the rows STAY in
-      // 'charging' under this batch — never re-charged blindly. The charge
-      // can be resolved by looking the Square payment up by its
-      // idempotency key (`fees-<batchId>`).
+      // 'charging' under this batch — never re-charged blindly. Square
+      // has no get-by-idempotency-key lookup (F2-5); resolveStuckFeeCharges
+      // re-sends the identical request inside Square's key-retention
+      // window and settles from the response.
       console.error(`[billing] accrued fee charge failed for location ${row.location_id} (batch ${batchId}):`, e);
+      continue;
     }
+    if (!payment?.id) {
+      console.error(`[billing] fee charge for location ${row.location_id} (batch ${batchId}) returned no payment — left 'charging' for the resolver`);
+      continue;
+    }
+    // F2-10: a returned payment object is not success by itself — with
+    // autocomplete a settled charge reports COMPLETED; FAILED/CANCELED
+    // must release the claim (with backoff), anything else stays
+    // 'charging' for the resolver rather than marking money collected
+    // that never moved.
+    const pStatus = typeof payment.status === 'string' ? payment.status.toUpperCase() : '';
+    if (pStatus === 'FAILED' || pStatus === 'CANCELED') {
+      console.error(`[billing] fee charge payment ${payment.id} for location ${row.location_id} ended ${pStatus} — releasing the batch`);
+      await releaseClaim(batchId);
+      await noteFailure(acct);
+      continue;
+    }
+    if (pStatus && pStatus !== 'COMPLETED') {
+      console.error(`[billing] fee charge payment ${payment.id} for location ${row.location_id} has status ${pStatus} — left 'charging' for the resolver`);
+      continue;
+    }
+    await query(
+      `UPDATE fee_ledger SET status = 'charged', platform_charge_ref = $2 WHERE batch_id = $1 AND status = 'charging'`,
+      [batchId, String(payment.id)],
+    );
+    if ((acct.fee_charge_failures ?? 0) > 0 || acct.fee_charge_next_attempt_at) {
+      await updateAccount(row.location_id, { fee_charge_failures: 0, fee_charge_next_attempt_at: null })
+        .catch((e) => console.error('[billing] could not reset fee-charge backoff:', e));
+    }
+    locationsCharged += 1;
+    totalCents += total;
   }
   return { locationsCharged, totalCents };
+}
+
+/**
+ * F2-5: batches stuck in 'charging' (the charge's outcome was unknown —
+ * timeout, 5xx, process death) used to sit there forever: the fees were
+ * never collected and never visible as collected either. Square offers NO
+ * lookup by idempotency key, but re-sending the IDENTICAL request (same
+ * key `fees-<batchId>`, same total, same card) inside Square's retention
+ * window (24h) is safe: Square returns the original payment instead of
+ * charging twice. This resolver does exactly that for batches claimed
+ * 15 minutes to 24 hours ago; older batches are flagged for a human and
+ * left untouched (past the window a re-send could double-charge).
+ */
+export async function resolveStuckFeeCharges(): Promise<{ resolved: number; manualReview: number }> {
+  const batches = await query<{ batch_id: string; location_id: string; total: string; currency: string; claimed_at: string }>(
+    `SELECT batch_id, location_id, SUM(fee_cents) AS total, MIN(currency) AS currency, MIN(claimed_at) AS claimed_at
+     FROM fee_ledger WHERE status = 'charging' AND batch_id IS NOT NULL AND claimed_at IS NOT NULL
+     GROUP BY batch_id, location_id`,
+  );
+  let resolved = 0;
+  let manualReview = 0;
+  for (const b of batches.rows) {
+    const ageMs = Date.now() - new Date(b.claimed_at).getTime();
+    if (ageMs < 15 * 60000) continue; // the original attempt may still be settling
+    if (ageMs > 24 * 3600000) {
+      manualReview += 1;
+      console.error(
+        `[billing] MANUAL REVIEW: fee batch ${b.batch_id} (location ${b.location_id}, ${b.total} cents) has been 'charging' for over 24h — past Square's idempotency window; verify in the Square dashboard before touching it`,
+      );
+      continue;
+    }
+    const acct = await ensureBillingAccount(b.location_id);
+    if (!acct.square_card_id || !acct.square_customer_id) continue;
+    try {
+      const loc = await platformLocation();
+      const payment = await createPlatformCardCharge({
+        customerId: acct.square_customer_id,
+        cardId: acct.square_card_id,
+        locationId: loc.id,
+        amountCents: Number(b.total),
+        currency: b.currency ?? loc.currency,
+        idempotencyKey: `fees-${b.batch_id}`,
+        note: 'Smart Table commission (accrued guest-payment fees)',
+      });
+      const pStatus = typeof payment?.status === 'string' ? payment.status.toUpperCase() : '';
+      if (payment?.id && (pStatus === '' || pStatus === 'COMPLETED')) {
+        await query(
+          `UPDATE fee_ledger SET status = 'charged', platform_charge_ref = $2 WHERE batch_id = $1 AND status = 'charging'`,
+          [b.batch_id, String(payment.id)],
+        );
+        resolved += 1;
+      } else if (pStatus === 'FAILED' || pStatus === 'CANCELED') {
+        await query(
+          `UPDATE fee_ledger SET status = 'accrued', batch_id = NULL, claimed_at = NULL WHERE batch_id = $1 AND status = 'charging'`,
+          [b.batch_id],
+        );
+        resolved += 1;
+      }
+      // Any other status: leave the batch for the next resolver run.
+    } catch (e) {
+      if (isDefinitiveSquareFailure(e)) {
+        await query(
+          `UPDATE fee_ledger SET status = 'accrued', batch_id = NULL, claimed_at = NULL WHERE batch_id = $1 AND status = 'charging'`,
+          [b.batch_id],
+        ).catch(() => undefined);
+        resolved += 1;
+      } else {
+        console.error(`[billing] stuck-batch resolver could not resolve batch ${b.batch_id}:`, e);
+      }
+    }
+  }
+  return { resolved, manualReview };
 }
 
 /**

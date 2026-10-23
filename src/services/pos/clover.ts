@@ -157,7 +157,10 @@ function mapTenders(order: AnyObj): { id: string; type: string; amountCents: num
   return payments.map((p: AnyObj) => ({
     id: String(p?.id ?? ''),
     type: String(p?.tender?.label ?? p?.tender?.id ?? 'tender'),
-    amountCents: p?.amount ?? 0,
+    // PosTender contract (F2-13): amountCents is the TOTAL tendered,
+    // tip included. Clover reports the tip separately (tipAmount) —
+    // without it, tipped Clover payments never amount-match in reconcile.
+    amountCents: (p?.amount ?? 0) + (p?.tipAmount ?? 0),
   }));
 }
 

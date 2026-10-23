@@ -37,7 +37,7 @@ const { recordFee, processAccruedFees, ensureBillingAccount, saveCard, switchPla
 // ---- Square platform fetch mock -------------------------------------------
 interface Call { url: string; method: string; body: Record<string, unknown> }
 const calls: Call[] = [];
-let payBehavior: 'ok' | 'decline' | 'network' = 'ok';
+let payBehavior: 'ok' | 'decline' | 'network' | 'canceled' = 'ok';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let searchResult: any[] = [];
 
@@ -72,6 +72,9 @@ function installFetch() {
       if (payBehavior === 'network') throw new TypeError('fetch failed');
       if (payBehavior === 'decline') {
         return json({ errors: [{ category: 'PAYMENT_ERROR', code: 'CARD_DECLINED', detail: 'declined' }] }, 400);
+      }
+      if (payBehavior === 'canceled') {
+        return json({ payment: { id: 'PLATPAY1', status: 'CANCELED' } });
       }
       return json({ payment: { id: 'PLATPAY1', status: 'COMPLETED' } });
     }
@@ -197,10 +200,46 @@ describe('v0.6.6 billing integrity (E-2/E-3/E-9)', () => {
     let rows = await feeRows(loc);
     assert.ok(rows.every((r) => r.status === 'accrued' && !r.batch_id), 'declined batch must be released');
     payBehavior = 'ok';
+    // F2-6 (v0.7.5): a definitive refusal now backs the location off — an
+    // immediate rerun must NOT hammer the same card again.
+    const rBackedOff = await processAccruedFees();
+    assert.equal(rBackedOff.locationsCharged, 0, 'backoff window: no retry yet');
+    // Once the backoff passes (restaurant updated their card), the
+    // released rows collect normally.
+    await query(`UPDATE billing_accounts SET fee_charge_next_attempt_at = NULL WHERE location_id = $1`, [loc]);
     const r2 = await processAccruedFees();
     assert.equal(r2.locationsCharged, 1);
     rows = await feeRows(loc);
     assert.ok(rows.every((r) => r.status === 'charged'));
+  });
+
+  it('processAccruedFees: the 25-day branch fires for a small old balance (F2-4)', async () => {
+    const loc = 'loc-claim-old';
+    await seedLocation(loc);
+    await setCard(loc);
+    await seedAccrued(loc, [3000]); // $30 — under the $50 threshold
+    await query(`UPDATE fee_ledger SET created_at = now() - interval '26 days' WHERE location_id = $1`, [loc]);
+    payBehavior = 'ok';
+    const r = await processAccruedFees();
+    assert.equal(r.locationsCharged, 1, 'a 26-day-old balance is due even under $50');
+    const rows = await feeRows(loc);
+    assert.ok(rows.every((x) => x.status === 'charged'));
+  });
+
+  it('processAccruedFees: a CANCELED payment object is not success (F2-10)', async () => {
+    const loc = 'loc-claim-canceled';
+    await seedLocation(loc);
+    await setCard(loc);
+    await seedAccrued(loc, [6000]);
+    payBehavior = 'canceled';
+    const r = await processAccruedFees();
+    assert.equal(r.locationsCharged, 0);
+    const rows = await feeRows(loc);
+    assert.ok(
+      rows.every((x) => x.status === 'accrued' && !x.batch_id),
+      'a CANCELED charge releases the claim (with backoff) instead of marking fees collected',
+    );
+    payBehavior = 'ok';
   });
 
   it('switchPlan: adopts an existing live subscription instead of duplicating', async () => {

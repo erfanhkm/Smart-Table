@@ -476,10 +476,16 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
       // the process dies between the charge and the tender-ref write, a
       // resumed request finds this marker (see the guard above) instead
       // of charging blind on adapters without native idempotency.
+      // F2-3: the same write persists the FINAL amount + tip — the
+      // reservation row stores amount 0 for full-mode payments, and
+      // reconcile's amount matching is blind without the real figure if
+      // the post-charge write is lost.
       const markChargeStarted = async (): Promise<void> => {
         await query(
-          `UPDATE payments SET charge_started_at = now() WHERE idempotency_key = $1 AND charge_started_at IS NULL`,
-          [key],
+          `UPDATE payments SET charge_started_at = COALESCE(charge_started_at, now()),
+             amount_cents = $2, tip_cents = $3
+           WHERE idempotency_key = $1 AND status = 'PENDING'`,
+          [key, amount, tipCents],
         ).catch((e) => console.error('[payments] failed to persist charge_started_at:', e));
       };
 
