@@ -27,6 +27,14 @@ function money(cents, currency) {
   }
 }
 
+/* I-6: server-supplied numeric fields are coerced through Number() before
+   being interpolated into HTML, so a malformed or string value can never
+   inject markup into the portal. */
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 const fmtDur = (secs) => {
   if (secs == null) return '—';
   if (secs < 60) return Math.round(secs) + 's';
@@ -248,6 +256,23 @@ const PortalAPI = {
     } catch { /* logout is best-effort client-side; the token is dropped regardless */ }
   },
 };
+
+/* I-5: the portal navigates the whole tab to the OAuth authorize URL the
+   server returns. Verify it really points at Square's authorize endpoint
+   before navigating, so a compromised/buggy response can't redirect the
+   signed-in portal tab to an arbitrary origin. */
+function isSquareAuthorizeUrl(u) {
+  try {
+    const url = new URL(u);
+    return (
+      url.protocol === 'https:' &&
+      (url.hostname === 'connect.squareup.com' || url.hostname === 'connect.squareupsandbox.com') &&
+      url.pathname === '/oauth2/authorize'
+    );
+  } catch {
+    return false;
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* auth                                                                */
@@ -591,7 +616,7 @@ async function loadOnboarding() {
       menu.done ? `${menu.item_count ?? 0} items found in your POS catalog${menu.verified_at ? ' · verified ' + esc(timeAgo(menu.verified_at)) : ''}. Guests see exactly this menu for QR ordering.`
                 : 'We pull your menu straight from your POS catalog — nothing to type in.', menuAction) +
     row(tbl.done, '3. Add your tables',
-      tbl.done ? `${tbl.count} table${tbl.count === 1 ? '' : 's'} on your floor. Print each table's QR code from Floor &amp; Tables.`
+      tbl.done ? `${num(tbl.count)} table${Number(tbl.count) === 1 ? '' : 's'} on your floor. Print each table's QR code from Floor &amp; Tables.`
                : 'Create your tables, then print a QR code for each one.', tblAction) +
     (s.complete ? '<p class="inline-note" style="margin-top:10px">🎉 You\'re live — guests can scan, order and pay. Dismiss this card whenever you\'re ready.</p>' : '');
 
@@ -605,7 +630,11 @@ async function loadOnboarding() {
     // Square connects with one click (OAuth); other POS connect in Settings.
     if ((pos.pos_type || 'square') === 'square') {
       connect.disabled = true; connect.textContent = 'Opening…';
-      try { window.location.href = await PortalAPI.startOAuth(); }
+      try {
+        const url = await PortalAPI.startOAuth();
+        if (!isSquareAuthorizeUrl(url)) throw new Error('Unexpected connect URL.');
+        window.location.href = url;
+      }
       catch { connect.disabled = false; connect.textContent = 'Connect POS'; }
     } else {
       showView('settings');
@@ -898,6 +927,11 @@ async function startRefund(paymentId, maxCents, currency, checkRef) {
     } else if (out.status === 409) {
       // Unknown outcome — keep the key so a retry replays the same refund.
       alert(out.error || 'This refund is still being confirmed. Check again in a moment before retrying.');
+    } else if (out.status >= 500) {
+      // I-3: a 5xx is also an unknown outcome (the refund may have reached
+      // the POS) — keep the key so a retry replays the same refund instead
+      // of minting a new key that could refund twice.
+      alert(out.error || 'The refund result is not confirmed. Check the payment before retrying — the same request will be re-sent.');
     } else {
       delete attempts[sig];
       saveRefundAttempts(attempts);
@@ -933,6 +967,15 @@ function saveCashAttempt(a) {
 function clearCashAttempt() {
   memCash = null;
   try { sessionStorage.removeItem(CASH_KEY); } catch { /* ignore */ }
+}
+
+/* I-4: crypto.randomUUID is not available in every browser/context the
+   portal runs in (insecure origins, older WebViews); the cash flow used
+   it unguarded and would throw, breaking cash recording entirely. Same
+   guarded pattern as newRefundKey(). */
+function newCashKey() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'k-' + Date.now() + '-' + Math.random().toString(36).slice(2);
 }
 
 /** Strict amount: digits with optional 1-2 decimals; comma accepted as the decimal separator. */
@@ -977,7 +1020,7 @@ async function recordCashPayment() {
         `Remaining after: ${money(bill.remaining_cents - cents, bill.currency)}` +
         posClosureNote,
       )) return;
-      attempt = { sig, key: crypto.randomUUID() };
+      attempt = { sig, key: newCashKey() };
       saveCashAttempt(attempt);
     }
 
@@ -1194,7 +1237,7 @@ async function renderReports() {
     <div class="card"><div class="stat-num">${fmtDur(met.avg_settlement_secs)}</div><div class="stat-label">Avg settlement time · ${esc(label)}</div></div>
     <div class="card"><div class="stat-num">${met.settled_checks ?? '—'}</div><div class="stat-label">Settled checks · ${esc(label)}</div></div>
     <div class="card"><div class="stat-num">${fmtDur(met.avg_waiter_response_secs)}</div><div class="stat-label">Avg waiter response · ${esc(label)}</div></div>
-    <div class="card"><div class="stat-num">${met.open_calls ?? '—'}</div><div class="stat-label">Open waiter calls</div></div>`;
+    <div class="card"><div class="stat-num">${met.open_calls == null ? '—' : num(met.open_calls)}</div><div class="stat-label">Open waiter calls</div></div>`;
 
   // Daily breakdown: real data from the metrics API (payments minus refunds).
   const daily = Array.isArray(met.daily) ? met.daily : [];
@@ -1215,13 +1258,13 @@ async function renderReports() {
         const top = maxRev > 0 && x.revenue_cents === maxRev && x.revenue_cents > 0;
         return `<div class="floor-card" style="${bg}">
           <span class="floor-card-head"><span class="floor-card-name">${esc(x.table_name)}${top ? ' ⭐' : ''}</span></span>
-          <span class="floor-card-body">${money(x.revenue_cents, 'CAD')} · ${x.checks} check${x.checks === 1 ? '' : 's'}</span>
+          <span class="floor-card-body">${money(x.revenue_cents, 'CAD')} · ${num(x.checks)} check${Number(x.checks) === 1 ? '' : 's'}</span>
         </div>`;
       }).join('')
     : '<p class="empty">No tables yet.</p>';
   $('report-tables-body').innerHTML = tbl.length
     ? tbl.map((x) =>
-        `<tr><td>${esc(x.table_name)}</td><td>${money(x.revenue_cents, 'CAD')}</td><td>${x.checks}</td><td>${money(x.avg_bill_cents, 'CAD')}</td><td>${money(x.tips_cents, 'CAD')}</td><td>${x.share_pct}%</td></tr>`,
+        `<tr><td>${esc(x.table_name)}</td><td>${money(x.revenue_cents, 'CAD')}</td><td>${num(x.checks)}</td><td>${money(x.avg_bill_cents, 'CAD')}</td><td>${money(x.tips_cents, 'CAD')}</td><td>${num(x.share_pct)}%</td></tr>`,
       ).join('')
     : '<tr><td colspan="6">No tables yet.</td></tr>';
 }
@@ -1266,7 +1309,7 @@ function renderDevices() {
   $('devices-grid').innerHTML = devices.map((d) => `
     <div class="card">
       <h4>${esc(d.table)}</h4>
-      <div class="kv"><span class="k">Battery</span><span class="${d.battery < 30 ? 'status-bad' : 'status-ok'}">${d.battery}%${d.battery < 30 ? ' — charge soon' : ''}</span></div>
+      <div class="kv"><span class="k">Battery</span><span class="${d.battery < 30 ? 'status-bad' : 'status-ok'}">${num(d.battery)}%${d.battery < 30 ? ' — charge soon' : ''}</span></div>
       <div class="kv"><span class="k">LED</span><span>${esc(d.led)}</span></div>
       <div class="kv"><span class="k">Status</span><span class="status-ok">Online</span></div>
     </div>`).join('');
@@ -1326,7 +1369,7 @@ async function renderBilling() {
     <div class="grid grid-2" style="margin-bottom:16px">
       <div class="card" style="${isCommission ? 'outline:2px solid var(--accent)' : ''}">
         <h4>Commission ${isCommission ? '· Current plan' : ''}</h4>
-        <div class="stat-num" style="font-size:1.4rem">${st.commission_percent}% per payment</div>
+        <div class="stat-num" style="font-size:1.4rem">${num(st.commission_percent)}% per payment</div>
         <div class="stat-label">Taken only when a guest pays by card through Smart Table. No monthly fee, nothing when you're closed.</div>
         ${pendingNote}
         <div style="margin-top:12px">
@@ -1526,6 +1569,7 @@ async function renderSettings() {
     btn.disabled = true;
     try {
       const url = await PortalAPI.startOAuth();
+      if (!isSquareAuthorizeUrl(url)) throw new Error('Unexpected connect URL — not opening it.');
       window.location.href = url;
     } catch (e) {
       if (!(e instanceof AuthExpired)) alert(e.message);
