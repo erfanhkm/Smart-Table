@@ -247,6 +247,12 @@ describe('portal Devices view (source shape)', () => {
     const idx = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
     const route = idx.slice(idx.indexOf("app.get('/portal/app.js'"));
     assert.ok(route.slice(0, 400).includes("'Cache-Control', 'no-cache'"), 'portal app.js route must set no-cache');
+    // v0.7.4: the route header alone did not survive the static plugin's
+    // send path (live responses carried max-age) — the onSend hook must
+    // also force no-cache for both app scripts.
+    const hook = idx.slice(idx.indexOf("addHook('onSend'"));
+    assert.ok(hook.slice(0, 1600).includes("urlPath === '/portal/app.js'"), 'onSend must force no-cache for /portal/app.js');
+    assert.ok(hook.slice(0, 1600).includes("urlPath === '/t/app.js'"), 'onSend must force no-cache for /t/app.js');
   });
 });
 

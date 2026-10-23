@@ -92,7 +92,15 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     // revalidates so deploys take effect immediately, JS/CSS keep the
     // plugin's 1h, fonts/images cache for 30 days.
     const urlPath = _req.url.split('?')[0];
-    if (/^(?:\/portal|\/admin|\/dashboard|\/t)(?:\/|$)/.test(urlPath)) {
+    if (urlPath === '/portal/app.js' || urlPath === '/t/app.js') {
+      // v0.7.4: the app scripts must revalidate on every load. Setting
+      // no-cache in the route handler (v0.7.2) did NOT survive — the
+      // static plugin's send path applies its own Cache-Control and the
+      // live response carried max-age=14400, so a stale script hid the
+      // v0.7.1 fix on the owner's phone. onSend runs after the plugin,
+      // so the header set here is the one that ships.
+      reply.header('Cache-Control', 'no-cache');
+    } else if (/^(?:\/portal|\/admin|\/dashboard|\/t)(?:\/|$)/.test(urlPath)) {
       if (/\.(?:woff2|png|jpe?g|svg|ico)$/i.test(urlPath)) {
         reply.header('Cache-Control', 'public, max-age=2592000, immutable');
       } else if (!/\.(?:js|css)$/i.test(urlPath)) {
