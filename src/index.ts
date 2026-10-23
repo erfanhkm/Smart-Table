@@ -18,6 +18,7 @@ import { adminRoutes } from './routes/admin.js';
 import { onboardingRoutes } from './routes/onboarding.js';
 import { billingRoutes } from './routes/billing.js';
 import { refundRoutes } from './routes/refunds.js';
+import { deviceRoutes } from './routes/device.js';
 import { processAccruedFees } from './services/billing.js';
 import { refreshExpiringTokens } from './services/pos/token-refresh.js';
 
@@ -240,6 +241,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(onboardingRoutes);
   await app.register(billingRoutes);
   await app.register(refundRoutes);
+  await app.register(deviceRoutes);
 
   // v0.4 billing: collect accrued commission fees on a slow timer (the
   // processor itself decides what is due: >= $50 accrued, or oldest fee

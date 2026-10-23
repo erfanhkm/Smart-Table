@@ -53,7 +53,9 @@ describe('v0.6.11 portal smalls (I-3..I-6)', () => {
 
   it('I-6: numeric fields are Number()-coerced before HTML interpolation', () => {
     assert.ok(src.includes('function num(v)'), 'num() coercion helper must exist');
-    for (const wrapped of ['num(tbl.count)', 'num(met.open_calls)', 'num(x.checks)', 'num(x.share_pct)', 'num(d.battery)', 'num(st.commission_percent)']) {
+    // v0.7: the demo Devices view (d.battery) became the real registry
+    // (d.battery_pct); the coercion rule is unchanged.
+    for (const wrapped of ['num(tbl.count)', 'num(met.open_calls)', 'num(x.checks)', 'num(x.share_pct)', 'num(d.battery_pct)', 'num(st.commission_percent)']) {
       assert.ok(src.includes(wrapped), `expected ${wrapped} in portal app.js`);
     }
     assert.ok(!src.includes('${x.checks}'), 'raw x.checks interpolation must be gone');

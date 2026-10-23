@@ -31,5 +31,5 @@
     "test": "PG_MEM=1 tsx --test tests/*.test.ts"
   },
   "type": "module",
-  "version": "0.6.11"
+  "version": "0.7.0"
 }

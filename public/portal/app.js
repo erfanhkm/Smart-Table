@@ -1299,20 +1299,73 @@ function renderStaff() {
 /* ------------------------------------------------------------------ */
 /* devices (demo)                                                      */
 /* ------------------------------------------------------------------ */
-function renderDevices() {
-  const devices = [
-    { table: 'Table 1', battery: 87, led: 'Green' },
-    { table: 'Table 2', battery: 64, led: 'Blue' },
-    { table: 'Table 3', battery: 23, led: 'Yellow' },
-    { table: 'Table 4', battery: 91, led: 'Green' },
-  ];
-  $('devices-grid').innerHTML = devices.map((d) => `
-    <div class="card">
-      <h4>${esc(d.table)}</h4>
-      <div class="kv"><span class="k">Battery</span><span class="${d.battery < 30 ? 'status-bad' : 'status-ok'}">${num(d.battery)}%${d.battery < 30 ? ' — charge soon' : ''}</span></div>
-      <div class="kv"><span class="k">LED</span><span>${esc(d.led)}</span></div>
-      <div class="kv"><span class="k">Status</span><span class="status-ok">Online</span></div>
-    </div>`).join('');
+/* Devices (v0.7 — real registry): STT-101 units paired per table via an
+   8-digit claim code. Health comes from device heartbeats; a device counts
+   as online when it was seen within the last 90 seconds. */
+async function renderDevices() {
+  const grid = $('devices-grid');
+  grid.innerHTML = '<div class="card"><p>Loading devices…</p></div>';
+  try {
+    const loc = encodeURIComponent(CONFIG.locationId);
+    const [devRes, tabRes] = await Promise.all([
+      request(`/api/portal/devices?location_id=${loc}`),
+      request(`/api/tables?location_id=${loc}`),
+    ]);
+    const devices = devRes.devices || [];
+    const tables = tabRes.tables || [];
+    const paired = new Set(devices.map((d) => d.table_id));
+    const pairable = tables.filter((t) => !paired.has(t.id));
+    let html = `<div class="card">
+      <h4>Pair a new device</h4>
+      ${pairable.length
+        ? `<div class="kv"><span class="k">Table</span><span><select id="pair-table">${pairable.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}</select></span></div>
+           <button class="btn" id="pair-btn" type="button">Generate pairing code</button>
+           <div id="pair-result"></div>`
+        : '<p>Every table already has a paired device. Revoke a device below to re-pair its table.</p>'}
+      <p class="hint">On the device, open provisioning and enter the 8-digit code. Codes expire in 10 minutes and work once. Pairing a table again replaces its previous device.</p>
+    </div>`;
+    html += devices.map((d) => {
+      const seen = d.last_seen_at ? new Date(d.last_seen_at) : null;
+      const online = seen && Date.now() - seen.getTime() < 90_000;
+      return `<div class="card">
+      <h4>${esc(d.table_name)}</h4>
+      <div class="kv"><span class="k">Status</span><span class="${online ? 'status-ok' : 'status-bad'}">${online ? 'Online' : 'Offline'}</span></div>
+      <div class="kv"><span class="k">Battery</span><span>${d.battery_pct == null ? '—' : `${num(d.battery_pct)}%${d.charging ? ' (charging)' : ''}`}</span></div>
+      <div class="kv"><span class="k">Paper</span><span>${d.paper_ok == null ? '—' : d.paper_ok ? 'OK' : 'OUT'}</span></div>
+      <div class="kv"><span class="k">Firmware</span><span>${esc(d.fw_version || '—')}</span></div>
+      <div class="kv"><span class="k">Last seen</span><span>${seen ? esc(seen.toLocaleString()) : 'never'}</span></div>
+      ${d.last_error ? `<div class="kv"><span class="k">Last error</span><span class="status-bad">${esc(d.last_error)}</span></div>` : ''}
+      <button class="btn" type="button" data-revoke="${esc(d.id)}">Revoke device</button>
+    </div>`;
+    }).join('');
+    grid.innerHTML = html;
+    const pairBtn = $('pair-btn');
+    if (pairBtn) {
+      pairBtn.addEventListener('click', async () => {
+        pairBtn.disabled = true;
+        try {
+          const res = await request('/api/portal/devices/claim-code', {
+            method: 'POST',
+            body: { table_id: $('pair-table').value },
+          });
+          $('pair-result').innerHTML = `<p>Pairing code: <strong style="font-size:1.35em;letter-spacing:.18em">${esc(res.code)}</strong><br>Enter it on the device before ${esc(new Date(res.expires_at).toLocaleTimeString())}.</p>`;
+        } catch (e) {
+          $('pair-result').innerHTML = `<p class="status-bad">${esc(e.message || e)}</p>`;
+        } finally {
+          pairBtn.disabled = false;
+        }
+      });
+    }
+    grid.querySelectorAll('[data-revoke]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        if (!confirm('Revoke this device? It stops working until it is paired again.')) return;
+        await request(`/api/portal/devices/${encodeURIComponent(b.getAttribute('data-revoke'))}/revoke`, { method: 'POST', body: {} });
+        renderDevices();
+      }),
+    );
+  } catch (e) {
+    grid.innerHTML = `<div class="card"><p class="status-bad">Could not load devices: ${esc(e.message || e)}</p></div>`;
+  }
 }
 
 /* ------------------------------------------------------------------ */
