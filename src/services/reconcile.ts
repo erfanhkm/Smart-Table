@@ -20,7 +20,7 @@
 //
 // Run: npx tsx scripts/reconcile.ts  (cron: every 15 min in production)
 import { query, withTx, withAdvisoryLock } from '../db.js';
-import { getCheckPos } from './pos/context.js';
+import { getCheckPos, TENDER_BLIND_POS } from './pos/context.js';
 import { effectivePlan, ensureBillingAccount, feeFor, recordFee } from './billing.js';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -32,7 +32,7 @@ const GIVE_UP_AFTER_H = 24;
 // meaningless there, so we never mark FAILED for them. Helcim qualifies
 // (F-1): its check detail carries no tender list, so a Helcim row can only
 // ever resolve by exact reference — never by amount, never auto-FAILED.
-const NO_TENDER_ADAPTERS = new Set(['shopify', 'helcim']);
+const NO_TENDER_ADAPTERS = TENDER_BLIND_POS; // single source: pos/context.ts (F1-19)
 
 interface PendingRow {
   id: string;

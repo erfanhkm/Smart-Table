@@ -24,7 +24,7 @@ import { forUpdate, query, withTx } from '../db.js';
 import {
   createPayment, orderRemaining, payOrder, retrieveOrder, SquareError, squareErrorCode,
 } from '../square.js';
-import { getCheckPos } from './pos/context.js';
+import { getCheckPos, TENDER_BLIND_POS } from './pos/context.js';
 import { effectivePlan, ensureBillingAccount, feeFor, recordFee } from './billing.js';
 import { badRequest, conflict, httpError, isClientError } from '../http.js';
 
@@ -46,12 +46,14 @@ export interface PayCheckInput {
   /** POS-native check reference (Square order id, Clover order id, Shopify draft id, Helcim invoice id). */
   checkRef: string;
   /**
-   * Internal checks.id, when the CALLER has already resolved and authorized
-   * the check (guest table-token binding, staff location scoping). payCheck
-   * then resolves by id instead of the bare external ref (v0.6.5, B-6) —
-   * external refs are only unique per location, never globally.
+   * Internal checks.id. REQUIRED since v0.7.3 (F1-5): the caller must
+   * already have resolved and authorized the check (guest table-token
+   * binding, staff location scoping). The old bare-ref fallback resolved
+   * `external_check_ref = $1 OR square_order_id = $1` with rows[0] and no
+   * location filter — external refs are only unique per location, never
+   * globally, so that path could charge the wrong tenant's check.
    */
-  checkId?: string;
+  checkId: string;
   mode: SplitMode;
   amountCents?: number;
   tipCents?: number;
@@ -85,6 +87,8 @@ interface PaymentRow {
   check_state: string | null;
   currency: string | null;
   pos_tender_ref: string | null;
+  /** F1-2: set in autocommit immediately BEFORE the POS charge call. */
+  charge_started_at: string | null;
 }
 
 const TIP_MSG = 'tip_cents must be an integer between 0 and the amount being paid';
@@ -144,7 +148,13 @@ function assertSameRequest(
   row: PaymentRow,
   exp: { checkId: string; mode: SplitMode; amountCents?: number; tipCents: number },
 ): void {
-  const sameAmount = exp.mode === 'full' || exp.amountCents === undefined || row.amount_cents === exp.amountCents;
+  // F1-16: an omitted amount only matches a first attempt that also had
+  // none (a stored 0). Previously ANY omitted amount matched ANY stored
+  // amount, so a resumed request could silently change the charged sum.
+  const sameAmount =
+    exp.mode === 'full' ||
+    (exp.amountCents !== undefined && row.amount_cents === exp.amountCents) ||
+    (exp.amountCents === undefined && row.amount_cents === 0);
   if (row.check_id !== exp.checkId || row.split_mode !== exp.mode || row.tip_cents !== exp.tipCents || !sameAmount) {
     throw conflict('idempotency_key was already used for a different payment request', 'idempotency_key_reused');
   }
@@ -167,13 +177,41 @@ function replayFrom(row: PaymentRow): PayCheckResult | null {
   return null;
 }
 
-/** Adapters whose check detail cannot list tenders (mirrors reconcile's NO_TENDER_ADAPTERS). */
-const TENDER_BLIND_POS = new Set(['shopify', 'helcim']);
+/**
+ * HTTP status carried by a POS CLIENT error, if any. POS clients use
+ * `.status`; our own httpError uses `.statusCode` — deliberately NOT read
+ * here: payCheck's own validation errors (invalid(), badRequest) thrown
+ * inside the transaction must never be misclassified as POS declines.
+ */
+function posHttpStatus(e: unknown): number | undefined {
+  const s = (e as { status?: unknown })?.status;
+  return typeof s === 'number' ? s : undefined;
+}
 
-/** A 4xx (other than timeout/rate-limit) from any POS client is a definitive rejection. */
+/**
+ * A 4xx (other than timeout/rate-limit) from any POS client is a definitive
+ * rejection — EXCEPT 401/403/404 (F1-3): a dead merchant token or a vanished
+ * POS order is a CONNECTION problem, not a card decline. Marking those
+ * FAILED told the guest their card failed and hid a broken POS link.
+ */
 function isDefinitivePosError(e: unknown): boolean {
-  const status = (e as { status?: unknown })?.status;
-  return typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429;
+  const status = posHttpStatus(e);
+  return (
+    typeof status === 'number' &&
+    status >= 400 &&
+    status < 500 &&
+    status !== 408 &&
+    status !== 429 &&
+    status !== 401 &&
+    status !== 403 &&
+    status !== 404
+  );
+}
+
+/** F1-3: statuses that mean "the POS link is broken", never "the card declined". */
+function isPosUnavailableError(e: unknown): boolean {
+  const status = posHttpStatus(e);
+  return status !== undefined && (status === 401 || status === 403 || status === 404 || status >= 500);
 }
 
 /** Raw POS error code from the error object (server logs only — never sent to guests). */
@@ -218,11 +256,9 @@ function posErrorCode(e: unknown): string | null {
 
 export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
   const checkRef = String(input.checkRef ?? '').trim();
-  if (input.checkId) {
-    if (checkRef.length > 255) throw badRequest('invalid check reference');
-  } else if (!checkRef || checkRef.length > 255) {
-    throw badRequest('invalid check reference');
-  }
+  if (checkRef.length > 255) throw badRequest('invalid check reference');
+  // F1-5: resolution is by internal id only (see PayCheckInput.checkId).
+  if (!input.checkId) throw badRequest('checkId is required');
   const key = String(input.idempotencyKey).toLowerCase();
   if (!UUID_V4_RE.test(key)) throw badRequest('idempotency_key must be a UUID v4');
   const tipCents = input.tipCents ?? 0;
@@ -232,32 +268,41 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
     if (!Number.isSafeInteger(requested) || requested <= 0) throw badRequest('amount_cents must be a positive integer');
     if (tipCents > requested) throw badRequest(TIP_MSG);
   }
+  // F1-4: a split mode without an amount used to charge the FULL remaining
+  // balance (amount = requested ?? remaining). The mode is a promise that
+  // the guest chose a share — never silently upgrade it to the whole bill.
+  if (input.mode !== 'full' && requested === undefined) {
+    throw badRequest('amount_cents is required for split payments');
+  }
 
   // Resolve the check -> its location -> the location's POS adapter + token.
   // From here on, every POS call goes through ctx.adapter: a Clover location
   // can never reach Square and vice versa.
-  const chk = input.checkId
-    ? await query<{ id: string }>(`SELECT id FROM checks WHERE id = $1`, [input.checkId])
-    : await query<{ id: string }>(
-        `SELECT id FROM checks WHERE external_check_ref = $1 OR square_order_id = $1`,
-        [checkRef],
-      );
+  const chk = await query<{ id: string }>(`SELECT id FROM checks WHERE id = $1`, [input.checkId]);
   if (chk.rowCount === 0) throw badRequest('check is not linked to a table yet — link it first');
   const checkId = chk.rows[0].id;
   const ctx = await getCheckPos(checkId);
   const { adapter, posType, token } = ctx;
   const nativeRef = ctx.checkRef;
+  // F1-15: a location with no configured currency used to skip the D-6
+  // mismatch check silently. Locations always carry CAD by schema default,
+  // so a missing value means broken data — refuse outside demo mode.
+  if (!ctx.currency && !ctx.demo) {
+    throw badRequest('this location has no billing currency configured');
+  }
 
   if (input.source.kind === 'card' && !adapter.chargeCard) {
     throw badRequest(`card payments are not supported for ${posType} locations yet`);
   }
   // Card token allow-list per POS (what the guest browser SDK returns).
+  // F1-17: use the strict exported pattern for Square (it was defined but
+  // unused while a looser inline regex ran), and bound every POS's token.
   if (input.source.kind === 'card') {
     const t = input.source.nonce;
     const ok =
-      posType === 'square' ? /^cnon:/.test(t) :
-      posType === 'clover' ? /^clv_/i.test(t) :
-      posType === 'helcim' ? t.length >= 8 :
+      posType === 'square' ? CARD_NONCE_RE.test(t) :
+      posType === 'clover' ? /^clv_[A-Za-z0-9_-]{1,200}$/i.test(t) :
+      posType === 'helcim' ? t.length >= 8 && t.length <= 200 :
       false;
     if (!ok) throw badRequest('invalid card token');
   }
@@ -303,6 +348,7 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
       // Square keeps its verified raw-order path; other POS go through the adapter.
       let remaining: number;
       let currency: string;
+      let posTotalCents = 0;
       if (posType === 'square') {
         const { order } = await retrieveOrder(nativeRef, token);
         remaining = orderRemaining(order);
@@ -311,6 +357,7 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
         const detail = await adapter.getCheckDetail(nativeRef, token);
         remaining = detail.remainingCents;
         currency = detail.currency;
+        posTotalCents = detail.totalCents;
       }
       if (!currency) throw new Error('POS check has no currency');
 
@@ -330,6 +377,31 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
         }
       }
 
+      // E-4 + F1-1: tender-blind adapters report the FULL total as
+      // remaining even after earlier payments settled (their detail has no
+      // tender list), so the chargeable remaining is computed from our own
+      // ledger. Three corrections over the original cap:
+      //  - amounts only: tips are extra money ON TOP of the bill, so
+      //    subtracting them from the bill total under-collected by the tip
+      //    sum and the check could never close;
+      //  - the base is the FRESH POS total (the link-time total_cents is a
+      //    snapshot — a discount applied in the POS afterwards must lower
+      //    what guests can be charged);
+      //  - PENDING rows that already carry a tender ref are counted: the
+      //    charge landed at the POS even though our row never finalized.
+      if (TENDER_BLIND_POS.has(posType)) {
+        const base = posTotalCents > 0 ? posTotalCents : check.total_cents;
+        if (base > 0) {
+          const settled = await client.query<{ s: string }>(
+            `SELECT COALESCE(SUM(amount_cents), 0) AS s FROM payments
+             WHERE check_id = $1 AND (status IN ('AUTHORIZED','COMPLETED')
+               OR (status = 'PENDING' AND pos_tender_ref IS NOT NULL))`,
+            [checkId],
+          );
+          remaining = Math.max(0, base - Number(settled.rows[0]?.s ?? 0));
+        }
+      }
+
       // D-1 resume guard: a resumed PENDING row that already carries a
       // persisted POS tender ref means the first attempt DID create the
       // charge — the ref is written the moment the charge lands, outside
@@ -337,19 +409,22 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
       // charge again: some adapters (Clover) have no native idempotency
       // on their charge endpoint, so a blind retry double-charges the
       // guest. The outcome is resolved from the live POS detail instead.
-      const resumeResolved = input.source.kind === 'card' && resumed && !!curRow.pos_tender_ref;
+      // v0.7.3 (F1-8): the guard now covers external payments too, not
+      // just card — a resumed cash recording with a ref must not record
+      // the same money twice either.
+      const resumeResolved = resumed && !!curRow.pos_tender_ref;
 
-      // E-4: tender-blind adapters report the FULL total as remaining
-      // even after earlier payments settled (their detail has no tender
-      // list). Cap the remaining by our own settled payments so a later
-      // payer can never be charged for money already collected.
-      if (!resumeResolved && TENDER_BLIND_POS.has(posType) && check.total_cents > 0) {
-        const settled = await client.query<{ s: string }>(
-          `SELECT COALESCE(SUM(amount_cents + tip_cents), 0) AS s FROM payments
-           WHERE check_id = $1 AND status IN ('AUTHORIZED','COMPLETED')`,
-          [checkId],
+      // F1-2: a resumed attempt whose charge_started_at marker is set but
+      // which never landed a tender ref sits in the crash window between
+      // "the POS charged" and "the ref write persisted". On adapters
+      // WITHOUT native idempotency a blind retry can charge twice, so the
+      // attempt stops here and staff/reconcile resolve it — never a guess.
+      if (resumed && !resumeResolved && curRow.charge_started_at && !adapter.nativeIdempotency) {
+        throw httpError(
+          409,
+          'the earlier attempt may have been charged; staff will verify the bill before any new charge',
+          'payment_needs_reconciliation',
         );
-        remaining = Math.max(0, check.total_cents - Number(settled.rows[0]?.s ?? 0));
       }
 
       // For a resumed key, a failed validation may mean "the first attempt already charged": never answer
@@ -374,7 +449,10 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
         if (!Number.isInteger(amount) || amount <= 0 || amount > remaining) {
           throw invalid(`amount_cents must be between 1 and ${remaining}`);
         }
-        if (tipCents > amount) throw badRequest(TIP_MSG);
+        // F1-18: through invalid(), not badRequest — on a resumed key a
+        // plain 400 makes the client discard the attempt and start a new
+        // key, which is exactly what the resume semantics exist to avoid.
+        if (tipCents > amount) throw invalid(TIP_MSG);
       }
 
       // Non-Square adapters record external payments atomically (no split
@@ -393,28 +471,32 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
       let newRemaining: number;
       let resultCurrency = currency;
 
+      // F1-2: durable "a charge is about to happen" marker, written in
+      // autocommit BEFORE any POS charge call in the branches below. If
+      // the process dies between the charge and the tender-ref write, a
+      // resumed request finds this marker (see the guard above) instead
+      // of charging blind on adapters without native idempotency.
+      const markChargeStarted = async (): Promise<void> => {
+        await query(
+          `UPDATE payments SET charge_started_at = now() WHERE idempotency_key = $1 AND charge_started_at IS NULL`,
+          [key],
+        ).catch((e) => console.error('[payments] failed to persist charge_started_at:', e));
+      };
+
       if (resumeResolved) {
         // D-1: resolve the stranded charge WITHOUT charging again. The
         // shared completion tail below finalizes the row/check/table from
         // these values, exactly as if the charge had just returned.
         chargeCreated = true; // money exists at the POS; a failure from here must never mark the row FAILED
         externalPaymentId = curRow.pos_tender_ref!;
-        if (TENDER_BLIND_POS.has(posType)) {
-          const settled = await client.query<{ s: string }>(
-            `SELECT COALESCE(SUM(amount_cents + tip_cents), 0) AS s FROM payments
-             WHERE check_id = $1 AND status IN ('AUTHORIZED','COMPLETED')`,
-            [checkId],
-          );
-          newRemaining = Math.max(
-            0,
-            (check.total_cents || 0) - Number(settled.rows[0]?.s ?? 0) - (curRow.amount_cents + curRow.tip_cents),
-          );
-        } else {
-          newRemaining = remaining;
-        }
+        // `remaining` already excludes this charge: live tenders reflect
+        // it on tender-capable POS, and the F1-1 cap counts PENDING rows
+        // carrying a tender ref on tender-blind ones.
+        newRemaining = remaining;
         // Commission fee, if the first attempt died before recording it
-        // (mirrors reconcile F-7; an existing fee row makes this a no-op).
-        if (ctx.locationId) {
+        // (card only — external recordings never carry a fee; mirrors
+        // reconcile F-7; an existing fee row makes this a no-op).
+        if (input.source.kind === 'card' && ctx.locationId) {
           try {
             const priorFee = await query<{ n: number }>(
               `SELECT COUNT(*)::int AS n FROM fee_ledger WHERE payment_row_id = $1 AND method IN ('square_app_fee','accrued')`,
@@ -469,6 +551,7 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
             feeCents = feeFor(amount + tipCents, acct.commission_bps);
           }
         }
+        await markChargeStarted();
         const res = await adapter.chargeCard!({
           checkId: nativeRef,
           amountCents: amount,
@@ -509,20 +592,12 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
           `UPDATE payments SET pos_tender_ref = $2, amount_cents = $3, tip_cents = $4
            WHERE idempotency_key = $1 AND status = 'PENDING'`,
           [key, res.paymentId, amount, tipCents],
-        ).catch(() => undefined);
-        // H5 fix: persist the POS reference OUTSIDE the main transaction, the
-        // moment the charge succeeds. If the transaction below rolls back, the
-        // reconciler can still match this payment exactly by reference instead
-        // of the fragile amount-only heuristic.
-        await query(
-          `UPDATE payments SET pos_tender_ref = $2, amount_cents = $3, tip_cents = $4
-           WHERE idempotency_key = $1 AND status = 'PENDING'`,
-          [key, res.paymentId, amount, tipCents],
-        ).catch(() => undefined);
+        ).catch((e) => console.error('[payments] failed to persist pos_tender_ref:', e));
       } else if (posType === 'square') {
         // ---- Square orchestration (unchanged verified flow; order already retrieved above) ----
         // This branch only runs for EXTERNAL (cash) payments now; card
         // payments go through adapter.chargeCard above.
+        await markChargeStarted();
         const { payment } = await createPayment(
           {
             orderId: nativeRef,
@@ -544,9 +619,10 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
           `UPDATE payments SET pos_tender_ref = $2, amount_cents = $3, tip_cents = $4
            WHERE idempotency_key = $1 AND status = 'PENDING'`,
           [key, payment.id, amount, tipCents],
-        ).catch(() => undefined);
+        ).catch((e) => console.error('[payments] failed to persist pos_tender_ref:', e));
       } else {
         // ---- Generic external payment via the location's adapter ----
+        await markChargeStarted();
         const res = await adapter.recordExternalPayment(
           nativeRef,
           amount,
@@ -565,7 +641,7 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
           `UPDATE payments SET pos_tender_ref = $2, amount_cents = $3, tip_cents = $4
            WHERE idempotency_key = $1 AND status = 'PENDING'`,
           [key, res.paymentId, amount, tipCents],
-        ).catch(() => undefined);
+        ).catch((e) => console.error('[payments] failed to persist pos_tender_ref:', e));
       }
 
       const completes = newRemaining <= 0;
@@ -589,7 +665,7 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
             [check.id],
           );
           const ids: string[] = rows.rows.map((r) => r.square_payment_id);
-          await payOrder(nativeRef, ids, randomUUID(), token);
+          await payOrder(nativeRef, ids, `${key}:payorder`, token);
         }
         await client.query(`UPDATE payments SET status='COMPLETED' WHERE check_id=$1 AND status='AUTHORIZED'`, [check.id]);
         await client.query(`UPDATE checks SET state='COMPLETED' WHERE id=$1`, [check.id]);
@@ -623,6 +699,14 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
         'the payment was taken but the bill could not be closed; ask staff to check the table',
         'payment_needs_reconciliation',
       );
+    }
+    if (isPosUnavailableError(e)) {
+      // F1-3: the POS LINK failed (dead merchant token, vanished order,
+      // POS 5xx) — not a decline. The row stays PENDING so the same key
+      // resumes once the connection is fixed, and the guest hears "ask
+      // staff", never "your card failed".
+      console.error(`[payments] POS unavailable while paying (key ${key}):`, e);
+      throw httpError(503, 'the payment service is temporarily unavailable — please ask staff', 'pos_unavailable');
     }
     if (isDefinitivePosError(e)) {
       // The POS rejected the request outright (declined card, bad token, ...): terminal for this key.

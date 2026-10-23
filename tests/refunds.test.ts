@@ -143,18 +143,18 @@ describe('v0.4.1 refunds', () => {
     await seed();
     // Guest pays SQORDR1 in full by card: $100 + $10 tip (fee 220 collected).
     await payCheck({
-      checkRef: 'SQORDR1', mode: 'full', tipCents: 1000, idempotencyKey: randomUUID(),
+      checkRef: 'SQORDR1', checkId: checkIds.SQORDR1, mode: 'full', tipCents: 1000, idempotencyKey: randomUUID(),
       source: { kind: 'card', nonce: 'cnon:card-nonce-ok' },
     });
     // SQORDR2 is paid in cash (EXTERNAL tender).
     await payCheck({
-      checkRef: 'SQORDR2', mode: 'full', tipCents: 0, idempotencyKey: randomUUID(),
+      checkRef: 'SQORDR2', checkId: checkIds.SQORDR2, mode: 'full', tipCents: 0, idempotencyKey: randomUUID(),
       source: { kind: 'external', label: 'CASH' },
     });
     // SQORDR3 is paid by card ($40, no tip); its Square payment is then
     // flipped to APPROVED (authorized, not yet settled) for the void tests.
     await payCheck({
-      checkRef: 'SQORDR3', mode: 'full', tipCents: 0, idempotencyKey: randomUUID(),
+      checkRef: 'SQORDR3', checkId: checkIds.SQORDR3, mode: 'full', tipCents: 0, idempotencyKey: randomUUID(),
       source: { kind: 'card', nonce: 'cnon:card-nonce-ok' },
     });
     const p3 = await query<{ external_payment_ref: string }>(

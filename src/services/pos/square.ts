@@ -112,6 +112,8 @@ function isAppFeeRejection(e: SquareError): boolean {
 
 export const squareAdapter: PosAdapter = {
   posType: 'square',
+  // Square dedupes on our idempotency key: a same-key retry never charges twice.
+  nativeIdempotency: true,
 
   async listOpenChecks(locationRef: string, token?: string): Promise<PosOpenCheckSummary[]> {
     const { orders } = await searchOpenOrders(assertSquareId(locationRef, 'location_id'), token);

@@ -19,7 +19,7 @@ import { onboardingRoutes } from './routes/onboarding.js';
 import { billingRoutes } from './routes/billing.js';
 import { refundRoutes } from './routes/refunds.js';
 import { deviceRoutes } from './routes/device.js';
-import { processAccruedFees } from './services/billing.js';
+import { processAccruedFees, sweepMissingFees } from './services/billing.js';
 import { refreshExpiringTokens } from './services/pos/token-refresh.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -260,7 +260,16 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // account exists.
   if (!config.usePgMem) {
     const runBilling = () =>
-      processAccruedFees()
+      // F1-6: first sweep for settled payments whose fee row never landed,
+      // then collect whatever is due.
+      sweepMissingFees()
+        .then((s) => {
+          if (s.recorded > 0 || s.squareMissing > 0) {
+            app.log.warn(s, '[billing] missing-fee sweep found gaps');
+          }
+        })
+        .catch((e) => app.log.error(e, '[billing] missing-fee sweep failed'))
+        .then(() => processAccruedFees())
         .then((r) => {
           if (r.locationsCharged > 0) {
             app.log.info(r, '[billing] accrued commission collected');

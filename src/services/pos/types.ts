@@ -200,6 +200,14 @@ export interface CardCredentials {
  */
 export interface PosAdapter {
   readonly posType: PosType;
+  /**
+   * True when the provider dedupes charge attempts on OUR idempotency key
+   * (Square does). Absent/false means a retried charge with the same key
+   * can charge twice at the provider — payCheck therefore refuses to
+   * re-charge a resumed attempt that carries a charge_started_at marker
+   * but no tender ref on such adapters (v0.7.3, F1-2).
+   */
+  readonly nativeIdempotency?: boolean;
 
   listOpenChecks(locationRef: string, token?: string): Promise<PosOpenCheckSummary[]>;
   getCheckDetail(checkId: string, token?: string): Promise<PosCheckDetail>;

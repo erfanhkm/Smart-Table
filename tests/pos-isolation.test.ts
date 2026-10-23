@@ -28,6 +28,7 @@ const { payCheck } = await import('../src/services/payments.js');
 // ---- fetch mock: records every call, routes by host ----
 interface Call { url: string; method: string; headers: Record<string, string>; body: string | undefined }
 const calls: Call[] = [];
+const checkIdsByRef: Record<string, string> = {};
 let cloverPaid = false;
 
 function json(data: unknown, status = 200) {
@@ -120,9 +121,11 @@ async function seed() {
     const tId = randomUUID();
     await query(`INSERT INTO tables(id, location_id, name, qr_token, state) VALUES ($1,$2,$3,$4,'SEATED')`,
       [tId, loc, `T-${pos}`, randomUUID().replace(/-/g, '')]);
+    const cId = randomUUID();
+    checkIdsByRef[ref] = cId;
     await query(`INSERT INTO checks(id, table_id, pos_type, external_check_ref, square_order_id, merchant_id, state, total_cents, currency)
       VALUES ($1,$2,$3,$4,$5,$6,'OPEN',1000,'CAD')`,
-      [randomUUID(), tId, pos, ref, pos === 'square' ? ref : null, MERCHANT]);
+      [cId, tId, pos, ref, pos === 'square' ? ref : null, MERCHANT]);
   }
 }
 
@@ -185,6 +188,7 @@ describe('v0.3 POS isolation', () => {
     cloverPaid = false;
     const res = await payCheck({
       checkRef: 'CLM1:CLORDER1',
+      checkId: checkIdsByRef['CLM1:CLORDER1'],
       mode: 'full',
       idempotencyKey: randomUUID(),
       source: { kind: 'external', label: 'Cash' },
@@ -202,6 +206,7 @@ describe('v0.3 POS isolation', () => {
     await assert.rejects(
       () => payCheck({
         checkRef: 'test.myshopify.com:99',
+        checkId: checkIdsByRef['test.myshopify.com:99'],
         mode: 'full',
         idempotencyKey: randomUUID(),
         source: { kind: 'card', nonce: 'cnon:test' },
@@ -218,6 +223,7 @@ describe('v0.3 POS isolation', () => {
     // re-read flow through the mocked fetch.
     const r = await payCheck({
       checkRef: 'CLM1:CLORDER1',
+      checkId: checkIdsByRef['CLM1:CLORDER1'],
       mode: 'full',
       idempotencyKey: randomUUID(),
       source: { kind: 'card', nonce: 'clv_testtoken123' },

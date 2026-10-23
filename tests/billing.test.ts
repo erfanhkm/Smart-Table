@@ -72,13 +72,16 @@ function installFetch() {
 // ---- seed ------------------------------------------------------------------
 const MERCHANT = 'm-bill';
 const LOC = 'loc-bill';
+const checkIds: Record<string, string> = {};
 async function seedCheck(orderId: string, total: number) {
   const tId = randomUUID();
   await query(`INSERT INTO tables(id, location_id, name, qr_token, state) VALUES ($1,$2,$3,$4,'SEATED')`,
     [tId, LOC, `T-${orderId}`, randomUUID().replace(/-/g, '')]);
+  const cId = randomUUID();
+  checkIds[orderId] = cId;
   await query(`INSERT INTO checks(id, table_id, pos_type, external_check_ref, square_order_id, merchant_id, state, total_cents, currency)
     VALUES ($1,$2,'square',$3,$3,$4,'OPEN',$5,'CAD')`,
-    [randomUUID(), tId, orderId, MERCHANT, total]);
+    [cId, tId, orderId, MERCHANT, total]);
 }
 async function seed() {
   await migrate();
@@ -120,7 +123,7 @@ describe('v0.4 billing', () => {
   it('commission + Square: payment carries the 2% app fee; ledger collected', async () => {
     calls.length = 0;
     const res = await payCheck({
-      checkRef: 'SQORDER1', mode: 'full', tipCents: 1000,
+      checkRef: 'SQORDER1', checkId: checkIds.SQORDER1, mode: 'full', tipCents: 1000,
       idempotencyKey: randomUUID(), source: { kind: 'card', nonce: 'cnon:card-nonce-ok' },
     });
     assert.equal(res.checkState, 'COMPLETED');
@@ -143,7 +146,7 @@ describe('v0.4 billing', () => {
     await query(`UPDATE billing_accounts SET plan = 'subscription' WHERE location_id = $1`, [LOC]);
     calls.length = 0;
     const res = await payCheck({
-      checkRef: 'SQORDER2', mode: 'full',
+      checkRef: 'SQORDER2', checkId: checkIds.SQORDER2, mode: 'full',
       idempotencyKey: randomUUID(), source: { kind: 'card', nonce: 'cnon:card-nonce-ok' },
     });
     assert.equal(res.checkState, 'COMPLETED');
@@ -160,7 +163,7 @@ describe('v0.4 billing', () => {
     calls.length = 0;
     try {
       const res = await payCheck({
-        checkRef: 'SQORDER3', mode: 'full',
+        checkRef: 'SQORDER3', checkId: checkIds.SQORDER3, mode: 'full',
         idempotencyKey: randomUUID(), source: { kind: 'card', nonce: 'cnon:card-nonce-ok' },
       });
       assert.equal(res.checkState, 'COMPLETED');

@@ -34,6 +34,14 @@ function demoTokenFor(posType: PosType): string | undefined {
 // adapters — D-10); these wrappers keep the context-shaped API.
 export { invalidateMenuCache } from './menu-cache.js';
 
+/**
+ * Adapters whose check detail cannot list tenders, so their reported
+ * remaining is the FULL total even after payments settle. Single source
+ * (v0.7.3, F1-19): payments.ts caps the chargeable remaining from our own
+ * ledger for these, and reconcile.ts cannot match their tenders.
+ */
+export const TENDER_BLIND_POS: ReadonlySet<string> = new Set(['shopify', 'helcim']);
+
 /** Get the location's menu, cached for 45s (menu-cache.ts). */
 export async function getCachedMenu(ctx: PosContext): Promise<PosMenuItem[]> {
   if (!ctx.adapter.getMenu) throw badRequest(`ordering is not supported for ${ctx.posType} locations yet`);

@@ -573,3 +573,69 @@ export async function processAccruedFees(): Promise<{ locationsCharged: number; 
   }
   return { locationsCharged, totalCents };
 }
+
+/**
+ * F1-6 sweep: a successful charge whose recordFee write failed (DB blip)
+ * used to lose the platform's commission silently — the payment completed
+ * and nothing ever looked for the missing ledger row again. This sweep
+ * finds settled payments on commission-plan locations with NO fee row and
+ * records the fee through the same idempotent recordFee.
+ *
+ * Square locations are the exception: Square takes the application fee
+ * in-flight, atomically with the charge, so a missing row there is a
+ * bookkeeping gap, NOT money owed — recording it as 'accrued' would bill
+ * the restaurant twice. Square misses are counted and logged loudly for
+ * manual review instead.
+ */
+export async function sweepMissingFees(): Promise<{ recorded: number; squareMissing: number }> {
+  const r = await query<{
+    id: string; amount_cents: number; tip_cents: number; currency: string | null;
+    external_payment_ref: string | null; square_payment_id: string | null;
+    pos_type: string; location_id: string | null;
+  }>(
+    // LEFT JOIN instead of a correlated NOT EXISTS: pg-mem cannot plan
+    // correlated subqueries against the outer row (and the shape is
+    // portable to real Postgres unchanged). Duplicate rows from multiple
+    // fee entries are deduped by the f.id IS NULL filter itself — a
+    // payment with ANY fee row joins only non-null rows.
+    `SELECT p.id, p.amount_cents, p.tip_cents, p.currency, p.external_payment_ref,
+            p.square_payment_id, c.pos_type, c.location_id
+     FROM payments p JOIN checks c ON c.id = p.check_id
+     LEFT JOIN fee_ledger f ON f.payment_row_id = p.id AND f.method IN ('square_app_fee','accrued')
+     WHERE p.status IN ('AUTHORIZED','COMPLETED')
+       AND p.created_at < now() - interval '10 minutes'
+       AND f.id IS NULL`,
+  );
+  let recorded = 0;
+  let squareMissing = 0;
+  for (const row of r.rows) {
+    if (!row.location_id) continue;
+    try {
+      const acct = await ensureBillingAccount(row.location_id);
+      if (effectivePlan(acct) !== 'commission') continue;
+      const fee = feeFor(row.amount_cents + row.tip_cents, acct.commission_bps);
+      if (fee <= 0) continue;
+      if (row.pos_type === 'square') {
+        squareMissing += 1;
+        console.error(
+          `[billing] MISSING FEE ROW for Square payment ${row.id} (location ${row.location_id}): ` +
+            'the in-flight application fee is not in the ledger — review manually, do NOT accrue.',
+        );
+        continue;
+      }
+      await recordFee({
+        locationId: row.location_id,
+        paymentRowId: row.id,
+        posPaymentRef: row.external_payment_ref ?? row.square_payment_id,
+        chargeCents: row.amount_cents + row.tip_cents,
+        feeCents: fee,
+        currency: row.currency ?? 'CAD',
+        method: 'accrued',
+      });
+      recorded += 1;
+    } catch (e) {
+      console.error(`[billing] sweepMissingFees failed for payment ${row.id}:`, e);
+    }
+  }
+  return { recorded, squareMissing };
+}

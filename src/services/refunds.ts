@@ -62,22 +62,31 @@ async function refundedSoFar(paymentRowId: string): Promise<number> {
 }
 
 export async function listCheckPayments(checkId: string): Promise<PaymentWithRefunds[]> {
+  // F1-22: explicit columns (SELECT * shipped internal fields —
+  // pos_tender_ref, idempotency_key, recorded_by — to portal clients) and
+  // one grouped refund-sum query instead of an N+1 refundedSoFar per row.
   const r = await query<PaymentRow>(
-    `SELECT * FROM payments WHERE check_id = $1 ORDER BY created_at ASC`,
+    `SELECT id, check_id, square_payment_id, external_payment_ref, amount_cents, tip_cents,
+            currency, status, payer_label, split_mode, created_at
+     FROM payments WHERE check_id = $1 ORDER BY created_at ASC`,
     [checkId],
   );
-  const out: PaymentWithRefunds[] = [];
-  for (const p of r.rows) {
-    const refunded = await refundedSoFar(p.id);
+  const sums = await query<{ payment_row_id: string; total: string }>(
+    `SELECT payment_row_id, COALESCE(SUM(amount_cents), 0) AS total FROM refunds
+     WHERE check_id = $1 AND status IN ('PENDING', 'COMPLETED') GROUP BY payment_row_id`,
+    [checkId],
+  );
+  const byPayment = new Map(sums.rows.map((s) => [s.payment_row_id, Number(s.total ?? 0)]));
+  return r.rows.map((p) => {
+    const refunded = byPayment.get(p.id) ?? 0;
     const refundable = REFUNDABLE_STATUSES.includes(p.status)
       ? Math.max(0, p.amount_cents + p.tip_cents - refunded)
       : 0;
-    out.push({ ...p, refunded_cents: refunded, refundable_cents: refundable });
-  }
-  return out;
+    return { ...p, refunded_cents: refunded, refundable_cents: refundable };
+  });
 }
 
-async function reverseFees(payment: PaymentRow, totalRefundedAfter: number): Promise<void> {
+async function reverseFees(payment: PaymentRow, totalRefundedAfter: number, refundRowId: string): Promise<void> {
   const fees = await query<{
     id: string; location_id: string; charge_cents: number; fee_cents: number;
     currency: string; status: string; pos_payment_ref: string | null;
@@ -103,9 +112,9 @@ async function reverseFees(payment: PaymentRow, totalRefundedAfter: number): Pro
   // 'accrued' credit that offsets the restaurant's future fees.
   const status = fee.status === 'collected' ? 'collected' : 'accrued';
   await query(
-    `INSERT INTO fee_ledger(id, location_id, payment_row_id, pos_payment_ref, charge_cents, fee_cents, currency, method, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'reversal', $8)`,
-    [randomUUID(), fee.location_id, payment.id, fee.pos_payment_ref, fee.charge_cents, -delta, fee.currency, status],
+    `INSERT INTO fee_ledger(id, location_id, payment_row_id, pos_payment_ref, charge_cents, fee_cents, currency, method, status, refund_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'reversal', $8, $9)`,
+    [randomUUID(), fee.location_id, payment.id, fee.pos_payment_ref, fee.charge_cents, -delta, fee.currency, status, refundRowId],
   );
 }
 
@@ -159,7 +168,26 @@ export async function refundPayment(input: {
   const existing = (await query<RefundRow>(`SELECT * FROM refunds WHERE idempotency_key = $1`, [key])).rows[0];
   if (existing) {
     if (existing.payment_row_id !== payment.id) throw badRequest('idempotency_key was used for a different payment');
+    // F1-21: a replay naming a DIFFERENT amount is a different request —
+    // say so (409, mirroring payCheck) instead of silently returning the
+    // original amount as if it were what was asked for.
+    if (input.amountCents !== undefined && input.amountCents !== existing.amount_cents) {
+      throw conflict('idempotency_key was already used for a different refund amount', 'idempotency_key_reused');
+    }
     if (existing.status === 'COMPLETED') {
+      // F1-10: if the original call died after the POS refund but before
+      // the fee reversal, the reversal was never retried — the replay path
+      // returned early and the restaurant stayed overbilled forever.
+      // reverseFees is cumulative and idempotent, so retry it here, under
+      // the same per-payment lock the reservation uses.
+      await withAdvisoryLock(
+        `refund:${payment.id}`,
+        async () => {
+          const total = await refundedSoFar(payment.id);
+          await reverseFees(payment, total, existing.id);
+        },
+        { runIfUnsupported: true },
+      ).catch((e) => console.error('[refunds] fee reversal retry on replay failed:', e));
       return summarize(existing.id, existing.pos_refund_ref, existing.amount_cents, true);
     }
     if (existing.status === 'PENDING') {
@@ -184,15 +212,42 @@ export async function refundPayment(input: {
   const reserved = await withAdvisoryLock(`refund:${payment.id}`, async () => {
     const alreadyNow = await refundedSoFar(payment.id);
     const refundableNow = totalCharged - alreadyNow;
-    const amountNow = input.amountCents ?? refundableNow;
-    if (!Number.isInteger(amountNow) || amountNow <= 0) throw badRequest('amount_cents must be a positive integer');
-    if (amountNow > refundableNow) throw badRequest(`amount_cents exceeds the refundable remainder (${refundableNow})`);
 
     // Reserve the refund row before calling the POS.
     const newRowId = existing?.id ?? randomUUID();
     if (existing) {
-      await query(`UPDATE refunds SET status = 'PENDING', amount_cents = $2 WHERE id = $1`, [newRowId, amountNow]);
+      // F1-12: FAILED-retry hardening. `existing` was read BEFORE the
+      // lock; a concurrent retry of the same key could already be in
+      // flight. Re-read inside the lock and flip the row with a
+      // compare-and-set on status='FAILED', so exactly one retry owns it.
+      // The amount is PINNED to the original: the POS call reuses the
+      // same idempotency key, and a changed amount under a reused key
+      // diverges the POS from our books (Square answers the original
+      // payload or IDEMPOTENCY_KEY_REUSED) — a different amount needs a
+      // new key, which the replay check above already enforces for
+      // explicit amounts; the default-amount path lands here.
+      const cur = (await query<RefundRow>(`SELECT * FROM refunds WHERE id = $1`, [existing.id])).rows[0];
+      if (!cur || cur.status !== 'FAILED') {
+        if (cur && cur.status === 'COMPLETED') return { kind: 'replay' as const, row: cur };
+        throw conflict('this refund is still being confirmed with the POS; check the payment before retrying', 'refund_state_unknown');
+      }
+      if (cur.amount_cents > refundableNow) {
+        throw badRequest('the refundable remainder changed since the failed attempt; review the payment before retrying');
+      }
+      await query(
+        `UPDATE refunds SET status = 'PENDING', amount_cents = $2, refunded_by = COALESCE($3, refunded_by)
+         WHERE id = $1 AND status = 'FAILED'`,
+        [existing.id, cur.amount_cents, input.actor ?? null],
+      );
+      const after = (await query<RefundRow>(`SELECT * FROM refunds WHERE id = $1`, [existing.id])).rows[0];
+      if (!after || after.status !== 'PENDING' || after.amount_cents !== cur.amount_cents) {
+        throw conflict('this refund is still being confirmed with the POS; check the payment before retrying', 'refund_state_unknown');
+      }
+      return { kind: 'reserved' as const, rowId: existing.id, amount: cur.amount_cents, already: alreadyNow };
     } else {
+      const amountNow = input.amountCents ?? refundableNow;
+      if (!Number.isInteger(amountNow) || amountNow <= 0) throw badRequest('amount_cents must be a positive integer');
+      if (amountNow > refundableNow) throw badRequest(`amount_cents exceeds the refundable remainder (${refundableNow})`);
       await query(
         `INSERT INTO refunds(id, payment_row_id, check_id, location_id, amount_cents, currency, reason, idempotency_key, refunded_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (idempotency_key) DO NOTHING`,
@@ -204,8 +259,8 @@ export async function refundPayment(input: {
         if (stored && stored.status === 'COMPLETED') return { kind: 'replay' as const, row: stored };
         throw conflict('this refund is still being confirmed with the POS; check the payment before retrying', 'refund_state_unknown');
       }
+      return { kind: 'reserved' as const, rowId: newRowId, amount: amountNow, already: alreadyNow };
     }
-    return { kind: 'reserved' as const, rowId: newRowId, amount: amountNow, already: alreadyNow };
   }, { runIfUnsupported: true });
   if (reserved === null) {
     throw conflict('another refund for this payment is in progress — wait a moment and retry', 'refund_state_unknown');
@@ -225,7 +280,14 @@ export async function refundPayment(input: {
       token: ctx.token,
     });
     await query(`UPDATE refunds SET status = 'COMPLETED', pos_refund_ref = $2 WHERE id = $1`, [rowId, res.refundId]);
-    await reverseFees(payment, already + amount);
+    // F1-10: the refund itself has SUCCEEDED at this point — a fee-reversal
+    // failure must not turn it into a 409 (the retry would replay the
+    // COMPLETED row, which now retries the reversal itself; see above).
+    // It runs under the per-payment lock so two concurrent refunds of the
+    // same payment can't both read the same already-reversed total.
+    await withAdvisoryLock(`refund:${payment.id}`, () => reverseFees(payment, already + amount, rowId), {
+      runIfUnsupported: true,
+    }).catch((e) => console.error('[refunds] fee reversal failed (will retry on replay):', e));
     return summarize(rowId, res.refundId, amount, false);
   } catch (e) {
     // F-2 state machine: FAILED only on a DEFINITIVE rejection — an error
@@ -238,7 +300,15 @@ export async function refundPayment(input: {
     // second refund of the same money.
     const rawStatus = (e as { status?: unknown })?.status ?? (e as { statusCode?: unknown })?.statusCode;
     const status = typeof rawStatus === 'number' ? rawStatus : undefined;
-    const definitive = status !== undefined && status >= 400 && status < 500 && status !== 408 && status !== 429;
+    // F1-12: IDEMPOTENCY_KEY_REUSED means the POS saw this key before with
+    // a different payload — the original attempt's outcome is NOT a clean
+    // rejection, so it is unknown, never definitive.
+    const keyReused =
+      e instanceof SquareError &&
+      Array.isArray(e.errors) &&
+      e.errors.some((x) => (x as { code?: unknown })?.code === 'IDEMPOTENCY_KEY_REUSED');
+    const definitive =
+      !keyReused && status !== undefined && status >= 400 && status < 500 && status !== 408 && status !== 429;
     if (!definitive) {
       console.error(`[refunds] refund outcome unknown for payment ${payment.id} (row ${rowId} left PENDING):`, e);
       throw conflict('this refund is still being confirmed with the POS; check the payment before retrying', 'refund_state_unknown');

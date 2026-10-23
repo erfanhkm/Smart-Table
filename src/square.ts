@@ -211,7 +211,10 @@ export async function createPayment(input: CreatePaymentInput, token?: string): 
 export async function payOrder(
   orderId: string,
   paymentIds: string[],
-  idempotencyKey = randomUUID(),
+  // Square accepts any string (<=255 chars) as an idempotency key; the
+  // explicit string type lets callers derive one (e.g. `<payment key>:payorder`,
+  // F1-8) instead of minting a random key per attempt.
+  idempotencyKey: string = randomUUID(),
   token?: string,
 ): Promise<{ order: SquareOrder }> {
   const oid = pathSeg(orderId, 'order_id');
