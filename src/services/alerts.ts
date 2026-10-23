@@ -23,10 +23,15 @@ export async function raiseServiceAlert(a: {
     );
     if ((open.rowCount ?? 0) > 0) return false;
   }
-  await query(
+  // uq_alert_open (migration 020) makes the dedupe structural; ON CONFLICT
+  // DO NOTHING closes the race between the SELECT above and the INSERT
+  // (two simultaneous signals for one table must not 500 the guest route).
+  const ins = await query(
     `INSERT INTO service_alerts(id, location_id, table_id, check_id, kind, rating, comment)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
     [randomUUID(), a.locationId, a.tableId, a.checkId ?? null, a.kind, a.rating ?? null, a.comment ?? null],
   );
-  return true;
+  // pg-mem reports rowCount 1 even for a skipped insert (see AGENTS.md);
+  // on real Postgres rowCount is exact. A 0 here means the race was lost.
+  return (ins.rowCount ?? 1) > 0;
 }

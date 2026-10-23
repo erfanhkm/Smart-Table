@@ -35,16 +35,25 @@ export async function getTables(locationId: string): Promise<TableView[]> {
   );
   const ids = new Set(tables.rows.map((r) => r.id));
 
+  // G-1: both reads are scoped IN SQL to this location's tables (via the
+  // table join, so legacy checks whose location_id is still NULL are not
+  // lost). The old code loaded EVERY tenant's open checks + payments and
+  // filtered in memory — a cross-tenant data sweep on every floor poll.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const checks = await query<any>(
-    `SELECT table_id, external_check_ref, created_at FROM checks WHERE state = 'OPEN' ORDER BY created_at DESC`,
+    `SELECT c.table_id, c.external_check_ref, c.created_at
+     FROM checks c JOIN tables t ON t.id = c.table_id
+     WHERE c.state = 'OPEN' AND t.location_id = $1 ORDER BY c.created_at DESC`,
+    [loc],
   );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const paid = await query<any>(
     `SELECT c.table_id, SUM(p.amount_cents) AS paid_cents
      FROM payments p JOIN checks c ON c.id = p.check_id
-     WHERE c.state = 'OPEN' AND p.status IN ('AUTHORIZED','COMPLETED')
+     JOIN tables t ON t.id = c.table_id
+     WHERE c.state = 'OPEN' AND t.location_id = $1 AND p.status IN ('AUTHORIZED','COMPLETED')
      GROUP BY c.table_id`,
+    [loc],
   );
 
   const openByTable = new Map<string, string>();

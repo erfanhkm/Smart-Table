@@ -119,26 +119,40 @@ let loyaltySubmitting = false;
 const setNotice = (text, kind = 'err') => { notice = text ? { text, kind } : null; };
 
 // ---- payment attempts (idempotency) ----------------------------------------
-// ONE attempt = one idempotency key + frozen {mode, amount, tip}. It is persisted (sessionStorage, with an in-memory
-// fallback) so a reload cannot lose an unconfirmed attempt. The key is rotated ONLY after the server confirmed that
+// ONE attempt = one idempotency key + frozen {mode, amount, tip}. It is persisted (localStorage, with an in-memory
+// fallback) so a reload — or closing and reopening the tab — cannot lose an unconfirmed attempt. The key is rotated ONLY after the server confirmed that
 // nothing was charged (400, 402, 409 payment_failed|payment_cancelled) or after success. It is NEVER rotated on a
 // network error, timeout, 5xx, 429, unparseable response, or 409 idempotency_key_reused / payment_state_unknown /
 // payment_needs_reconciliation: those may have charged the card.
 const memAttempts = new Map();
 const attemptStoreKey = (orderId) => 'st_attempt_' + orderId;
+// H-5: the attempt lives in localStorage (with a 2h TTL), not
+// sessionStorage — closing the tab used to destroy the only copy of the
+// idempotency key, so a guest whose first charge actually went through
+// could reopen the page and pay again under a fresh key. Entries older
+// than the TTL are dropped on read (a bill is never open that long
+// without staff involvement, and staff can reconcile by hand past it).
+const ATTEMPT_TTL_MS = 2 * 60 * 60 * 1000;
 function loadAttempt(orderId) {
     let a = memAttempts.get(orderId) || null;
     if (!a) {
+        try { a = JSON.parse(localStorage.getItem(attemptStoreKey(orderId)) || 'null'); } catch { a = null; }
+    }
+    if (!a) {
+        // Legacy entries written by <= v0.6.9 live in sessionStorage.
         try { a = JSON.parse(sessionStorage.getItem(attemptStoreKey(orderId)) || 'null'); } catch { a = null; }
     }
+    if (a && a.savedAt && Date.now() - a.savedAt > ATTEMPT_TTL_MS) { clearAttempt(orderId); return null; }
     return a && typeof a.key === 'string' ? a : null;
 }
 function saveAttempt(a) {
+    a.savedAt = Date.now();
     memAttempts.set(a.orderId, a);
-    try { sessionStorage.setItem(attemptStoreKey(a.orderId), JSON.stringify(a)); } catch { /* private mode: memory copy only */ }
+    try { localStorage.setItem(attemptStoreKey(a.orderId), JSON.stringify(a)); } catch { /* private mode: memory copy only */ }
 }
 function clearAttempt(orderId) {
     memAttempts.delete(orderId);
+    try { localStorage.removeItem(attemptStoreKey(orderId)); } catch { /* ignore */ }
     try { sessionStorage.removeItem(attemptStoreKey(orderId)); } catch { /* ignore */ }
 }
 const currentAttempt = () => (check ? loadAttempt(check.square_order_id) : null);
@@ -345,7 +359,14 @@ async function helcimTokenize(cfg) {
     await loadScript(cfg.extra.helcimPayJs);
     return new Promise((resolve, reject) => {
         try {
+            // H-6: only accept messages from the HelcimPay iframe's own
+            // origin (derived from the script URL our server handed us).
+            // Without this, any frame/window could post a forged SUCCESS
+            // message carrying an attacker-chosen card token.
+            let expectedOrigin = '';
+            try { expectedOrigin = new URL(cfg.extra.helcimPayJs).origin; } catch { expectedOrigin = 'https://secure.helcim.app'; }
             const onMsg = (ev) => {
+                if (ev.origin !== expectedOrigin) return;
                 let msg = null;
                 try { msg = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data; } catch { return; }
                 if (!msg || msg.eventName !== `helcim-pay-js-${cfg.publishableKey}`) return;
@@ -970,9 +991,31 @@ async function toggleClaim(idx, want) {
     fetchBill();
 }
 document.addEventListener('focusout', () => { if (renderDeferred) setTimeout(() => render(true), 0); });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) fetchBill(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { pollDelayMs = POLL_MIN_MS; fetchBill(); } });
 
-setInterval(() => { if (!document.hidden && !paying) fetchBill(); }, 5000);
+// H-3/G-5: adaptive poll backoff. A fixed 5s poll from every phone at a
+// table (16+ phones on one venue IP) saturated the shared rate bucket and
+// cost a live POS call per poll per check. The delay now doubles while
+// the bill is unchanged (5s -> 10s -> 20s -> 30s cap) and snaps back to
+// 5s the moment anything changes, so a fresh tender still appears fast.
+const POLL_MIN_MS = 5000;
+const POLL_MAX_MS = 30000;
+let pollDelayMs = POLL_MIN_MS;
+let lastBillSig = null;
+function billSig() {
+    if (!check) return table ? 'table-only' : 'none';
+    return [check.square_order_id, check.state, check.remaining_cents, check.total_cents, JSON.stringify(claimsByIdx)].join('|');
+}
+async function pollTick() {
+    if (!document.hidden && !paying) {
+        await fetchBill();
+        const sig = billSig();
+        if (sig === lastBillSig) pollDelayMs = Math.min(POLL_MAX_MS, pollDelayMs * 2);
+        else { lastBillSig = sig; pollDelayMs = POLL_MIN_MS; }
+    }
+    setTimeout(pollTick, pollDelayMs);
+}
+setTimeout(pollTick, POLL_MIN_MS);
 render(true);
 fetchBill();
 

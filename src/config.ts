@@ -75,6 +75,8 @@ export const config = {
   resendApiKey: opt('RESEND_API_KEY'),
   /** Verified sender, e.g. receipts@smarttablepay.com. */
   receiptFromEmail: opt('RECEIPT_FROM_EMAIL'),
+  /** True when running on Render (the platform sets RENDER=true). */
+  isRender: !!process.env.RENDER,
 };
 
 export function requireSquareToken(): string {
@@ -82,30 +84,97 @@ export function requireSquareToken(): string {
   return config.squareAccessToken;
 }
 
-export type SafetyConfig = Pick<typeof config, 'isProd' | 'usePgMem' | 'squareWebhookKey' | 'staffApiToken'>;
+export type SafetyConfig = Pick<
+  typeof config,
+  | 'isProd'
+  | 'nodeEnv'
+  | 'usePgMem'
+  | 'squareWebhookKey'
+  | 'staffApiToken'
+  | 'encryptionKeyHex'
+  | 'adminPasswordHash'
+  | 'appUrl'
+  | 'squareEnv'
+  | 'helcimApiToken'
+  | 'shopifyAdminToken'
+  | 'port'
+  | 'trustProxy'
+  | 'isRender'
+>;
 
 /**
  * Fail-closed startup checks. Throws (=> refuse to boot) when NODE_ENV=production and:
  *  - PG_MEM=1 (in-memory DB, silently drops row locks),
  *  - SQUARE_WEBHOOK_SIGNATURE_KEY is empty (webhooks would be unauthenticated),
- *  - STAFF_API_TOKEN is missing or shorter than 32 chars.
- * In non-production it only warns.
+ *  - STAFF_API_TOKEN is missing or shorter than 32 chars,
+ *  - ENCRYPTION_KEY is not exactly 64 hex chars (stored POS credentials
+ *    would be undecryptable — or, worse, decryptable by a guessed key),
+ *  - ADMIN_PASSWORD_HASH is set but not in the scrypt$<salt>$<hash> shape
+ *    hashPassword produces (a malformed value locks the founder out),
+ *  - APP_URL is not https or points at localhost (the Square webhook URL
+ *    is pinned to it; a wrong value silently breaks signature checks),
+ *  - SQUARE_ENV is not 'sandbox' or 'production',
+ *  - RENDER is set while NODE_ENV says development/test (a mislabelled
+ *    deploy would run with every production guard off),
+ *  - PORT / TRUST_PROXY_HOPS did not parse to sane numbers (NaN port =
+ *    random port; NaN proxy hops = spoofable rate-limit keys).
+ * G-4 (Claude cycle-1 backlog). Two items are WARNING-only even in
+ * production, deliberately: app-level Helcim/Shopify demo tokens may be
+ * legitimately present while a location is explicitly flagged demo
+ * (v0.6.5 demo flag), so refusing to boot would kill the live demo; and a
+ * missing ADMIN_PASSWORD_HASH only disables the founder panel.
+ * In non-production the same problems only warn.
  */
 export function assertSafeConfig(c: SafetyConfig = config, warn: (msg: string) => void = console.warn): void {
   const problems: string[] = [];
+  const warnings: string[] = [];
+  if (!Number.isInteger(c.port) || c.port < 1 || c.port > 65535) {
+    problems.push('PORT must be an integer between 1 and 65535');
+  }
+  if (!Number.isInteger(c.trustProxy) || c.trustProxy < 0 || c.trustProxy > 10) {
+    problems.push('TRUST_PROXY_HOPS must be an integer between 0 and 10');
+  }
   if (c.isProd) {
     if (c.usePgMem) problems.push('PG_MEM=1 is not allowed when NODE_ENV=production');
     if (!c.squareWebhookKey) problems.push('SQUARE_WEBHOOK_SIGNATURE_KEY must be set when NODE_ENV=production');
     if (c.staffApiToken.length < 32) {
       problems.push('STAFF_API_TOKEN must be set (>= 32 chars, e.g. `openssl rand -hex 32`) when NODE_ENV=production');
     }
-    if (problems.length > 0) throw new Error(`unsafe production configuration: ${problems.join('; ')}`);
-    return;
+    if (!/^[0-9a-fA-F]{64}$/.test(c.encryptionKeyHex)) {
+      problems.push('ENCRYPTION_KEY must be 64 hex chars (32 bytes) when NODE_ENV=production');
+    }
+    if (c.adminPasswordHash && !/^scrypt\$[0-9a-fA-F]{32}\$[0-9a-fA-F]{128}$/.test(c.adminPasswordHash)) {
+      problems.push('ADMIN_PASSWORD_HASH is set but malformed (expected scrypt$<32 hex salt>$<128 hex hash>)');
+    }
+    if (!c.adminPasswordHash) {
+      warnings.push('ADMIN_PASSWORD_HASH is not set — the founder admin panel will reject every login.');
+    }
+    if (!c.appUrl.startsWith('https://') || /localhost|127\.0\.0\.1/.test(c.appUrl)) {
+      problems.push('APP_URL must be an https URL (not localhost) when NODE_ENV=production');
+    }
+    if (c.squareEnv !== 'sandbox' && c.squareEnv !== 'production') {
+      problems.push("SQUARE_ENV must be 'sandbox' or 'production'");
+    }
+    if (c.helcimApiToken || c.shopifyAdminToken) {
+      warnings.push(
+        'app-level Helcim/Shopify demo tokens are set in production — only locations explicitly flagged demo may use them (v0.6.5).',
+      );
+    }
   }
-  if (!c.staffApiToken) {
-    warn('[smart-table] WARNING: STAFF_API_TOKEN is not set — all staff endpoints will answer 401.');
+  if (c.isRender && (c.nodeEnv === 'development' || c.nodeEnv === 'test')) {
+    problems.push(`RENDER is set but NODE_ENV=${c.nodeEnv} — refusing to run a Render deploy in non-production mode`);
   }
-  if (!c.squareWebhookKey) {
-    warn('[smart-table] WARNING: SQUARE_WEBHOOK_SIGNATURE_KEY is empty — webhooks are accepted UNVERIFIED (non-production only).');
+  if (problems.length > 0) {
+    if (c.isProd || c.isRender) throw new Error(`unsafe production configuration: ${problems.join('; ')}`);
+    for (const p of problems) warn(`[smart-table] WARNING: ${p}`);
+  }
+  for (const w of warnings) warn(`[smart-table] WARNING: ${w}`);
+  if (!c.isProd) {
+    if (!c.staffApiToken) {
+      warn('[smart-table] WARNING: STAFF_API_TOKEN is not set — all staff endpoints will answer 401.');
+    }
+    if (!c.squareWebhookKey) {
+      warn('[smart-table] WARNING: SQUARE_WEBHOOK_SIGNATURE_KEY is empty — webhooks are accepted UNVERIFIED (non-production only).');
+    }
   }
 }

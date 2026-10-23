@@ -1,4 +1,4 @@
-/* Smart Table — Restaurant Portal (v0.6.9)
+/* Smart Table — Restaurant Portal (v0.6.10)
  * Served from /portal/app.js with a strict Content-Security-Policy
  * (no inline script). The network layer below has no DOM *rendering*
  * dependencies; it uses sessionStorage only for the auth token. */
@@ -144,6 +144,14 @@ const PortalAPI = {
     const res = await request(`/api/checks/${encodeURIComponent(squareOrderId)}`);
     if (!res.ok) throw new Error('Could not load check.');
     return readJson(res);
+  },
+  /** I-1 aggregate: every open check's detail for this location in ONE
+   * request (server fans out to the POS with a cap + a 4s cache). */
+  async getOpenChecksDetail() {
+    const res = await request(`/api/portal/open-checks-detail?location_id=${encodeURIComponent(CONFIG.locationId)}`);
+    if (!res.ok) throw new Error('Could not load open checks.');
+    const data = await readJson(res);
+    return (data && data.orders) || [];
   },
   async getCheckPayments(checkRef) {
     const res = await request(`/api/portal/checks/${encodeURIComponent(checkRef)}/payments`);
@@ -705,6 +713,12 @@ async function mapCapped(items, limit, fn) {
 
 async function getLiveOrders() {
   const oRes = await PortalAPI.getOverview();
+  // I-1: prefer the one-request aggregate; fall back to the per-table
+  // fan-out only if the aggregate route itself fails.
+  try {
+    const orders = await PortalAPI.getOpenChecksDetail();
+    return { orders, waiter_calls: oRes.waiter_calls || [] };
+  } catch { /* fall through to the legacy per-table flow */ }
   const openTables = (oRes.tables || []).filter((t) => t.open_order_id);
   const orders = await mapCapped(openTables, 3, async (t) => {
     try {

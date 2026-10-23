@@ -7,7 +7,8 @@
 import { FastifyInstance } from 'fastify';
 import { query } from '../db.js';
 import { badRequest, notFound } from '../http.js';
-import { getLocationPos } from '../services/pos/context.js';
+import { getCheckPos, getLocationPos } from '../services/pos/context.js';
+import { getTables } from '../services/floor.js';
 import { assertSquareId, searchOpenOrders } from '../square.js';
 import { parsePaymentBody, payCheck } from '../services/payments.js';
 import { requirePortalRole, scopedLocationId, staffOnly } from '../auth.js';
@@ -190,6 +191,53 @@ export async function staffRoutes(app: FastifyInstance) {
         opened_at: c.openedAt,
       })),
     };
+  });
+
+  // I-1/G-5 aggregate: Live Orders in ONE request. The portal used to make
+  // one live POS call per open table from the browser every 5s (17+ tables
+  // saturated the shared rate bucket and the POS). Here the server fans
+  // out with a concurrency cap of 3 and caches the result for 4 seconds
+  // per location, so a second portal tab costs nothing. Per-table
+  // failures keep the portal's "Unavailable — retry" row shape.
+  const openDetailCache = new Map<string, { at: number; orders: unknown[] }>();
+  app.get('/api/portal/open-checks-detail', staffOnly, async (req) => {
+    const { location_id } = req.query as { location_id?: string };
+    const scopedId = scopedLocationId(req, location_id);
+    const hit = openDetailCache.get(scopedId);
+    if (hit && Date.now() - hit.at < 4_000) return { orders: hit.orders };
+    const tables = (await getTables(scopedId)).filter((t) => t.open_order_id);
+    const orders: unknown[] = new Array(tables.length);
+    let next = 0;
+    async function worker() {
+      while (next < tables.length) {
+        const idx = next++;
+        const t = tables[idx];
+        try {
+          const row = await query(
+            `SELECT id FROM checks WHERE table_id = $1 AND (external_check_ref = $2 OR square_order_id = $2)`,
+            [t.id, t.open_order_id],
+          );
+          if (row.rowCount === 0) throw new Error('check row not found');
+          const ctx = await getCheckPos(row.rows[0].id as string);
+          const detail = await ctx.adapter.getCheckDetail(ctx.checkRef, ctx.token);
+          orders[idx] = {
+            table_id: t.id,
+            table_name: t.name,
+            id: t.open_order_id,
+            total: detail.totalCents,
+            paid: detail.tenders.reduce((s, x) => s + (x.amountCents || 0), 0),
+            remaining: detail.remainingCents,
+            currency: detail.currency || 'CAD',
+            error: false,
+          };
+        } catch {
+          orders[idx] = { table_id: t.id, table_name: t.name, id: t.open_order_id, error: true };
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(3, tables.length) }, worker));
+    openDetailCache.set(scopedId, { at: Date.now(), orders });
+    return { orders };
   });
 
   // Legacy (portal compat): Square-shaped open orders; Square locations only.

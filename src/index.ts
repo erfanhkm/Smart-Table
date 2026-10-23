@@ -124,7 +124,16 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
       return reply.code(301).header('Location', target).send();
     }
     if (req.url.startsWith('/api/webhooks/')) return webhookLimiter(req, reply);
-    const isPay = req.url.includes('/pay') || req.url.includes('/record-external-payment');
+    // G-5: match the two money-moving POST routes EXACTLY. The old
+    // substring test (url.includes('/pay')) also swept read-only routes
+    // like GET /api/portal/checks/:id/payments and /api/admin/payments
+    // into the tight 20/min pay bucket, so a busy portal could lock
+    // itself out of its own payment history.
+    const pathname = req.url.split('?')[0];
+    const isPay =
+      req.method === 'POST' &&
+      (/^\/api\/checks\/[^/]+\/pay$/.test(pathname) ||
+        /^\/api\/checks\/[^/]+\/record-external-payment$/.test(pathname));
     await (isPay ? payLimiter : generalLimiter)(req, reply);
   });
 
