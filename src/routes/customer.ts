@@ -12,6 +12,7 @@ import { getCachedMenu, getCheckPos, getLocationPos } from '../services/pos/cont
 import { PosCheckDetail } from '../services/pos/types.js';
 import { CARD_NONCE_RE, parsePaymentBody, payCheck } from '../services/payments.js';
 import { sendReceiptEmail } from '../services/email.js';
+import { buildReceiptLines } from '../services/receiptLines.js';
 import { raiseServiceAlert } from '../services/alerts.js';
 import { badRequest, conflict, httpError, notFound } from '../http.js';
 import { claimItem, listClaims, releaseAllClaims, releaseClaims, unclaimItem } from '../services/grouppay.js';
@@ -504,6 +505,85 @@ export async function customerRoutes(app: FastifyInstance) {
       await query(`UPDATE payments SET receipt_emailed_at = NULL WHERE id = $1`, [pay.id]).catch(() => undefined);
     }
     return { ok: true, ...result };
+  });
+
+  // ---- Receipt print on the table device (guest opts in) ----------------------
+  // POST /api/t/:token/receipt-print { payment_id? }
+  // The guest picks "Print" (or "Print + Email") on their phone after
+  // paying; the receipt prints on the table's own STT-101 device — the
+  // device has no screen UI for this, it just polls print jobs. Same
+  // payment binding + one-print-per-payment claim as the email route.
+  // A table with no paired device is NOT an error for the guest: the
+  // route answers printed:false / reason:'no_device' and the page tells
+  // them the server can print it instead.
+  app.post('/api/t/:token/receipt-print', { preHandler: tokenWriteLimiter }, async (req) => {
+    const { token } = req.params as { token: string };
+    const t = await query(
+      `SELECT t.id, t.name AS table_name, t.location_id, l.name AS location_name
+       FROM tables t JOIN locations l ON l.id = t.location_id WHERE t.qr_token = $1`,
+      [token],
+    );
+    if (t.rowCount === 0) throw badRequest('unknown table');
+    const body = (req.body ?? {}) as { payment_id?: unknown };
+    const paymentId = typeof body.payment_id === 'string' && body.payment_id ? body.payment_id : null;
+    const p = paymentId
+      ? await query(
+          `SELECT p.id, p.check_id, p.amount_cents, p.tip_cents, p.currency, p.created_at
+           FROM payments p JOIN checks c ON c.id = p.check_id
+           WHERE (p.external_payment_ref = $2 OR p.square_payment_id = $2) AND c.table_id = $1
+             AND p.status IN ('AUTHORIZED','COMPLETED')
+             AND p.created_at > now() - interval '60 minutes'`,
+          [t.rows[0].id, paymentId],
+        )
+      : await query(
+          `SELECT p.id, p.check_id, p.amount_cents, p.tip_cents, p.currency, p.created_at
+           FROM payments p JOIN checks c ON c.id = p.check_id
+           WHERE c.table_id = $1 AND p.status IN ('AUTHORIZED','COMPLETED')
+             AND p.created_at > now() - interval '30 minutes'
+           ORDER BY p.created_at DESC LIMIT 1`,
+          [t.rows[0].id],
+        );
+    if (p.rowCount === 0) throw badRequest('no recent completed payment found for this table');
+    const pay = p.rows[0];
+    const dev = await query<{ id: string }>(
+      `SELECT id FROM devices WHERE table_id = $1 AND revoked_at IS NULL`,
+      [t.rows[0].id],
+    );
+    if (dev.rowCount === 0) return { ok: true, printed: false, reason: 'no_device' };
+    // One device print per payment: claim the slot atomically.
+    const claim = await query(
+      `UPDATE payments SET receipt_printed_at = now() WHERE id = $1 AND receipt_printed_at IS NULL RETURNING id`,
+      [pay.id],
+    );
+    if (claim.rowCount === 0) return { ok: true, printed: false, reason: 'already_printed' };
+    // Item breakdown from THE payment's own check (best effort).
+    let items: { name: string; quantity: number; amountCents: number }[] = [];
+    try {
+      const ctx = await getCheckPos(pay.check_id);
+      const detail = await ctx.adapter.getCheckDetail(ctx.checkRef, ctx.token);
+      items = detail.items.map((i) => ({ name: i.name, quantity: i.quantity, amountCents: i.amountCents }));
+    } catch { /* receipt still prints with totals */ }
+    const lines = buildReceiptLines({
+      restaurantName: t.rows[0].location_name || 'Smart Table',
+      tableName: t.rows[0].table_name,
+      items,
+      amountCents: pay.amount_cents,
+      tipCents: pay.tip_cents,
+      currency: pay.currency || 'CAD',
+      paidAt: new Date(pay.created_at).toLocaleString(),
+    });
+    const jobId = randomUUID();
+    try {
+      await query(
+        `INSERT INTO print_jobs(id, device_id, location_id, table_id, check_id, lines) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [jobId, dev.rows[0].id, t.rows[0].location_id, t.rows[0].id, pay.check_id, JSON.stringify(lines)],
+      );
+    } catch (err) {
+      // Release the claim so the guest can retry.
+      await query(`UPDATE payments SET receipt_printed_at = NULL WHERE id = $1`, [pay.id]).catch(() => undefined);
+      throw err;
+    }
+    return { ok: true, printed: true, job_id: jobId };
   });
 
   // ---- QR ordering (optional per-location) ---------------------------------
