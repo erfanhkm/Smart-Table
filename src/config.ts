@@ -75,6 +75,8 @@ export const config = {
   resendApiKey: opt('RESEND_API_KEY'),
   /** Verified sender, e.g. receipts@smarttablepay.com. */
   receiptFromEmail: opt('RECEIPT_FROM_EMAIL'),
+  /** v0.8.4: where owner-demo access requests are emailed. */
+  demoAccessNotifyEmail: opt('DEMO_ACCESS_NOTIFY_EMAIL', 'erfanbillion@gmail.com'),
   /** True when running on Render (the platform sets RENDER=true). */
   isRender: !!process.env.RENDER,
 };

@@ -71,6 +71,19 @@ function mapTenders(order: AnyOrder): { id: string; type: string; amountCents: n
   }));
 }
 
+// v0.8.4: every payment id tendered on the order, in tender order —
+// PayOrder's required id list. Tenders carry `payment_id` (the tender's
+// own `id` is the fallback). `fallback` is used when the order lists no
+// tenders at all.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function tenderPaymentIds(order: AnyOrder, fallback: string[]): string[] {
+  const ids: string[] = (order?.tenders ?? [])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((t: any): string => String(t?.payment_id ?? t?.id ?? ''))
+    .filter((s: string) => Boolean(s));
+  return ids.length ? [...new Set(ids)] : fallback;
+}
+
 function mapDetail(order: AnyOrder): PosCheckDetail {
   const items = (order?.line_items ?? []).map((li: any) => {
     const qty = parseFloat(li?.quantity ?? '1') || 1;
@@ -160,9 +173,28 @@ export const squareAdapter: PosAdapter = {
       },
       token,
     );
-    const { order } = await payOrder(checkId, [payment.id], randomUUID(), token);
-    const d = mapDetail(order);
-    return { paymentId: payment.id, remainingCents: d.remainingCents, currency: d.currency, replayed: false };
+    // v0.8.4: same PayOrder discipline as chargeCard — pay with EVERY
+    // tendered payment id (Square rejects a list that omits payments
+    // already on the order), and never throw after the tender landed:
+    // staff would see a failure for money Square already recorded.
+    let payIds: string[] = [payment.id];
+    let freshCurrency: string | undefined;
+    try {
+      const { order: fresh } = await retrieveOrder(checkId, token);
+      payIds = tenderPaymentIds(fresh, payIds);
+      freshCurrency = mapDetail(fresh).currency;
+    } catch { /* fall back to just our payment */ }
+    try {
+      const { order } = await payOrder(checkId, payIds, randomUUID(), token);
+      const d = mapDetail(order);
+      return { paymentId: payment.id, remainingCents: d.remainingCents, currency: d.currency, replayed: false };
+    } catch (e) {
+      console.error(
+        `[square] PayOrder failed after recording an external payment (order ${checkId}, payment ${payment.id}); the tender stands in Square:`,
+        e,
+      );
+      return { paymentId: payment.id, remainingCents: null, currency: freshCurrency ?? currency, replayed: false };
+    }
   },
 
   async chargeCard(args: ChargeCardArgs): Promise<PosPaymentResult> {
@@ -227,13 +259,40 @@ export const squareAdapter: PosAdapter = {
       ));
       feeCollected = false;
     }
-    const { order } = await retrieveOrder(args.checkId, args.token);
-    const d = mapDetail(order);
-    if (d.remainingCents <= 0) {
-      await payOrder(args.checkId, [...args.priorPaymentIds, payment.id], randomUUID(), args.token);
-      return { paymentId: payment.id, remainingCents: 0, currency: d.currency, replayed: false, feeCollected };
+    // v0.8.4: the charge has LANDED by this point — nothing below may
+    // throw, or the caller marks a PAID bill FAILED and loses the
+    // payment's id (proven live 2026-10-24: a charge + app fee succeeded
+    // at Square, then PayOrder rejected because its id list omitted a
+    // pre-existing POS tender the payments table had no row for, and
+    // the guest's successful payment was recorded FAILED).
+    let order: AnyOrder;
+    try {
+      ({ order } = await retrieveOrder(args.checkId, args.token));
+    } catch (e) {
+      console.error(
+        `[square] post-charge order read failed (order ${args.checkId}, payment ${payment.id}); reporting unknown remaining:`,
+        e,
+      );
+      return { paymentId: payment.id, remainingCents: null, currency: args.currency, replayed: false, feeCollected };
     }
-    return { paymentId: payment.id, remainingCents: d.remainingCents, currency: d.currency, replayed: false, feeCollected };
+    const d = mapDetail(order);
+    if (d.remainingCents > 0) {
+      return { paymentId: payment.id, remainingCents: d.remainingCents, currency: d.currency, replayed: false, feeCollected };
+    }
+    // Fully covered: close the order in Square. PayOrder requires the ids
+    // of EVERY payment tendered on the order — including tenders recorded
+    // directly in the POS that we have no payments row for — so the list
+    // comes from the order itself, not from our prior-payment bookkeeping.
+    const payIds = tenderPaymentIds(order, [...args.priorPaymentIds, payment.id]);
+    try {
+      await payOrder(args.checkId, payIds, randomUUID(), args.token);
+    } catch (e) {
+      console.error(
+        `[square] PayOrder close failed AFTER a successful charge (order ${args.checkId}, payment ${payment.id}); the charge stands — the order close needs reconcile:`,
+        e,
+      );
+    }
+    return { paymentId: payment.id, remainingCents: 0, currency: d.currency, replayed: false, feeCollected };
   },
 
   async refundPayment(args: RefundPaymentArgs): Promise<PosRefundResult> {

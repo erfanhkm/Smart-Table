@@ -90,10 +90,18 @@ export type SquarePayment = any;
 
 /** Remaining unpaid amount on an order, from its tenders. */
 export function orderRemaining(order: SquareOrder): number {
+  // Square's own amount-due figure is authoritative when present: a
+  // tender's amount_money INCLUDES its tip, so total - sum(tenders)
+  // double-counts every tip (a fully paid $24.00 bill with a $2.10 tip
+  // read as -$2.10 remaining, proven live 2026-10-24; split payments
+  // with tips likewise under-reported the balance still owed).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const due = (order as any)?.net_amount_due_money?.amount;
+  if (typeof due === 'number') return due;
   const total: number = order?.total_money?.amount ?? 0;
   const paid: number = (order?.tenders ?? []).reduce(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (sum: number, t: any) => sum + (t?.amount_money?.amount ?? 0),
+    (sum: number, t: any) => sum + ((t?.amount_money?.amount ?? 0) - (t?.tip_money?.amount ?? 0)),
     0,
   );
   return total - paid;
