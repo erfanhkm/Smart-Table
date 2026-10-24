@@ -330,13 +330,20 @@ function renderSuccess() {
       status.textContent = t('noReceiptOk');
       lockReceiptButtons();
     } else {
+      if (kind === 'both') {
+        // Print fires IMMEDIATELY (same as the real product) — it is not
+        // gated behind the email step. The email form opens in parallel.
+        state.receiptDone = true;
+        doPrint();
+        status.textContent = t('receiptPrintedOk');
+        lockReceiptButtons();
+      }
       $('emailZone').innerHTML = emailBlockHtml();
       $('rcSend').addEventListener('click', () => {
         const v = $('rcEmail').value.trim();
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) { toast(t('validEmail')); return; }
         state.receiptDone = true;
-        if (kind === 'both') doPrint();
-        status.textContent = t('receiptSentTo', { email: v });
+        status.textContent = (kind === 'both' ? t('receiptPrintedOk') + ' · ' : '') + t('receiptSentTo', { email: v });
         feed('✉️ Receipt emailed to the guest');
         $('emailZone').innerHTML = '';
         lockReceiptButtons();
