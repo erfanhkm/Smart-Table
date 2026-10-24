@@ -19,15 +19,42 @@ async function createPool(): Promise<Pool> {
   }
   // F-3: explicit pool + server-side session timeouts. A wedged query or a
   // transaction left open by a crashed request must never hold locks (or
-  // pool connections) forever: statements die at 15s, lock waits at 5s,
-  // idle-in-transaction sessions at 20s.
-  return new Pool({
+  // pool connections) forever.
+  // v0.8.6 (F5-3): idle-in-transaction raised 20s -> 60s — the payment path
+  // holds a transaction across sequential POS calls (10s timeouts, up to 3
+  // steps plus the no-fee retry), and a slow POS could idle past 20s, after
+  // which Postgres killed the session mid-bookkeeping and stranded the
+  // payment for reconcile. lock_timeout 5s -> 10s for the same reason:
+  // simultaneous payers on one check queue on the check row lock, and a
+  // wallet sheet on the first payer easily exceeds 5s (lock errors are also
+  // mapped to a retryable 409 in the error handler). statement_timeout
+  // stays 15s — request queries are all indexed point lookups; migrations
+  // are small DDL files (a future data-backfill migration must be chunked).
+  const pool = new Pool({
     connectionString: config.databaseUrl,
     max: 10,
     connectionTimeoutMillis: 5_000,
     idleTimeoutMillis: 30_000,
-    options: '-c statement_timeout=15000 -c lock_timeout=5000 -c idle_in_transaction_session_timeout=20000',
+    options: '-c statement_timeout=15000 -c lock_timeout=10000 -c idle_in_transaction_session_timeout=60000',
   });
+  // F5-2: pg.Pool emits 'error' when an IDLE client dies (DB restart,
+  // failover, maintenance, network cut). With no listener Node treats it as
+  // an unhandled error event and the whole process exits — one managed-
+  // Postgres restart would take the API down for every tenant and abort
+  // in-flight payments mid-bookkeeping. Log it; the pool discards the
+  // dead client itself.
+  pool.on('error', (err) => {
+    console.error('[db] idle pool client error (client discarded):', err);
+  });
+  return pool;
+}
+
+/** Close the pool (graceful shutdown). Safe to call once at process exit. */
+export async function closePool(): Promise<void> {
+  if (!poolPromise) return;
+  const pool = await poolPromise;
+  poolPromise = null;
+  await pool.end().catch(() => undefined);
 }
 
 function getPool(): Promise<Pool> {
@@ -55,6 +82,11 @@ export async function query<T = any>(text: string, params?: unknown[]): Promise<
 export async function withTx<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
   const pool = await getPool();
   const client = await pool.connect();
+  // F5-9: if ROLLBACK itself fails, the connection may still sit inside an
+  // aborted transaction — releasing it normally would poison the next user
+  // of that pooled client until the idle timeout. Release with the error
+  // so the pool destroys the connection instead.
+  let destroyClient: Error | undefined;
   try {
     await client.query('BEGIN');
     const out = await fn(client);
@@ -63,11 +95,12 @@ export async function withTx<T>(fn: (client: PoolClient) => Promise<T>): Promise
   } catch (e) {
     // F-11: a failed ROLLBACK must never mask the original error.
     await client.query('ROLLBACK').catch((rbErr) => {
+      destroyClient = rbErr instanceof Error ? rbErr : new Error(String(rbErr));
       console.error('[db] ROLLBACK failed (original error preserved):', rbErr);
     });
     throw e;
   } finally {
-    client.release();
+    client.release(destroyClient);
   }
 }
 
@@ -78,9 +111,18 @@ export async function withTx<T>(fn: (client: PoolClient) => Promise<T>): Promise
  * migrations (F-11), the reconciler (F-6) and refunds (F-9).
  *
  * pg-mem has no advisory locks (nor hashtext): with runIfUnsupported the
- * lock ACQUISITION failure runs fn unlocked instead of throwing. fn's
- * own errors always propagate — they are never mistaken for a lock
- * failure and fn never runs twice.
+ * lock ACQUISITION failure runs fn unlocked instead of throwing — but ONLY
+ * in pg-mem mode (F5-4). In production a transient lock failure (statement
+ * timeout, dropped connection) must surface, never silently disable the
+ * protection for migrations / reconcile / refunds. fn's own errors always
+ * propagate — they are never mistaken for a lock failure and fn never
+ * runs twice.
+ *
+ * Lock keys use the 64-bit hashtextextended form on real Postgres (F5-4):
+ * the 32-bit hashtext space collided across unrelated lock names. If the
+ * unlock fails, the client is destroyed rather than returned to the pool
+ * still holding a session-level lock (which would report "busy" to every
+ * later caller until that backend closed).
  */
 export async function withAdvisoryLock<T>(
   name: string,
@@ -89,25 +131,30 @@ export async function withAdvisoryLock<T>(
 ): Promise<T | null> {
   const pool = await getPool();
   const client = await pool.connect();
+  const hashFn = config.usePgMem ? 'hashtext' : 'hashtextextended';
+  const hashArg = config.usePgMem ? '$1' : '$1, 0';
+  let destroyClient: Error | undefined;
   try {
     let locked: boolean;
     try {
       const res = await client.query<{ locked: boolean }>(
-        `SELECT pg_try_advisory_lock(hashtext($1)) AS locked`,
+        `SELECT pg_try_advisory_lock(${hashFn}(${hashArg})) AS locked`,
         [name],
       );
       locked = !!res.rows[0]?.locked;
     } catch (e) {
-      if (opts.runIfUnsupported) return await fn();
+      if (opts.runIfUnsupported && config.usePgMem) return await fn();
       throw e;
     }
     if (!locked) return null;
     try {
       return await fn();
     } finally {
-      await client.query(`SELECT pg_advisory_unlock(hashtext($1))`, [name]).catch(() => undefined);
+      await client.query(`SELECT pg_advisory_unlock(${hashFn}(${hashArg}))`, [name]).catch((uErr) => {
+        destroyClient = uErr instanceof Error ? uErr : new Error(String(uErr));
+      });
     }
   } finally {
-    client.release();
+    client.release(destroyClient);
   }
 }

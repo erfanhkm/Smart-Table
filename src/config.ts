@@ -14,7 +14,9 @@ export const config = {
   // production guard (webhook verification, db-driver checks, seed refusal).
   isProd: nodeEnv !== 'development' && nodeEnv !== 'test',
   port: parseInt(opt('PORT', '3000'), 10),
-  appUrl: opt('APP_URL', 'http://localhost:3000').replace(/\/$/, ''),
+  // F5-18: strip ALL trailing slashes — a single-strip left 'https://x//'
+  // possible, which breaks the pinned webhook notification URL.
+  appUrl: opt('APP_URL', 'http://localhost:3000').replace(/\/+$/, ''),
   databaseUrl: opt('DATABASE_URL'),
   usePgMem: opt('PG_MEM') === '1',
   // Behind a reverse proxy (TLS terminator / load balancer): trust X-Forwarded-*.
@@ -24,6 +26,10 @@ export const config = {
   // Set TRUST_PROXY_HOPS=0 when running with no proxy in front.
   trustProxy: parseInt(opt('TRUST_PROXY_HOPS', '1'), 10),
   squareEnv: opt('SQUARE_ENV', 'sandbox'),
+  /** F5-8: whether SQUARE_ENV was EXPLICITLY set. The 'sandbox' default made
+   * the startup membership check vacuous — a production deploy that forgot
+   * the variable silently ran in sandbox and no real payment could work. */
+  squareEnvSet: 'SQUARE_ENV' in process.env,
   squareAccessToken: opt('SQUARE_ACCESS_TOKEN'),
   squareLocationId: opt('SQUARE_LOCATION_ID'),
   squareAppId: opt('SQUARE_APP_ID'),
@@ -97,6 +103,11 @@ export type SafetyConfig = Pick<
   | 'adminPasswordHash'
   | 'appUrl'
   | 'squareEnv'
+  | 'squareEnvSet'
+  | 'squareAccessToken'
+  | 'squareLocationId'
+  | 'cloverEnv'
+  | 'resendApiKey'
   | 'helcimApiToken'
   | 'shopifyAdminToken'
   | 'port'
@@ -116,6 +127,11 @@ export type SafetyConfig = Pick<
  *  - APP_URL is not https or points at localhost (the Square webhook URL
  *    is pinned to it; a wrong value silently breaks signature checks),
  *  - SQUARE_ENV is not 'sandbox' or 'production',
+ *  - SQUARE_ENV was not set explicitly at all, SQUARE_ACCESS_TOKEN /
+ *    SQUARE_LOCATION_ID are missing, or a secret is degenerate (a single
+ *    repeated character/byte) — F5-8: these used to degrade into silent
+ *    outages (sandbox payments, uncollected commission) instead of a
+ *    refused boot,
  *  - RENDER is set while NODE_ENV says development/test (a mislabelled
  *    deploy would run with every production guard off),
  *  - PORT / TRUST_PROXY_HOPS did not parse to sane numbers (NaN port =
@@ -156,6 +172,28 @@ export function assertSafeConfig(c: SafetyConfig = config, warn: (msg: string) =
     }
     if (c.squareEnv !== 'sandbox' && c.squareEnv !== 'production') {
       problems.push("SQUARE_ENV must be 'sandbox' or 'production'");
+    }
+    // F5-8: the checks below close the "can't fail / silently dead" gaps
+    // Claude's F5 pass found — each of these previously degraded to a
+    // silent outage (sandbox payments, uncollected commission, unsent
+    // receipts) instead of a refused boot.
+    if (!c.squareEnvSet) {
+      problems.push('SQUARE_ENV must be set explicitly in production (the sandbox default must never decide silently)');
+    }
+    if (!c.squareAccessToken || !c.squareLocationId) {
+      problems.push('SQUARE_ACCESS_TOKEN and SQUARE_LOCATION_ID must be set when NODE_ENV=production (payments and commission collection run on them)');
+    }
+    if (/^(.)\1+$/.test(c.staffApiToken)) {
+      problems.push('STAFF_API_TOKEN is a single repeated character — generate a real random token');
+    }
+    if (/^([0-9a-fA-F]{2})\1{31}$/.test(c.encryptionKeyHex)) {
+      problems.push('ENCRYPTION_KEY is a single repeated byte — generate a real random key');
+    }
+    if (c.cloverEnv !== 'sandbox' && c.cloverEnv !== 'production') {
+      problems.push("CLOVER_ENV must be 'sandbox' or 'production'");
+    }
+    if (!c.resendApiKey) {
+      warnings.push('RESEND_API_KEY is not set — receipt and notification emails will be logged and skipped, never sent.');
     }
     if (c.helcimApiToken || c.shopifyAdminToken) {
       warnings.push(

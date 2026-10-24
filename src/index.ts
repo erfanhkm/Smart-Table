@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { assertSafeConfig, config } from './config.js';
+import { closePool } from './db.js';
 import { httpError } from './http.js';
 import { migrate } from './migrate.js';
 import { rateLimit } from './rate-limit.js';
@@ -34,6 +35,10 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // proxy-addr calls it from the closest hop (0) outward, trusting the first N.
   const hops = config.trustProxy;
   const app = Fastify({
+    // F5-16: an explicit ceiling on how long one request may run — a wedged
+    // handler otherwise holds its connection (and its transaction) open
+    // until a client or proxy gives up.
+    requestTimeout: 30_000,
     // F-5: request logs must never contain guest table tokens — the /t/:token
     // path segment and the ?table_token= query value are bearer secrets.
     logger: (opts.logger ?? true)
@@ -43,8 +48,25 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
               const url = String(req.url ?? '')
                 .replace(/\/t\/[^/?#]+/g, '/t/…')
                 .replace(/([?&]device_id=)[^&#]+/g, '$1…')
+                // F5-15: OAuth callbacks carry code/state (and occasionally
+                // tokens) in the query — same bearer-secret treatment.
+                .replace(/([?&](?:code|state|access_token|refresh_token)=)[^&#]+/g, '$1…')
                 .replace(/([?&]table_token=)[^&#]+/g, '$1…');
               return { method: req.method, url, host: req.hostname };
+            },
+            // F5-15: pino's default err serializer copies a Postgres error's
+            // own properties — including `detail`, which names the offending
+            // VALUES (e.g. an email or token inside a unique violation).
+            // Keep only the operationally useful, value-free fields.
+            err(e: Error & { code?: string; statusCode?: number; errorCode?: string }) {
+              return {
+                type: e?.name ?? 'Error',
+                message: e?.message ?? '',
+                code: e?.code,
+                statusCode: e?.statusCode,
+                errorCode: e?.errorCode,
+                stack: e?.stack ?? '',
+              };
             },
           },
         }
@@ -70,14 +92,36 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // 4xx: the message is meant for the client. 5xx: generic message, details only in the server log
   // (Square error bodies and Postgres errors must never reach the browser).
   app.setErrorHandler((err, req, reply) => {
-    const e = err as { statusCode?: number; message?: string; errorCode?: string };
+    const e = err as { statusCode?: number; message?: string; errorCode?: string; code?: string };
+    // F5-3: a Postgres lock_timeout (55P03) is a transient contention state,
+    // not a server fault — answer a retryable 409 so simultaneous payers on
+    // one check see "payment in progress" instead of a generic 500.
+    if (e.code === '55P03') {
+      req.log.warn({ path: req.url.split('?')[0] }, 'lock timeout — answered 409');
+      return reply.code(409).send({ error: 'another operation is in progress — please retry', code: 'lock_timeout' });
+    }
     const status = typeof e.statusCode === 'number' && e.statusCode >= 400 ? e.statusCode : 500;
     if (status >= 500) {
       req.log.error({ err }, 'request failed');
       return reply.code(500).send({ error: 'internal error' });
     }
-    return reply.code(status).send({ error: e.message ?? 'bad request', ...(e.errorCode ? { code: e.errorCode } : {}) });
+    // F5-14: Fastify framework errors (body too large, unsupported media
+    // type, malformed payloads, validation) carry internal wording — map
+    // them to the same clean messages the API uses everywhere else.
+    let message = e.message ?? 'bad request';
+    if (typeof e.code === 'string' && e.code.startsWith('FST_ERR')) {
+      message =
+        status === 413 ? 'payload too large'
+        : status === 415 ? 'unsupported media type'
+        : status === 404 ? 'not found'
+        : 'bad request';
+    }
+    return reply.code(status).send({ error: message, ...(e.errorCode ? { code: e.errorCode } : {}) });
   });
+
+  // F5-14: one 404 shape for every unmatched route (Fastify's default names
+  // the route and differs from the API's {error} shape).
+  app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'not found' }));
 
   // Security headers on EVERY response (API, portal, admin, guest page,
   // static assets). The portal route sets the same values itself; these are
@@ -109,6 +153,29 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
         reply.header('Cache-Control', 'no-cache');
       }
     }
+    // F5-16: API responses are per-user / per-table state — never storable
+    // by any cache (extends the F4 no-store that covered /api/t/ and
+    // /api/checks/ to the whole API surface).
+    if (urlPath.startsWith('/api/')) {
+      reply.header('Cache-Control', 'no-store');
+    }
+    // F5-10: the strict per-page CSPs are set by the NAMED routes (/portal,
+    // /t/:token, /dashboard). The same files are also reachable as static
+    // assets (/portal/index.html, /t/index.html, ...) where the static
+    // plugin serves them with NO page CSP at all. Any HTML response that
+    // reaches onSend without a CSP gets the portal's strict policy as a
+    // floor, so the direct static URL is never the weakly-protected one.
+    const ctype = reply.getHeader('content-type');
+    if (
+      typeof ctype === 'string' &&
+      ctype.includes('text/html') &&
+      !reply.getHeader('content-security-policy')
+    ) {
+      reply.header(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self' https://*.squarecdn.com https://*.squareup.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://*.squarecdn.com https://*.squareup.com; frame-src https://*.squarecdn.com https://*.squareup.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+      );
+    }
   });
 
   await app.register(fastifyStatic, {
@@ -132,7 +199,10 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     const host = (req.headers.host ?? '').split(':')[0].toLowerCase();
     if (host.endsWith('.onrender.com')) {
       const target = `https://portal.smarttablepay.com${req.url}`;
-      return reply.code(301).header('Location', target).send();
+      // F5-13: 301 makes clients rewrite POSTs into GETs and drop bodies —
+      // a webhook or API caller landing on the fallback host lost its
+      // payload silently. 308 preserves method and body for non-GET.
+      return reply.code(req.method === 'GET' || req.method === 'HEAD' ? 301 : 308).header('Location', target).send();
     }
     if (req.url.startsWith('/api/webhooks/')) return webhookLimiter(req, reply);
     // G-5: match the two money-moving POST routes EXACTLY. The old
@@ -146,6 +216,18 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
       (/^\/api\/checks\/[^/]+\/pay$/.test(pathname) ||
         /^\/api\/checks\/[^/]+\/record-external-payment$/.test(pathname));
     await (isPay ? payLimiter : generalLimiter)(req, reply);
+  });
+
+  // F5-16: guest payloads are tiny (an order, a payment token, a rating).
+  // The framework's 1 MB default body limit on these public routes only
+  // serves memory pressure — cap declared bodies at 64 KB up front.
+  app.addHook('onRequest', async (req, reply) => {
+    if (req.url.split('?')[0].startsWith('/api/t/')) {
+      const len = Number(req.headers['content-length'] ?? 0);
+      if (Number.isFinite(len) && len > 65_536) {
+        return reply.code(413).send({ error: 'payload too large' });
+      }
+    }
   });
 
   // F-11: healthz reports liveness only — the Square environment is
@@ -320,11 +402,37 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
 
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
+  // F5-6: log process-level failures instead of dying silently, and shut
+  // down gracefully — Render sends SIGTERM on every deploy, and the old
+  // behaviour killed in-flight requests mid-flight (a guest payment could
+  // be charged at the POS and lose its bookkeeping to the restart).
+  // app.close() stops accepting new connections and drains the in-flight
+  // ones; a hard deadline keeps us inside Render's kill window.
+  process.on('unhandledRejection', (e) => {
+    console.error('[smart-table] unhandled rejection:', e);
+  });
   try {
     const app = await buildApp();
     await migrate();
     await app.listen({ port: config.port, host: '0.0.0.0' });
     console.log(`[smart-table] listening on :${config.port} (square: ${config.squareEnv}, env: ${config.nodeEnv})`);
+    let closing = false;
+    const shutdown = (signal: string) => {
+      if (closing) return;
+      closing = true;
+      console.log(`[smart-table] ${signal} — draining in-flight requests…`);
+      setTimeout(() => process.exit(1), 10_000).unref();
+      app
+        .close()
+        .then(() => closePool())
+        .then(() => process.exit(0))
+        .catch((e) => {
+          console.error('[smart-table] graceful shutdown failed:', e);
+          process.exit(1);
+        });
+    };
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
   } catch (e) {
     console.error('[smart-table] refusing to start:', e instanceof Error ? e.message : e);
     process.exit(1);

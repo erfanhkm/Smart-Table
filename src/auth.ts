@@ -33,7 +33,15 @@ export function extractBearer(header: string | undefined): string | null {
  * On a portal token the user's identity is attached to the request for per-user scoping. */
 export async function requireStaff(req: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | undefined> {
   const token = extractBearer(req.headers.authorization);
-  if (token && isValidStaffToken(token)) return undefined;
+  if (token && isValidStaffToken(token)) {
+    // F5-1 (mitigation): the shared staff token bypasses tenant scoping BY
+    // DESIGN (it is the venue staff-device credential) — so every use is
+    // audit-logged with route + caller, giving the trail Claude's review
+    // found missing. The structural fix (per-location, revocable device
+    // tokens) is scheduled pre-pilot with the C-14/A-13 token work.
+    req.log.info({ path: req.url.split('?')[0], ip: req.ip }, 'staff token authenticated');
+    return undefined;
+  }
   if (token) {
     const user = await getPortalUser(token);
     if (user) {
@@ -64,7 +72,10 @@ export function assertPortalLocation(req: FastifyRequest, locationId: string | n
 /** Role gate for portal users (refunds, cash recording, settings, QR, billing writes). */
 export function requirePortalRole(req: FastifyRequest, ...roles: string[]): void {
   const u = req.portalUser;
-  if (u && !roles.includes(u.role)) throw forbidden(`requires role: ${roles.join(' or ')}`);
+  // F5-19: the client gets a generic denial — the required roles are an
+  // internal authorization detail, not something an error should teach a
+  // caller probing the API.
+  if (u && !roles.includes(u.role)) throw forbidden('forbidden');
 }
 
 /**

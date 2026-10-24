@@ -19,10 +19,23 @@ export function encryptSecret(plain: string): string {
 }
 
 export function decryptSecret(enc: string): string {
-  const [ivB64, ctB64, tagB64] = enc.split('.');
-  if (!ivB64 || !ctB64 || !tagB64) throw new Error('malformed encrypted secret');
+  const parts = enc.split('.');
+  if (parts.length !== 3) throw new Error('malformed encrypted secret');
+  const [ivB64, ctB64, tagB64] = parts;
+  // F5-20: an empty PLAINTEXT is legitimate (a stored credential with no
+  // refresh token encrypts ''), and its ciphertext segment is empty too.
+  // The old truthiness check rejected it as malformed, so such credentials
+  // threw on every decrypt. Only missing segments are malformed.
+  if (ivB64 === undefined || ctB64 === undefined || tagB64 === undefined || !ivB64 || !tagB64) {
+    throw new Error('malformed encrypted secret');
+  }
+  const tag = Buffer.from(tagB64, 'base64');
+  // F5-7 (partial): pin the GCM auth tag at the full 16 bytes — Node
+  // otherwise accepts truncated tags in some versions, weakening the
+  // integrity guarantee.
+  if (tag.length !== 16) throw new Error('malformed encrypted secret');
   const decipher = createDecipheriv('aes-256-gcm', encKey(), Buffer.from(ivB64, 'base64'));
-  decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
+  decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(Buffer.from(ctB64, 'base64')), decipher.final()]).toString('utf8');
 }
 
@@ -44,7 +57,11 @@ const scryptAsync = promisify(scryptCb);
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
-  const hash = (await scryptAsync(password, salt, 64)) as Buffer;
+  // F5-21 (partial): NFC-normalize so the same password typed with composed
+  // vs decomposed characters (different keyboards/OSes) hashes identically.
+  // (Cost-parameter versioning stays with the A-11 deferral — changing the
+  // KDF cost without storing the params would invalidate existing hashes.)
+  const hash = (await scryptAsync(password.normalize('NFC'), salt, 64)) as Buffer;
   return `scrypt$${salt.toString('hex')}$${hash.toString('hex')}`;
 }
 
@@ -54,6 +71,6 @@ export async function verifyPassword(password: string, stored: string): Promise<
   const salt = Buffer.from(parts[1], 'hex');
   const expected = Buffer.from(parts[2], 'hex');
   if (salt.length !== 16 || expected.length !== 64) return false;
-  const actual = (await scryptAsync(password, salt, 64)) as Buffer;
+  const actual = (await scryptAsync(password.normalize('NFC'), salt, 64)) as Buffer;
   return timingSafeEqual(actual, expected);
 }
