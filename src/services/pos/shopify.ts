@@ -28,6 +28,7 @@
 //   [S4] webhook topic names + HMAC verification against a real delivery.
 //   [S5] currency field presence on draft orders.
 import { createHmac, timingSafeEqual } from 'crypto';
+import { getMenuCached } from './menu-cache.js';
 import { config } from '../../config.js';
 import { badRequest } from '../../http.js';
 import {
@@ -93,6 +94,7 @@ async function sh<T>(shop: string, method: string, path: string, body?: unknown,
   if (!t) throw new Error('shopify is not connected for this location (no POS credential stored)');
   const res = await fetch(adminBase(shop) + path, {
     method,
+    redirect: 'error',
     signal: AbortSignal.timeout(10_000),
     headers: {
       'X-Shopify-Access-Token': t,
@@ -186,6 +188,20 @@ export const shopifyAdapter: PosAdapter = {
     token?: string,
   ): Promise<PosPaymentResult> {
     const { shop, draftId } = splitCheckId(checkId);
+    // F3-6: completing a draft settles the WHOLE draft, so (a) a partial
+    // amount must never complete it (the amount used to be ignored — a $1
+    // cash entry closed a $100 bill), and (b) the call must be replay-safe:
+    // an already-completed draft is a success, not Shopify's "already
+    // completed" error surfacing as a definitive payment failure.
+    const before: AnyObj = await sh(shop, 'GET', `/draft_orders/${draftId}.json`, undefined, token);
+    if (!before?.draft_order) throw badRequest('draft order not found');
+    const beforeDet = mapDetail(before.draft_order);
+    if (beforeDet.state !== 'OPEN') {
+      return { paymentId: String(before.draft_order?.order_id ?? ''), remainingCents: 0, currency: beforeDet.currency, replayed: true };
+    }
+    if (amountCents < beforeDet.remainingCents) {
+      throw badRequest('partial external payments are not supported for Shopify — record the full remaining amount');
+    }
     // [S3] verify the payment body: completing a draft order creates the
     // paid order. payment_gateway_id maps manual payment methods (e.g. Cash)
     // when the caller passes a numeric method; otherwise complete with a
@@ -195,11 +211,21 @@ export const shopifyAdapter: PosAdapter = {
       : { note: `Smart Table external payment (${method}) [${idempotencyKey.slice(0, 32)}]` };
     // Currency sanity: Shopify totals are in the draft's currency.
     void currency;
-    void amountCents;
     // [S3] verified 2026-10-15: complete is PUT (not POST) —
-    // PUT /draft_orders/{id}/complete.json. payment_gateway_id maps manual
-    // payment methods (e.g. Cash) when the caller passes a numeric method.
-    const data: AnyObj = await sh(shop, 'PUT', `/draft_orders/${draftId}/complete.json`, body, token);
+    // PUT /draft_orders/{id}/complete.json.
+    let data: AnyObj;
+    try {
+      data = await sh(shop, 'PUT', `/draft_orders/${draftId}/complete.json`, body, token);
+    } catch (e) {
+      // Lost response or double submit: re-read — if the draft completed
+      // anyway, that is the recorded success, not a failure.
+      const after: AnyObj = await sh(shop, 'GET', `/draft_orders/${draftId}.json`, undefined, token).catch(() => null);
+      const afterDet = after?.draft_order ? mapDetail(after.draft_order) : null;
+      if (afterDet && afterDet.state !== 'OPEN') {
+        return { paymentId: String(after.draft_order?.order_id ?? ''), remainingCents: 0, currency: afterDet.currency, replayed: true };
+      }
+      throw e;
+    }
     const order: AnyObj = data?.draft_order ?? {};
     const det = mapDetail(order);
     return {
@@ -261,7 +287,9 @@ export const shopifyAdapter: PosAdapter = {
   async createCheck(args: CreateCheckArgs): Promise<{ checkId: string }> {
     const shop = assertShop(args.locationRef);
     if (!args.items.length) throw new Error('order must have at least one item');
-    const menu = await this.getMenu!(shop, args.token);
+    // F3-12: validate against the shared menu cache (same D-10 fix
+    // Clover already had) instead of a fresh full-catalog fetch.
+    const menu = await getMenuCached(this, 'shopify', shop, args.token);
     const byId = new Map(menu.map((m) => [m.id, m]));
     const lineItems = args.items.map((i) => {
       const m = byId.get(i.menuItemId);

@@ -20,6 +20,7 @@ import { verifySquareWebhook } from '../crypto.js';
 import { assertPosType, PosType } from '../services/pos/types.js';
 import { getAdapter } from '../services/pos/registry.js';
 import { getCheckPos } from '../services/pos/context.js';
+import { raiseServiceAlert } from '../services/alerts.js';
 
 export const WEBHOOK_PATH = '/api/webhooks/square';
 
@@ -34,7 +35,9 @@ export const WEBHOOK_PATH = '/api/webhooks/square';
 export function webhookNotificationUrl(
   c: { appUrl: string } = config,
 ): string {
-  return `${c.appUrl}${WEBHOOK_PATH}`;
+  // Normalize a trailing slash in APP_URL — a doubled slash would break
+  // the URL Square signed and fail every verification.
+  return `${c.appUrl.replace(/\/+$/, '')}${WEBHOOK_PATH}`;
 }
 
 /**
@@ -74,24 +77,44 @@ async function applyCheckUpdated(posType: PosType, checkRef: string): Promise<vo
   if (c.rowCount === 0 || c.rows[0].state !== 'OPEN') return;
   const ctx = await getCheckPos(c.rows[0].id);
   const detail = await ctx.adapter.getCheckDetail(checkRef, ctx.token);
-  if (detail.state === 'CLOSED') {
+  // F3-4: CLOSED alone is not proof of payment — adapters map any
+  // non-open state to CLOSED (voided, refunded, in-progress...). Close
+  // only when the POS also shows the bill fully settled.
+  if (detail.state === 'CLOSED' && detail.remainingCents === 0) {
     await applyCheckClosed(posType, checkRef);
   }
 }
 
 async function applyCheckClosed(posType: PosType, checkRef: string): Promise<void> {
+  // F3-5: transition guard — only the OPEN->COMPLETED edge acts. A late
+  // or repeated event for an already-completed check must not re-flip
+  // its (possibly re-seated) table or insert duplicate 'paid' events.
   const c = await query(
-    `UPDATE checks SET state='COMPLETED' WHERE pos_type=$1 AND external_check_ref=$2 RETURNING id, table_id`,
+    `UPDATE checks SET state='COMPLETED' WHERE pos_type=$1 AND external_check_ref=$2 AND state <> 'COMPLETED' RETURNING id, table_id`,
     [posType, checkRef],
   );
   if (c.rowCount > 0 && c.rows[0].table_id) {
-    await query(`UPDATE tables SET state='PAID' WHERE id=$1`, [c.rows[0].table_id]);
-    await query(`INSERT INTO events(id, table_id, check_id, type) VALUES($1,$2,$3,'paid')`, [
-      randomUUID(),
-      c.rows[0].table_id,
-      c.rows[0].id,
-    ]);
+    await flipTablePaid(c.rows[0].table_id, c.rows[0].id);
   }
+}
+
+/**
+ * Mark a table PAID + record the 'paid' event — but only when the table
+ * has no OTHER open check: a stale closure must never flip a table that
+ * has since been re-seated with a new party (F3-5).
+ */
+async function flipTablePaid(tableId: string, checkId: string): Promise<void> {
+  const other = await query(`SELECT id FROM checks WHERE table_id=$1 AND state='OPEN' AND id <> $2 LIMIT 1`, [
+    tableId,
+    checkId,
+  ]);
+  if (other.rowCount > 0) return;
+  await query(`UPDATE tables SET state='PAID' WHERE id=$1`, [tableId]);
+  await query(`INSERT INTO events(id, table_id, check_id, type) VALUES($1,$2,$3,'paid')`, [
+    randomUUID(),
+    tableId,
+    checkId,
+  ]);
 }
 
 export async function webhookRoutes(app: FastifyInstance) {
@@ -137,16 +160,36 @@ export async function webhookRoutes(app: FastifyInstance) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const order = evt.data?.object?.order as any;
         if (order?.id && order.state === 'COMPLETED') {
-          const c = await query(`UPDATE checks SET state='COMPLETED' WHERE square_order_id=$1 RETURNING id, table_id`, [
-            order.id,
-          ]);
+          // F3-5: same transition guard as applyCheckClosed — repeated or
+          // late COMPLETED events for an old order are inert.
+          const c = await query(
+            `UPDATE checks SET state='COMPLETED' WHERE square_order_id=$1 AND state <> 'COMPLETED' RETURNING id, table_id`,
+            [order.id],
+          );
           if (c.rowCount > 0 && c.rows[0].table_id) {
-            await query(`UPDATE tables SET state='PAID' WHERE id=$1`, [c.rows[0].table_id]);
-            await query(`INSERT INTO events(id, table_id, check_id, type) VALUES($1,$2,$3,'paid')`, [
-              randomUUID(),
-              c.rows[0].table_id,
-              c.rows[0].id,
-            ]);
+            await flipTablePaid(c.rows[0].table_id, c.rows[0].id);
+          }
+        }
+      } else if (evt.type === 'refund.updated' || evt.type === 'refund.created') {
+        // F3-11 (partial): a refund completed in the Square dashboard used
+        // to be silently dropped. Flag it for staff review as a service
+        // alert; money rows and fee reversal stay with the refund
+        // reconciliation work (F1-11) — nothing is auto-adjusted here.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const refund = evt.data?.object?.refund as any;
+        if (refund?.payment_id && String(refund?.status ?? '').toUpperCase() === 'COMPLETED') {
+          const pay = await query(
+            `SELECT c.id AS check_id, c.table_id, c.location_id FROM payments p JOIN checks c ON c.id = p.check_id WHERE p.square_payment_id = $1`,
+            [refund.payment_id],
+          );
+          if (pay.rowCount > 0 && pay.rows[0].table_id) {
+            await raiseServiceAlert({
+              locationId: pay.rows[0].location_id,
+              tableId: pay.rows[0].table_id,
+              checkId: pay.rows[0].check_id,
+              kind: 'external_refund',
+              comment: `Refund completed in Square (refund ${String(refund.id ?? '')}) — review this payment; the commission is not auto-reversed.`,
+            });
           }
         }
       } else if (evt.type === 'payment.updated') {
@@ -197,12 +240,29 @@ export async function webhookRoutes(app: FastifyInstance) {
         headers: req.headers as Record<string, string | string[] | undefined>,
         rawBody: raw,
         body: req.body,
-        notificationUrl: `${config.appUrl}/api/webhooks/${posType}`,
+        notificationUrl: `${config.appUrl.replace(/\/+$/, '')}/api/webhooks/${posType}`,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      req.log.warn(`webhook rejected for ${posType}: ${msg}`);
-      return reply.code(401).send({ error: 'invalid webhook signature' });
+      // F3-13: every failure used to be a 401 'invalid webhook signature' —
+      // a missing secret or an unparseable payload was indistinguishable
+      // from an attack, and providers may disable endpoints that keep
+      // failing. 503 = our misconfiguration, 401 = verification failure,
+      // 400 = malformed payload.
+      const status = /not configured|is not set|not implemented/i.test(msg)
+        ? 503
+        : /signature|invalid .* key|hmac/i.test(msg)
+          ? 401
+          : 400;
+      req.log.warn(`webhook rejected for ${posType} (${status}): ${msg}`);
+      return reply.code(status).send({
+        error:
+          status === 401
+            ? 'invalid webhook signature'
+            : status === 503
+              ? 'webhook verification is not configured'
+              : 'malformed webhook payload',
+      });
     }
 
     let applied = 0;

@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { query } from '../db.js';
 
-export type ServiceAlertKind = 'low_rating' | 'waiter_repeat';
+export type ServiceAlertKind = 'low_rating' | 'waiter_repeat' | 'external_refund';
 
 export async function raiseServiceAlert(a: {
   locationId: string;

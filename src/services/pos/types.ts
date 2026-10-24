@@ -68,7 +68,14 @@ export interface PosOpenCheckSummary {
 export interface PosPaymentResult {
   /** POS-native payment id. */
   paymentId: string;
-  remainingCents: number;
+  /**
+   * Remaining balance after this payment — or null when the money moved
+   * but the adapter's read-back failed (v0.8.3, F3-1). Null means UNKNOWN:
+   * never proof of completion. payCheck keeps the pre-charge remaining so
+   * the check cannot auto-complete on an unknown balance; the live bill
+   * view and reconcile recompute the true figure from the POS.
+   */
+  remainingCents: number | null;
   currency: string;
   /** True when the idempotency key replayed an already-recorded payment. */
   replayed: boolean;

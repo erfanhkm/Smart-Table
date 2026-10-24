@@ -74,6 +74,7 @@ const TOKEN_BASE =
 async function ecom<T>(method: string, path: string, body: unknown, privateToken: string, clientIp?: string): Promise<T> {
   const res = await fetch(ECOM_BASE + path, {
     method,
+    redirect: 'error',
     signal: AbortSignal.timeout(10_000),
     headers: {
       Authorization: `Bearer ${privateToken}`,
@@ -133,6 +134,7 @@ async function cl<T>(method: string, path: string, body?: unknown, token?: strin
   if (!t) throw new Error('clover is not connected for this location (no POS credential stored)');
   const res = await fetch(REST_BASE + path, {
     method,
+    redirect: 'error',
     signal: AbortSignal.timeout(10_000),
     headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -169,7 +171,11 @@ function mapDetail(order: AnyObj): PosCheckDetail {
   // does not persist unitQty for fixed-price items (returns null) — each
   // line item is 1 unit, so quantity = number of line items with that name.
   // Order.total is also absent; total = sum(line item prices).
-  const rawItems = (order?.lineItems?.elements ?? order?.lineItems ?? []) as AnyObj[];
+  // F3-8: never bill for lines the POS marks voided/refunded/deleted
+  // (present on some Clover payloads; absent fields keep the line).
+  const rawItems = ((order?.lineItems?.elements ?? order?.lineItems ?? []) as AnyObj[]).filter(
+    (li) => li?.voided !== true && li?.refunded !== true && li?.deleted !== true,
+  );
   const items = rawItems.map((li: AnyObj) => ({
     name: String(li?.name ?? 'Item'),
     quantity: 1,
@@ -278,17 +284,24 @@ export const cloverAdapter: PosAdapter = {
       },
       token,
     );
-    const order: AnyObj = await cl(
-      'GET',
-      `/v3/merchants/${mId}/orders/${orderId}?expand=payments`,
-      undefined,
-      token,
-    );
-    const d = mapDetail(order);
+    // F3-1: the payment is already recorded at Clover. A failed read-back
+    // (e.g. an expired OAuth token -> 401) must NOT surface as a payment
+    // failure — the caller would mark the row FAILED and the guest would
+    // pay twice. Unknown remaining is reported as null instead.
+    let d: PosCheckDetail | null = null;
+    try {
+      const order: AnyObj = await cl(
+        'GET',
+        `/v3/merchants/${mId}/orders/${orderId}?expand=payments`,
+        undefined,
+        token,
+      );
+      d = mapDetail(order);
+    } catch { /* read-back is best-effort after the money moved */ }
     return {
       paymentId: String(payment?.id ?? ''),
-      remainingCents: d.remainingCents,
-      currency: d.currency,
+      remainingCents: d ? d.remainingCents : null,
+      currency: d?.currency ?? currency,
       replayed: false,
     };
   },
@@ -327,17 +340,22 @@ export const cloverAdapter: PosAdapter = {
     if (!paymentId) throw new Error('Clover order pay returned no payment id');
 
     const [mId] = [pathSeg(mIdRaw, 'merchant_id')];
-    const order: AnyObj = await cl(
-      'GET',
-      `/v3/merchants/${mId}/orders/${orderId}?expand=payments`,
-      undefined,
-      args.token,
-    );
-    const d = mapDetail(order);
+    // F3-1: same rule as recordExternalPayment — the charge has landed;
+    // a failed read-back yields an unknown remaining, never a fake decline.
+    let d: PosCheckDetail | null = null;
+    try {
+      const order: AnyObj = await cl(
+        'GET',
+        `/v3/merchants/${mId}/orders/${orderId}?expand=payments`,
+        undefined,
+        args.token,
+      );
+      d = mapDetail(order);
+    } catch { /* read-back is best-effort after the money moved */ }
     return {
       paymentId,
-      remainingCents: d.remainingCents,
-      currency: d.currency,
+      remainingCents: d ? d.remainingCents : null,
+      currency: d?.currency ?? args.currency,
       replayed: false,
     };
   },
@@ -423,9 +441,13 @@ export const cloverAdapter: PosAdapter = {
     try {
       // 2. Attach line items. Clover v3 ignores unitQty for fixed-price items,
       // so one line item per unit (verified in sandbox 2026-10-15).
+      // F3-12: an OVERALL deadline — up to 40 sequential 10s calls could
+      // otherwise hang an order creation for minutes.
+      const deadline = Date.now() + 90_000;
       for (const i of args.items) {
         const m = byId.get(i.menuItemId)!;
         for (let n = 0; n < Math.floor(i.quantity); n++) {
+          if (Date.now() > deadline) throw new Error('clover order creation exceeded the overall deadline');
           await cl(
             'POST',
             `/v3/merchants/${mId}/orders/${orderId}/line_items`,
@@ -436,7 +458,11 @@ export const cloverAdapter: PosAdapter = {
       }
     } catch (e) {
       // M2 fix: void the partial order instead of leaving it orphaned.
-      await cl('POST', `/v3/merchants/${mId}/orders/${orderId}`, { state: 'voided' }, args.token).catch(() => undefined);
+      // F3-12: a failed void is logged loudly — a half-built order sitting
+      // in the kitchen queue must be findable, never silent.
+      await cl('POST', `/v3/merchants/${mId}/orders/${orderId}`, { state: 'voided' }, args.token).catch(
+        (voidErr) => console.error(`[clover] FAILED to void partial order ${orderId} — it may sit in the POS queue:`, voidErr),
+      );
       throw e;
     }
     return { checkId: `${args.locationRef}:${orderId}` };

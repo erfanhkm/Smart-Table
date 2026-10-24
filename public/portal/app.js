@@ -559,8 +559,8 @@ async function renderServiceAlerts() {
   $('service-alerts').innerHTML = alerts.map((a) => `
     <div class="order-row">
       <div class="grow">
-        <div class="tname">${a.kind === 'low_rating' ? '🚨' : '🔔'} ${esc(a.table_name || 'Table')}${a.kind === 'low_rating' && a.rating ? ` — ${a.rating}★ rating` : ' — repeated waiter calls'}</div>
-        <div class="meta">${a.comment ? esc(a.comment) + ' · ' : ''}${esc(timeAgo(a.created_at))} · go to the table now</div>
+        <div class="tname">${a.kind === 'low_rating' ? '🚨' : a.kind === 'external_refund' ? '↩️' : '🔔'} ${esc(a.table_name || 'Table')}${a.kind === 'low_rating' && a.rating ? ` — ${a.rating}★ rating` : a.kind === 'external_refund' ? ' — refund completed in Square' : ' — repeated waiter calls'}</div>
+        <div class="meta">${a.comment ? esc(a.comment) + ' · ' : ''}${esc(timeAgo(a.created_at))} · ${a.kind === 'external_refund' ? 'review this payment' : 'go to the table now'}</div>
       </div>
       <button class="btn btn-sm" data-resolve-alert="${esc(a.id)}">Resolved</button>
     </div>`).join('');

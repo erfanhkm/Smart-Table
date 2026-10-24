@@ -573,7 +573,10 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
         });
         chargeCreated = true;
         externalPaymentId = res.paymentId;
-        newRemaining = res.remainingCents;
+        // F3-1: null remaining = the charge landed but the read-back
+        // failed. Keep the pre-charge remaining (> 0 here) so the check
+        // can never auto-complete on an unknown balance.
+        newRemaining = res.remainingCents ?? remaining;
         resultCurrency = res.currency || currency;
         if (feeCents > 0 && ctx.locationId) {
           // Autocommit on purpose (same reasoning as the H5 tender-ref write
@@ -639,7 +642,10 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
         );
         chargeCreated = true;
         externalPaymentId = res.paymentId;
-        newRemaining = res.remainingCents;
+        // F3-1: null remaining = the charge landed but the read-back
+        // failed. Keep the pre-charge remaining (> 0 here) so the check
+        // can never auto-complete on an unknown balance.
+        newRemaining = res.remainingCents ?? remaining;
         resultCurrency = res.currency || currency;
         // H5 parity with the card/Square branches: persist the POS ref
         // outside the transaction so a rollback leaves the row reconcilable.

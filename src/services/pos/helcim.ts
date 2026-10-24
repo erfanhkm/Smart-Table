@@ -93,6 +93,7 @@ async function hc<T>(method: string, path: string, body?: unknown, token?: strin
   if (idempotencyKey) headers['idempotency-key'] = idempotencyKey.replace(/[^A-Za-z0-9]/g, '').slice(0, 25).padEnd(25, '0');
   const res = await fetch(API_BASE + path, {
     method,
+    redirect: 'error',
     signal: AbortSignal.timeout(10_000),
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -224,25 +225,38 @@ class HelcimAdapter implements PosAdapter {
       apiToken,
       args.idempotencyKey,
     );
-    // E-7: success requires BOTH signals we know — responseCode "0"
+    // E-7 + F3-3: success requires BOTH signals we know — responseCode "0"
     // (APPROVED, per devdocs + community SDKs) AND a real transactionId.
     // A response missing either is an UNKNOWN SHAPE: the money may have
     // moved, so it must surface as outcome-unknown (5xx = non-definitive,
     // the payment row stays PENDING for reconciliation), never as a
-    // decline. A present, non-"0" responseCode is a definitive decline.
+    // decline. F3-3: a present, non-"0" responseCode used to throw a
+    // DEFINITIVE 402 on the strength of that same unverified assumption —
+    // if Helcim's real decline vocabulary differs, an approved purchase
+    // would be recorded as declined and charged again. Until the sandbox
+    // confirms the codes [S6], non-"0" is unknown too. Go-live blocker.
     const responseCode = purchase?.responseCode;
     const transactionId = purchase?.transactionId;
     if (responseCode !== undefined && responseCode !== null && String(responseCode) !== '0') {
-      throw new HelcimError(402, purchase);
+      throw new HelcimError(502, { message: 'unrecognized Helcim responseCode — outcome unknown until sandbox verification', purchase });
     }
     if (String(responseCode ?? '') !== '0' || !transactionId) {
       throw new HelcimError(502, { message: 'unrecognized Helcim purchase response shape — outcome unknown', purchase });
     }
-    const detail = await this.getCheckDetail(invoiceId, args.token);
+    // F3-1: the purchase has landed. A failed read-back must not turn a
+    // successful charge into a reported failure — unknown remaining (null)
+    // leaves the row reconcilable instead of inviting a second charge.
+    let remainingCents: number | null = null;
+    let currencyOut = args.currency;
+    try {
+      const detail = await this.getCheckDetail(invoiceId, args.token);
+      remainingCents = detail.remainingCents;
+      currencyOut = detail.currency;
+    } catch { /* read-back is best-effort after the money moved */ }
     return {
       paymentId: String(transactionId),
-      remainingCents: detail.remainingCents,
-      currency: detail.currency,
+      remainingCents,
+      currency: currencyOut,
       replayed: false,
     };
   }
@@ -273,6 +287,9 @@ class HelcimAdapter implements PosAdapter {
         helcimPayJs: 'https://secure.helcim.app/helcim-pay/services/start.js',
       },
     };
+    // F3-9: opportunistically evict expired entries so the cache Map
+    // cannot accumulate stale sessions forever.
+    for (const [k, v] of helcimConfigCache) if (v.expiresAt <= Date.now()) helcimConfigCache.delete(k);
     helcimConfigCache.set(cacheKey, { config: cfg, expiresAt: Date.now() + 60_000 });
     return cfg;
   }
@@ -289,12 +306,26 @@ class HelcimAdapter implements PosAdapter {
     // [S3] unverified: docs say the system auto-sets PAID when a payment
     // requirement is met; whether a direct status update is accepted for an
     // externally-collected payment must be confirmed in the sandbox.
-    // Idempotency: re-read first — if already PAID, replay the result.
-    const current = await this.getCheckDetail(id, token);
-    if (current.state !== 'OPEN') {
-      return { paymentId: `helcim-${id}`, remainingCents: current.remainingCents, currency: current.currency, replayed: true };
+    // F3-6: gate on the RAW invoice status. The old mapped-state replay
+    // treated ANY non-OPEN invoice — including CANCELLED and REFUNDED —
+    // as a successful replay, and the amount was ignored entirely, so a
+    // $1 entry flipped a $100 invoice to PAID. Now: PAID/COMPLETED replay
+    // as success, DUE proceeds, everything else is rejected, and partial
+    // amounts are refused (this adapter settles the whole invoice).
+    const raw: AnyObj = await hc('GET', `/invoices/${id}`, undefined, token);
+    const inv0 = raw?.invoice ?? raw;
+    if (!inv0?.invoiceId) throw new HelcimError(404, { message: 'invoice not found' });
+    const status = String(inv0?.status ?? '').toUpperCase();
+    const current = mapDetail(inv0);
+    if (status === 'PAID' || status === 'COMPLETED') {
+      return { paymentId: `helcim-${id}`, remainingCents: 0, currency: current.currency, replayed: true };
     }
-    void amountCents;
+    if (status !== 'DUE') {
+      throw badRequest(`invoice is ${status || 'unknown'} — an external payment cannot be recorded on it`);
+    }
+    if (amountCents < current.remainingCents) {
+      throw badRequest('partial external payments are not supported for Helcim — record the full remaining amount');
+    }
     void currency;
     void method;
     void idempotencyKey;
