@@ -12,8 +12,8 @@
 //     per check.
 //  4. C-6: a receipt email binds to the payment_id, claims the one-send
 //     slot atomically, and refuses a second send for the same payment.
-//  5. C-8: call-waiter lives under the table token; the old bare-UUID
-//     route is gone.
+//  5. C-8: the guest call-waiter route is GONE (Erfan, 2026-10-23):
+//     waiter calls live on the STT-101 device's physical button only.
 //  6. C-9: an order attempt that fails with an UNKNOWN outcome stays
 //     PENDING (same key resumable after the stale window), while a
 //     definitive POS rejection marks it FAILED.
@@ -268,15 +268,13 @@ describe('v0.6.7 batch 3 — guest endpoints (HTTP)', () => {
     if (app) await app.close();
   });
 
-  it('C-8: call-waiter works under the table token; the bare-UUID route is gone', async () => {
-    const ok = await app.inject({ method: 'POST', url: `/api/t/${tableToken}/call-waiter` });
-    assert.equal(ok.statusCode, 200);
-    const ev = await query(`SELECT COUNT(*)::int AS n FROM events WHERE table_id = $1 AND type = 'call_waiter'`, [tableId]);
-    assert.equal(ev.rows[0].n, 1);
+  it('C-8: guest call-waiter is gone — waiter calls live on the device button only', async () => {
+    const res = await app.inject({ method: 'POST', url: `/api/t/${tableToken}/call-waiter` });
+    assert.equal(res.statusCode, 404);
     const gone = await app.inject({ method: 'POST', url: `/api/tables/${tableId}/call-waiter` });
     assert.equal(gone.statusCode, 404);
-    const bad = await app.inject({ method: 'POST', url: `/api/t/nope-token/call-waiter` });
-    assert.equal(bad.statusCode, 400);
+    const ev = await query(`SELECT COUNT(*)::int AS n FROM events WHERE table_id = $1 AND type = 'call_waiter'`, [tableId]);
+    assert.equal(ev.rows[0].n, 0);
   });
 
   it('C-7: loyalty counts only against a settled payment, once per check', async () => {

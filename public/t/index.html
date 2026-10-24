@@ -89,10 +89,6 @@
         .pay-footer { position: fixed; bottom: 0; left: 0; right: 0; max-width: 480px; margin: 0 auto; background: white; padding: 16px 20px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; box-shadow: 0 -4px 12px rgba(0,0,0,0.05); }
         .btn-primary { background: var(--navy); color: white; border: none; border-radius: 14px; padding: 16px; font-size: 1.05rem; font-weight: 600; cursor: pointer; text-align: center; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; }
         .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
-
-        .floating-waiter { position: fixed; bottom: 85px; right: 20px; background: white; border: 1px solid var(--border); color: var(--navy); padding: 10px 16px; border-radius: 30px; font-size: 0.85rem; font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,0.1); cursor: pointer; display: flex; align-items: center; gap: 6px; z-index: 10; }
-        
-        [dir="rtl"] .floating-waiter { right: auto; left: 20px; }
         #lang-select option { color: #111; }
         .trust-badge { text-align: center; font-size: 0.75rem; color: var(--text-muted); padding: 4px 0; }
         /* Wallets (Apple Pay / Google Pay): SDK renders its own buttons inside these mounts */
@@ -117,7 +113,7 @@
         @media print {
             body { background: white; }
             .app-container { box-shadow: none; max-width: 100%; }
-            header, .floating-waiter, .pay-footer, .success-icon, [data-action="print"], [data-action="email-toggle"], #email-receipt-box { display: none !important; }
+            header, .pay-footer, .success-icon, [data-action="print"], [data-action="email-toggle"], #email-receipt-box { display: none !important; }
             .content { padding: 0; overflow: visible; }
             .card { box-shadow: none; break-inside: avoid; }
         }
@@ -137,10 +133,6 @@
                 <p>Connecting securely to the restaurant.</p>
             </div>
         </div>
-
-        <button class="floating-waiter" id="btn-call-waiter" data-action="waiter">
-            🔔 Call Waiter
-        </button>
 
         <div class="pay-footer" id="pay-footer" style="display: none;">
             <div id="wallet-area" style="display: none;">

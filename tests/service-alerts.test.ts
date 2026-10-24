@@ -7,8 +7,8 @@
 //  3. Dedupe: a second low rating while an alert is open adds no duplicate.
 //  4. Resolve: another location's portal user gets 404; staff token resolves;
 //     the open list empties.
-//  5. Waiter spam: 2 calls = no alert; the 3rd call within 10 minutes raises
-//     a waiter_repeat alert.
+//  5. Waiter spam via the DEVICE button: 2 calls = no alert; the 3rd call
+//     within 10 minutes raises a waiter_repeat alert.
 //
 // Run: PG_MEM=1 npx tsx --test tests/service-alerts.test.ts
 import { describe, it, before } from 'node:test';
@@ -90,13 +90,24 @@ describe('idea 1: service recovery alerts', () => {
     assert.equal((await openAlerts()).length, 0);
   });
 
-  it('third waiter call within 10 minutes raises a waiter_repeat alert', async () => {
-    for (let i = 0; i < 2; i++) {
-      const res = await app.inject({ method: 'POST', url: `/api/t/tok1/call-waiter` });
-      assert.equal(res.statusCode, 200);
-    }
+  it('third waiter call within 10 minutes raises a waiter_repeat alert (device button)', async () => {
+    // Waiter calls come from the table device's physical button only —
+    // the guest page has no call-waiter button anymore (Erfan, 2026-10-23).
+    await query(`INSERT INTO devices(id, location_id, table_id, token_hash) VALUES ($1,$2,$3,$4)`,
+      [randomUUID(), LOC, TABLE, hashToken('dev-token-sa')]);
+    const dev = { authorization: 'Bearer dev-token-sa' };
+    const call = () => app.inject({ method: 'POST', url: '/api/device/call', headers: dev, payload: {} });
+    // The device route bounce-guards presses <20s apart; backdate prior
+    // presses so each inject counts as a distinct press.
+    const space = () => query(`UPDATE events SET created_at = created_at - interval '30 seconds' WHERE table_id = $1 AND type = 'call_waiter'`, [TABLE]);
+    let res = await call();
+    assert.equal(res.statusCode, 200);
+    await space();
+    res = await call();
+    assert.equal(res.statusCode, 200);
     assert.equal((await openAlerts()).length, 0);
-    const res = await app.inject({ method: 'POST', url: `/api/t/tok1/call-waiter` });
+    await space();
+    res = await call();
     assert.equal(res.statusCode, 200);
     const alerts = await openAlerts();
     assert.equal(alerts.length, 1);

@@ -1,4 +1,4 @@
-// Guest-facing API: QR resolve, bill view, payment, waiter call. All public (no staff auth).
+// Guest-facing API: QR resolve, bill view, payment. All public (no staff auth).
 //
 // v0.3 multi-POS: every POS call resolves the location's adapter from its
 // pos_type (see src/services/pos/context.ts). The bill view is normalized;
@@ -279,34 +279,6 @@ export async function customerRoutes(app: FastifyInstance) {
     return result;
   });
 
-  // Guest calls the waiter from the web app (physical button comes with hardware).
-  // C-8: this route used to live at /api/tables/:id/call-waiter —
-  // unauthenticated, keyed by a bare table UUID (anyone who learned a table
-  // id could spam waiter calls + service alerts for it), and it inserted
-  // the event BEFORE checking the table existed. It now lives under the
-  // table's QR token like every other guest action.
-  app.post('/api/t/:token/call-waiter', { preHandler: tokenWriteLimiter }, async (req) => {
-    const { token } = req.params as { token: string };
-    const tt = await query(`SELECT id FROM tables WHERE qr_token = $1`, [token]);
-    if (tt.rowCount === 0) throw badRequest('unknown table');
-    const tableId = tt.rows[0].id;
-    await query(`INSERT INTO events(id, table_id, type) VALUES ($1,$2,'call_waiter')`, [randomUUID(), tableId]);
-    // Service Recovery (idea 1): 3+ calls from the same table within 10
-    // minutes means the guest feels ignored — raise an alert (deduped while
-    // one is open) so staff reach the table now, not at the next poll.
-    const t = await query(`SELECT location_id FROM tables WHERE id = $1`, [tableId]);
-    if (t.rowCount) {
-      const cutoff = new Date(Date.now() - 10 * 60 * 1000);
-      const recent = await query(
-        `SELECT COUNT(*) AS n FROM events WHERE table_id = $1 AND type = 'call_waiter' AND created_at > $2`,
-        [tableId, cutoff],
-      );
-      if (Number(recent.rows[0]?.n ?? 0) >= 3) {
-        await raiseServiceAlert({ locationId: t.rows[0].location_id, tableId, kind: 'waiter_repeat' });
-      }
-    }
-    return { ok: true };
-  });
 
   // ---- Review capture (frictionless: tap stars, no login) ---------------------
   // POST /api/t/:token/feedback { rating: 1-5, comment? }
