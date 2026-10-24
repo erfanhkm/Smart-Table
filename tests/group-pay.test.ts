@@ -48,6 +48,9 @@ const MERCHANT = 'm-gp';
 const LOC = 'loc-gp';
 const TABLE = randomUUID();
 const FP0 = 'Truffle Arancini|1|6000';
+// v0.8.5 (F4-13): device ids are validated as UUIDs server-side.
+const DEV_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const DEV_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const FP1 = 'Negroni|2|4000';
 
 async function seed() {
@@ -83,47 +86,47 @@ describe('idea 2: group pay item claims', () => {
   };
 
   it('claim, conflict, release, re-claim', async () => {
-    let res = await claim('device-A', 0, FP0);
+    let res = await claim(DEV_A, 0, FP0);
     assert.equal(res.statusCode, 200);
-    let claims = await billClaims('device-A');
+    let claims = await billClaims(DEV_A);
     assert.equal(claims.length, 1);
     assert.equal(claims[0].item_index, 0);
     // v0.6.5 (C-12): raw device ids never leave the API; the poll returns `mine`.
     assert.equal(claims[0].device_id, undefined);
     assert.equal(claims[0].mine, true);
-    claims = await billClaims('device-B');
+    claims = await billClaims(DEV_B);
     assert.equal(claims[0].mine, false);
 
-    res = await claim('device-B', 0, FP0);
+    res = await claim(DEV_B, 0, FP0);
     assert.equal(res.statusCode, 409, 'second device must not claim the same item');
-    res = await claim('device-B', 1, FP1);
+    res = await claim(DEV_B, 1, FP1);
     assert.equal(res.statusCode, 200);
     claims = await billClaims();
     assert.equal(claims.length, 2);
 
     // Same device re-claiming its own item is a no-op success.
-    res = await claim('device-A', 0, FP0);
+    res = await claim(DEV_A, 0, FP0);
     assert.equal(res.statusCode, 200);
 
     // Another device cannot release A's claim.
-    res = await unclaim('device-B', 0);
+    res = await unclaim(DEV_B, 0);
     assert.equal(res.statusCode, 200);
     claims = await billClaims();
     assert.equal(claims.filter((c: { item_index: number }) => c.item_index === 0).length, 1);
 
     // The owner releases; B can now take it.
-    res = await unclaim('device-A', 0);
+    res = await unclaim(DEV_A, 0);
     assert.equal(res.statusCode, 200);
-    res = await claim('device-B', 0, FP0);
+    res = await claim(DEV_B, 0, FP0);
     assert.equal(res.statusCode, 200);
-    claims = await billClaims('device-B');
+    claims = await billClaims(DEV_B);
     assert.equal(claims.filter((c: { item_index: number }) => c.item_index === 0)[0].mine, true);
   });
 
   it('guards: missing token -> 400, wrong token -> 404', async () => {
-    let res = await app.inject({ method: 'POST', url: '/api/checks/SQORDR1/claims', payload: { item_index: 0, fingerprint: FP0, device_id: 'device-A' } });
+    let res = await app.inject({ method: 'POST', url: '/api/checks/SQORDR1/claims', payload: { item_index: 0, fingerprint: FP0, device_id: DEV_A } });
     assert.equal(res.statusCode, 400);
-    res = await claim('device-A', 0, FP0, 'wrong-token');
+    res = await claim(DEV_A, 0, FP0, 'wrong-token');
     assert.equal(res.statusCode, 404);
   });
 });

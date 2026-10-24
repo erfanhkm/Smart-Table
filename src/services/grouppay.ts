@@ -14,6 +14,12 @@ import { query } from '../db.js';
 export async function claimItem(
   checkId: string, itemIndex: number, fingerprint: string, deviceId: string,
 ): Promise<boolean> {
+  // v0.8.5 (F4-13): claims expire — a guest who leaves must not hold items
+  // hostage for the next party on the same still-open check.
+  await query(
+    `DELETE FROM item_claims WHERE check_id = $1 AND claimed_at <= now() - interval '3 hours'`,
+    [checkId],
+  );
   const id = randomUUID();
   const r = await query(
     `INSERT INTO item_claims(id, check_id, item_index, item_fingerprint, device_id)
@@ -46,6 +52,26 @@ export async function releaseClaims(checkId: string, deviceId: string): Promise<
   await query(`DELETE FROM item_claims WHERE check_id = $1 AND device_id = $2`, [checkId, deviceId]);
 }
 
+/** Item indexes a device currently claims on a check. */
+export async function listDeviceClaimIndexes(checkId: string, deviceId: string): Promise<number[]> {
+  const r = await query<{ item_index: number }>(
+    `SELECT item_index FROM item_claims WHERE check_id = $1 AND device_id = $2`,
+    [checkId, deviceId],
+  );
+  return r.rows.map((row) => row.item_index);
+}
+
+/** v0.8.5 (F4-13): release ONLY the claims that were actually paid for —
+ *  the blanket releaseClaims() also dropped claims for items the payer
+ *  selected but did not pay for in this payment. */
+export async function releaseClaimIndexes(checkId: string, deviceId: string, indexes: number[]): Promise<void> {
+  if (indexes.length === 0) return;
+  await query(
+    `DELETE FROM item_claims WHERE check_id = $1 AND device_id = $2 AND item_index = ANY($3)`,
+    [checkId, deviceId, indexes],
+  );
+}
+
 /** Release every claim on a check (the whole bill was paid). */
 export async function releaseAllClaims(checkId: string): Promise<void> {
   await query(`DELETE FROM item_claims WHERE check_id = $1`, [checkId]);
@@ -59,7 +85,7 @@ export async function releaseAllClaims(checkId: string): Promise<void> {
 export async function listClaims(checkId: string, forDeviceId?: string) {
   const r = await query<{ item_index: number; item_fingerprint: string; device_id: string; claimed_at: string }>(
     `SELECT item_index, item_fingerprint, device_id, claimed_at FROM item_claims
-     WHERE check_id = $1 ORDER BY claimed_at`,
+     WHERE check_id = $1 AND claimed_at > now() - interval '3 hours' ORDER BY claimed_at`,
     [checkId],
   );
   return r.rows.map((row) => ({

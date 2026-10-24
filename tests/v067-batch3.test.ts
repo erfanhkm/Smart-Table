@@ -279,11 +279,12 @@ describe('v0.6.7 batch 3 — guest endpoints (HTTP)', () => {
 
   it('C-7: loyalty counts only against a settled payment, once per check', async () => {
     const phone = '6045551234';
-    const post = () =>
+    // v0.8.5 (F4-2): counting requires the caller's own payment_id.
+    const post = (paymentId?: string) =>
       app.inject({
         method: 'POST',
         url: `/api/t/${tableToken}/loyalty`,
-        payload: { phone },
+        payload: { phone, ...(paymentId ? { payment_id: paymentId } : {}) },
       });
     const before1 = await post();
     assert.equal(before1.statusCode, 200);
@@ -295,10 +296,10 @@ describe('v0.6.7 batch 3 — guest endpoints (HTTP)', () => {
        VALUES ($1,$2,1200,0,'COMPLETED',$3,'pay-ref-1','CAD')`,
       [randomUUID(), checkId, randomUUID()],
     );
-    const after1 = await post();
+    const after1 = await post('pay-ref-1');
     assert.equal(after1.json().counted, true);
     assert.equal(after1.json().visits, 1);
-    const again = await post();
+    const again = await post('pay-ref-1');
     assert.equal(again.json().counted, false);
     assert.equal(again.json().visits, 1);
   });
@@ -374,7 +375,7 @@ describe('v0.6.7 batch 3 — C-9 order outcome semantics', () => {
     const row1 = await query<{ status: string }>(`SELECT status FROM order_requests WHERE idempotency_key = $1`, [key]);
     assert.equal(row1.rows[0].status, 'PENDING');
     // Age the reservation past the stale window, POS recovers, same key resumes.
-    await query(`UPDATE order_requests SET created_at = now() - interval '3 minutes' WHERE idempotency_key = $1`, [key]);
+    await query(`UPDATE order_requests SET created_at = now() - interval '11 minutes' WHERE idempotency_key = $1`, [key]);
     orderBehavior = 'ok';
     const second = await app.inject(orderPayload(key));
     assert.equal(second.statusCode, 200);

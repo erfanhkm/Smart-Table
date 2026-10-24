@@ -42,6 +42,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
             req(req: { method?: string; url?: string; hostname?: string }) {
               const url = String(req.url ?? '')
                 .replace(/\/t\/[^/?#]+/g, '/t/…')
+                .replace(/([?&]device_id=)[^&#]+/g, '$1…')
                 .replace(/([?&]table_token=)[^&#]+/g, '$1…');
               return { method: req.method, url, host: req.hostname };
             },
