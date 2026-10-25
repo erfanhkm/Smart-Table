@@ -12,28 +12,78 @@ import { query } from '../db.js';
 import { extractBearer } from '../auth.js';
 import { verifyPassword } from '../crypto.js';
 import { config } from '../config.js';
-import { badRequest, unauthorized } from '../http.js';
+import { badRequest, httpError, unauthorized } from '../http.js';
 import { rateLimit } from '../rate-limit.js';
+import { logAudit } from '../services/audit.js';
 import { processAccruedFees } from '../services/billing.js';
 
 // Founder login is the highest-value credential in the system: strict
 // per-IP limiter (10 attempts / 15 min) on top of scrypt (v0.6.4).
 const adminLoginLimiter = rateLimit({ name: 'admin-login', windowMs: 15 * 60 * 1000, max: 10 });
 
-// Short-lived admin sessions (in-memory, single instance).
-const sessions = new Map<string, number>();
+// F6-1: the per-IP limiter alone never fires for a distributed attacker,
+// and this account is a single fixed target. A GLOBAL failure budget sits
+// behind it: 20 failures inside an hour lock ALL admin logins for 15
+// minutes and raise an audit record. A successful login clears the count.
+const ADMIN_FAIL_WINDOW_MS = 60 * 60 * 1000;
+const ADMIN_FAIL_LIMIT = 20;
+const ADMIN_LOCKOUT_MS = 15 * 60 * 1000;
+let adminFailCount = 0;
+let adminFailWindowStart = 0;
+let adminLockedUntil = 0;
+
+function adminLoginLocked(): boolean {
+  return Date.now() < adminLockedUntil;
+}
+
+async function noteAdminFailure(ip: string | undefined): Promise<void> {
+  const now = Date.now();
+  if (now - adminFailWindowStart > ADMIN_FAIL_WINDOW_MS) {
+    adminFailWindowStart = now;
+    adminFailCount = 0;
+  }
+  adminFailCount++;
+  if (adminFailCount >= ADMIN_FAIL_LIMIT && !adminLoginLocked()) {
+    adminLockedUntil = now + ADMIN_LOCKOUT_MS;
+    console.error('[admin] login LOCKED after repeated failures');
+    await logAudit({
+      actorType: 'system',
+      actorId: null,
+      role: null,
+      ip: ip ?? null,
+      action: 'admin_login_lockout',
+      detail: `${adminFailCount} failures within an hour; logins locked for 15 minutes`,
+    });
+  }
+}
+
+function noteAdminSuccess(): void {
+  adminFailCount = 0;
+  adminFailWindowStart = 0;
+  adminLockedUntil = 0;
+}
+
+// Short-lived admin sessions (in-memory, single instance). F6-11: capped
+// at 100 live sessions and idle-timed-out after 2 hours on top of the
+// 12-hour absolute TTL.
+const sessions = new Map<string, { exp: number; seen: number }>();
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const SESSION_IDLE_MS = 2 * 60 * 60 * 1000;
 setInterval(() => {
   const now = Date.now();
-  for (const [k, v] of sessions) if (v < now) sessions.delete(k);
+  for (const [k, v] of sessions) if (v.exp < now || now - v.seen > SESSION_IDLE_MS) sessions.delete(k);
 }, 60 * 60 * 1000).unref();
 
 /** Founder-only: a valid admin session token. Nothing else — see header. */
 async function founderOnly(req: any, reply: any) {
   const token = extractBearer(req.headers.authorization);
   if (!token) return reply.code(401).send({ error: 'unauthorized' });
-  const exp = sessions.get(token);
-  if (exp && exp > Date.now()) return;
+  const s = sessions.get(token);
+  const now = Date.now();
+  if (s && s.exp > now && now - s.seen <= SESSION_IDLE_MS) {
+    s.seen = now;
+    return;
+  }
   sessions.delete(token);
   req.log?.warn({ ip: req.ip, path: String(req.url ?? '').split('?')[0] }, 'admin auth failed');
   return reply.code(401).send({ error: 'unauthorized' });
@@ -49,32 +99,48 @@ export async function adminRoutes(app: FastifyInstance) {
   // ---- Username/password login ----
   // POST /api/admin/login { username, password } -> { token }
   app.post('/api/admin/login', { onRequest: adminLoginLimiter }, async (req) => {
+    // F6-1: global lockout after repeated failures (any source IPs).
+    if (adminLoginLocked()) throw httpError(429, 'too many failed login attempts; try again later');
     const body = (req.body ?? {}) as { username?: unknown; password?: unknown };
     const username = typeof body.username === 'string' ? body.username.trim() : '';
     const password = typeof body.password === 'string' ? body.password : '';
     const expectedUser = config.adminUsername;
     const expectedHash = config.adminPasswordHash;
-    if (!expectedUser || !expectedHash) throw badRequest('admin login is not configured');
+    // F6-11: a generic 503 — the old message confirmed config state to
+    // anonymous callers.
+    if (!expectedUser || !expectedHash) throw httpError(503, 'login unavailable');
     // Over-long passwords are rejected before scrypt so they can't be used to
     // tie up the (small) scrypt worker pool (v0.6.4).
+    // F6-11: failure logs carry the IP only — a submitted "username" can be
+    // a mistyped password and must never land in a log.
     if (password.length > 200) {
-      req.log.warn({ ip: req.ip, username }, 'admin login failed');
+      await noteAdminFailure(req.ip);
+      req.log.warn({ ip: req.ip }, 'admin login failed');
       throw unauthorized('invalid credentials');
     }
     if (username !== expectedUser) {
       // Constant-time-ish: still verify to avoid user enumeration timing.
       await verifyPassword('dummy', expectedHash).catch(() => false);
-      req.log.warn({ ip: req.ip, username }, 'admin login failed');
+      await noteAdminFailure(req.ip);
+      req.log.warn({ ip: req.ip }, 'admin login failed');
       throw unauthorized('invalid credentials');
     }
     const ok = await verifyPassword(password, expectedHash);
     if (!ok) {
-      req.log.warn({ ip: req.ip, username }, 'admin login failed');
+      await noteAdminFailure(req.ip);
+      req.log.warn({ ip: req.ip }, 'admin login failed');
       throw unauthorized('invalid credentials');
     }
-    req.log.info({ ip: req.ip, username }, 'admin login succeeded');
+    noteAdminSuccess();
+    req.log.info({ ip: req.ip }, 'admin login succeeded');
     const token = randomUUID().replace(/-/g, '');
-    sessions.set(token, Date.now() + SESSION_TTL_MS);
+    const now = Date.now();
+    sessions.set(token, { exp: now + SESSION_TTL_MS, seen: now });
+    // F6-11: cap live sessions (evict least-recently-seen first).
+    if (sessions.size > 100) {
+      const bySeen = [...sessions.entries()].sort((a, b) => a[1].seen - b[1].seen);
+      for (const [k] of bySeen.slice(0, sessions.size - 100)) sessions.delete(k);
+    }
     return { ok: true, token };
   });
 
@@ -94,12 +160,14 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!accountTag || !siteTag) throw badRequest('analytics is not configured');
     const start = daysAgo(7);
     const end = daysAgo(0);
+    // F6-11: config values travel as GraphQL variables (never interpolated
+    // into the query string) and the fetch has a hard timeout.
     const query = `
-      query {
+      query($accountTag: string!, $siteTag: string!, $start: Date!, $end: Date!) {
         viewer {
-          accounts(filter: { accountTag: "${accountTag}" }) {
+          accounts(filter: { accountTag: $accountTag }) {
             rumPageloadEventsAdaptiveGroups(
-              filter: { siteTag: "${siteTag}", date_geq: "${start}", date_leq: "${end}" }
+              filter: { siteTag: $siteTag, date_geq: $start, date_leq: $end }
               limit: 10
               orderBy: [date_ASC]
             ) {
@@ -117,7 +185,8 @@ export async function adminRoutes(app: FastifyInstance) {
           Authorization: `Bearer ${config.cloudflareApiToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query, variables: { accountTag, siteTag, start, end } }),
+        signal: AbortSignal.timeout(8000),
       });
       if (!res.ok) throw new Error(`Cloudflare API ${res.status}`);
       const data = (await res.json()) as any;
@@ -156,26 +225,40 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // ---- Manually trigger accrued-commission collection (v0.4) ----
-  app.post('/api/admin/billing/run', { onRequest: founderOnly }, async () => {
-    return processAccruedFees();
+  app.post('/api/admin/billing/run', { onRequest: founderOnly }, async (req) => {
+    const result = await processAccruedFees();
+    // F6-6: founder billing runs are audited like every other money action.
+    await logAudit({
+      actorType: 'founder',
+      actorId: null,
+      role: null,
+      ip: req.ip,
+      action: 'billing_run',
+      detail: JSON.stringify(result).slice(0, 400),
+    });
+    return result;
   });
 
   // ---- All locations with per-location stats ----
   // Aggregates computed per location with plain parameterized queries
   // (portable across Postgres/pg-mem — correlated scalar subqueries that
   // reference the outer row are not portable to pg-mem).
-  app.get('/api/admin/locations', { onRequest: founderOnly }, async () => {
+  app.get('/api/admin/locations', { onRequest: founderOnly }, async (req) => {
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    // F6-11: bounded page size — the per-location fan-out below is 5
+    // queries per location, so an unbounded list grows linearly worse.
+    const limit = Math.min(500, Math.max(1, Number((req.query as any).limit) || 100));
     const locs = await query(
       `SELECT l.id, l.name, l.pos_type, l.currency, l.qr_ordering_enabled,
               l.loyalty_enabled, l.created_at,
               b.plan AS billing_plan, b.subscription_status
        FROM locations l
        LEFT JOIN billing_accounts b ON b.location_id = l.id
-       ORDER BY l.created_at DESC`,
+       ORDER BY l.created_at DESC LIMIT $1`,
+      [limit],
     );
     const out = [];
     for (const l of locs.rows as any[]) {

@@ -20,6 +20,7 @@ import { storePosCredential } from '../services/pos/context.js';
 import { getAdapter } from '../services/pos/registry.js';
 import { badRequest, conflict, notFound } from '../http.js';
 import { rateLimit } from '../rate-limit.js';
+import { logAudit } from '../services/audit.js';
 import { requirePortalRole, requireStaff, staffOnly } from '../auth.js';
 
 // Credential writes are rare and sensitive: cap them hard (E-1).
@@ -50,8 +51,17 @@ export async function oauthRoutes(app: FastifyInstance) {
   // authorize URL; the portal navigates there. (A plain redirect cannot carry
   // the bearer header, and a public GET starter could be triggered by anyone.)
   app.post('/api/oauth/start', staffOnly, async (req) => {
-    const state = randomUUID();
+    // F6-9: connecting (or re-connecting) the restaurant's POS is an
+    // owner/manager action, and one user may hold only a few live states —
+    // the map used to grow without bound for any logged-in account.
+    requirePortalRole(req, 'owner', 'manager');
     const u = req.portalUser;
+    if (u) {
+      let live = 0;
+      for (const s of states.values()) if (s.userId === u.id) live++;
+      if (live >= 5) throw conflict('too many connection attempts in progress; finish or wait for one to expire', 'oauth_state_limit');
+    }
+    const state = randomUUID();
     states.set(state, { created: Date.now(), userId: u?.id, locationId: u?.location_id });
     return { url: squareAuthorizeUrl(state) };
   });
@@ -207,9 +217,18 @@ export async function oauthRoutes(app: FastifyInstance) {
           externalMerchantRef: mine.external_merchant_ref,
           accessToken,
         });
-        console.info(
-          `[oauth] manual-token stored pos=${posType} location=${mine.id} by portal user ${u.id} replace=${existingCred.rowCount > 0}`,
-        );
+        // F6-5/F6-6: credential writes land in the durable audit log, not
+        // only the console.
+        await logAudit({
+          actorType: 'portal_user',
+          actorId: u.id,
+          role: u.role,
+          ip: req.ip,
+          action: 'pos_credential_stored',
+          locationId: mine.id,
+          target: mine.merchant_id,
+          detail: `pos=${posType} replace=${existingCred.rowCount > 0} via=manual-token`,
+        });
         return { ok: true, pos_type: posType, location_id: mine.id };
       }
 
@@ -226,6 +245,26 @@ export async function oauthRoutes(app: FastifyInstance) {
       const currency = typeof b.currency === 'string' && /^[A-Z]{3}$/.test(b.currency) ? b.currency : 'CAD';
 
       const ourMerchantId = await upsertMerchant(posType, (merchantRef as string).trim());
+      // F6-5: the founder branch used to skip BOTH safeguards the portal
+      // branch has — no POS validation and no replace guard, so a mistyped
+      // (or malicious) token silently overwrote a working credential. Same
+      // rules here now: an existing credential needs replace: true, and the
+      // token must answer a live read against the location's own ref first.
+      const existingCred = await query(
+        `SELECT 1 FROM pos_credentials WHERE merchant_id = $1 AND pos_type = $2`,
+        [ourMerchantId, posType],
+      );
+      if (existingCred.rowCount > 0 && b.replace !== true) {
+        throw conflict(
+          'a POS credential is already stored for this merchant; send replace: true to overwrite it',
+          'credential_exists',
+        );
+      }
+      try {
+        await getAdapter(posType).listOpenChecks((locationRef as string).trim(), accessToken);
+      } catch {
+        throw badRequest('the POS rejected this token; check it and try again');
+      }
       await storePosCredential({
         merchantId: ourMerchantId,
         posType,
@@ -234,9 +273,13 @@ export async function oauthRoutes(app: FastifyInstance) {
       });
 
       const locId = randomUUID();
+      // locations.square_location_id is NOT NULL (legacy name — for
+      // non-Square locations it carries the POS location ref, the same
+      // fallback getLocationPos reads). Omitting it made every founder
+      // manual-token location insert fail with a 500 (found by F6 tests).
       await query(
-        `INSERT INTO locations(id, merchant_id, pos_type, pos_location_ref, name, currency)
-         VALUES ($1,$2,$3,$4,$5,$6)
+        `INSERT INTO locations(id, merchant_id, pos_type, pos_location_ref, square_location_id, name, currency)
+         VALUES ($1,$2,$3,$4,$4,$5,$6)
          ON CONFLICT DO NOTHING`,
         [locId, ourMerchantId, posType, (locationRef as string).trim(), (locationName as string).trim(), currency],
       );
@@ -246,7 +289,16 @@ export async function oauthRoutes(app: FastifyInstance) {
         `SELECT id FROM locations WHERE merchant_id=$1 AND pos_type=$2 AND pos_location_ref=$3`,
         [ourMerchantId, posType, (locationRef as string).trim()],
       );
-      console.info(`[oauth] manual-token stored pos=${posType} merchant_ref=${(merchantRef as string).trim()} by staff token`);
+      await logAudit({
+        actorType: 'staff_token',
+        actorId: null,
+        role: null,
+        ip: req.ip,
+        action: 'pos_credential_stored',
+        locationId: existing.rows[0]?.id ?? locId,
+        target: ourMerchantId,
+        detail: `pos=${posType} replace=${existingCred.rowCount > 0} via=manual-token-founder`,
+      });
       return { ok: true, pos_type: posType, location_id: existing.rows[0]?.id ?? locId };
     },
   );

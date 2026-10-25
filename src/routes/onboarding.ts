@@ -17,10 +17,10 @@
 // /api/feedback); staff-token callers pass location_id explicitly.
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { query } from '../db.js';
+import { query, withAdvisoryLock } from '../db.js';
 import { config } from '../config.js';
 import { badRequest, notFound } from '../http.js';
-import { staffOnly } from '../auth.js';
+import { requirePortalRole, staffOnly } from '../auth.js';
 import { getLocationPos } from '../services/pos/context.js';
 import { PosType } from '../services/pos/types.js';
 
@@ -36,7 +36,7 @@ function demoConfigured(loc: LocationRow): boolean {
 function resolveLocationId(req: FastifyRequest, given?: unknown): string {
   const u = req.portalUser;
   if (u) {
-    if (given !== undefined && given !== null && given !== u.location_id) throw badRequest('not your location');
+    if (given !== undefined && given !== null && given !== u.location_id) throw notFound('not found');
     return u.location_id;
   }
   if (typeof given !== 'string' || !given) throw badRequest('location_id is required');
@@ -97,9 +97,17 @@ export async function onboardingRoutes(app: FastifyInstance) {
   });
 
   // Step 2: pull the live menu from the POS and record the verification.
+  // F6-14: owner/manager only + a 60-second per-location cooldown — every
+  // call is a fresh full catalog pull against the merchant's POS quota.
+  const lastVerifyAt = new Map<string, number>();
   app.post('/api/portal/onboarding/verify-menu', staffOnly, async (req) => {
+    requirePortalRole(req, 'owner', 'manager');
     const body = (req.body ?? {}) as { location_id?: unknown };
     const locationId = resolveLocationId(req, body.location_id);
+    const last = lastVerifyAt.get(locationId) ?? 0;
+    if (Date.now() - last < 60_000) {
+      throw badRequest('the menu was just verified — wait a minute before pulling it again');
+    }
     const loc = await loadLocation(locationId);
     const state = await onboardingState(loc);
     if (!state.steps.pos_connected.done) {
@@ -111,6 +119,7 @@ export async function onboardingRoutes(app: FastifyInstance) {
     }
     // Fresh pull (not the 45s cache): this is an explicit verification.
     const items = await ctx.adapter.getMenu(ctx.locationRef, ctx.token);
+    lastVerifyAt.set(locationId, Date.now());
     await query(`UPDATE locations SET menu_verified_at = now(), menu_item_count = $2 WHERE id = $1`, [
       locationId,
       items.length,
@@ -129,7 +138,13 @@ export async function onboardingRoutes(app: FastifyInstance) {
 
   // Step 3 (fast path): bulk-create tables "Table 1..N", skipping names that
   // already exist. Mirrors POST /api/tables (same row shape + QR token).
+  // F6-4: this path used to skip BOTH the owner/manager role gate and the
+  // 200-table cumulative cap that POST /api/tables enforces — any logged-in
+  // waiter could grow a location's tables without bound. Both apply here
+  // too, under the same per-location advisory lock; the unique
+  // (location_id, name) index + ON CONFLICT keep concurrent runs safe.
   app.post('/api/portal/onboarding/quick-tables', staffOnly, async (req) => {
+    requirePortalRole(req, 'owner', 'manager');
     const body = (req.body ?? {}) as { location_id?: unknown; count?: unknown };
     const locationId = resolveLocationId(req, body.location_id);
     await loadLocation(locationId); // 404 for unknown locations
@@ -137,24 +152,35 @@ export async function onboardingRoutes(app: FastifyInstance) {
     if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > 50) {
       throw badRequest('count must be an integer between 1 and 50');
     }
-    const existing = await query<{ name: string }>(`SELECT name FROM tables WHERE location_id = $1`, [locationId]);
-    const names = new Set(existing.rows.map((r) => r.name));
-    const created: Array<{ id: string; name: string; qr_url: string }> = [];
-    for (let i = 1; created.length < count && i <= count + names.size + 50; i++) {
-      const name = `Table ${i}`;
-      if (names.has(name)) continue;
-      const id = randomUUID();
-      const qrToken = randomUUID().replace(/-/g, '');
-      await query(`INSERT INTO tables(id, location_id, name, qr_token, state) VALUES ($1,$2,$3,$4,'FREE')`, [
-        id,
-        locationId,
-        name,
-        qrToken,
-      ]);
-      names.add(name);
-      created.push({ id, name, qr_url: `${config.appUrl}/t/${qrToken}` });
-    }
-    return { created };
+    const created = await withAdvisoryLock(
+      `tables:${locationId}`,
+      async () => {
+        const existing = await query<{ name: string }>(`SELECT name FROM tables WHERE location_id = $1`, [locationId]);
+        if (existing.rowCount >= 200) throw badRequest('table limit reached for this location (200)');
+        const room = 200 - existing.rowCount;
+        const names = new Set(existing.rows.map((r) => r.name));
+        const made: Array<{ id: string; name: string; qr_url: string }> = [];
+        for (let i = 1; made.length < Math.min(count, room) && i <= count + names.size + 50; i++) {
+          const name = `Table ${i}`;
+          if (names.has(name)) continue;
+          const id = randomUUID();
+          const qrToken = randomUUID().replace(/-/g, '');
+          const ins = await query<{ id: string }>(
+            `INSERT INTO tables(id, location_id, name, qr_token, state) VALUES ($1,$2,$3,$4,'FREE')
+             ON CONFLICT (location_id, name) DO NOTHING RETURNING id`,
+            [id, locationId, name, qrToken],
+          );
+          // Created only when the returned row is OURS — pg-mem hands back
+          // the pre-existing row on a DO NOTHING conflict.
+          if (ins.rows[0]?.id !== id) continue; // lost a race for this name
+          names.add(name);
+          made.push({ id, name, qr_url: `${config.appUrl}/t/${qrToken}` });
+        }
+        return made;
+      },
+      { runIfUnsupported: true },
+    );
+    return { created: created ?? [] };
   });
 
   // Owner closed the wizard (complete or not) — don't nag them again.

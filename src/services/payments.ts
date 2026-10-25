@@ -62,6 +62,11 @@ export interface PayCheckInput {
   payerLabel?: string;
   /** D-11: the guest's IP (from the HTTP request) for POS fraud APIs. */
   clientIp?: string;
+  /** F6-6: who recorded an outside-rail payment (portal user id or
+   * 'staff-token'). Written INSIDE the Phase A reservation insert so the
+   * actor is atomic with the payment row and immutable on replay — the
+   * old post-hoc UPDATE could be lost or overwritten. */
+  recordedBy?: string;
 }
 
 export interface PayCheckResult {
@@ -310,10 +315,10 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
   // ---- Phase A: reserve the idempotency key (autocommit, before the main transaction) ----
   const myRowId = randomUUID();
   await query(
-    `INSERT INTO payments(id, check_id, amount_cents, tip_cents, split_mode, payer_label, status, idempotency_key)
-     VALUES ($1,$2,$3,$4,$5,$6,'PENDING',$7)
+    `INSERT INTO payments(id, check_id, amount_cents, tip_cents, split_mode, payer_label, status, idempotency_key, recorded_by)
+     VALUES ($1,$2,$3,$4,$5,$6,'PENDING',$7,$8)
      ON CONFLICT (idempotency_key) DO NOTHING`,
-    [myRowId, checkId, requested ?? 0, tipCents, input.mode, input.payerLabel ?? null, key],
+    [myRowId, checkId, requested ?? 0, tipCents, input.mode, input.payerLabel ?? null, key, input.recordedBy ?? null],
   );
   const found = await query<PaymentRow>(`SELECT * FROM payments WHERE idempotency_key = $1`, [key]);
   const reservation = found.rows[0];

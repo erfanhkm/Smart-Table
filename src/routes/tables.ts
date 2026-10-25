@@ -7,10 +7,11 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
-import { query } from '../db.js';
+import { query, withAdvisoryLock } from '../db.js';
 import { config } from '../config.js';
 import { badRequest, conflict, forbidden, notFound } from '../http.js';
 import { getTables } from '../services/floor.js';
+import { logAudit } from '../services/audit.js';
 import { getLocationPos } from '../services/pos/context.js';
 import { PosCheckDetail } from '../services/pos/types.js';
 import { retrieveOrder, SquareError } from '../square.js';
@@ -22,7 +23,8 @@ async function loadTableScoped(req: FastifyRequest, tableId: string): Promise<{ 
     `SELECT id, location_id FROM tables WHERE id = $1`,
     [tableId],
   );
-  if (t.rowCount === 0) throw notFound('table not found');
+  // F6-8: one message for missing and foreign tables alike — no oracle.
+  if (t.rowCount === 0) throw notFound('not found');
   assertPortalLocation(req, t.rows[0].location_id);
   return t.rows[0];
 }
@@ -46,26 +48,38 @@ export async function tableRoutes(app: FastifyInstance) {
     if (loc.rowCount === 0) throw badRequest('unknown location_id');
     // C-15: cumulative per-location ceiling (per-call caps alone let a
     // location grow tables without bound). 200 is far above any real
-    // dining room.
-    const cnt = await query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM tables WHERE location_id = $1`, [scopedId]);
-    if ((cnt.rows[0]?.n ?? 0) >= 200) throw badRequest('table limit reached for this location (200)');
-    const id = randomUUID();
-    const qrToken = randomUUID().replace(/-/g, '');
-    await query(`INSERT INTO tables(id, location_id, name, qr_token, state) VALUES ($1,$2,$3,$4,'FREE')`, [
-      id,
-      scopedId,
-      name.trim(),
-      qrToken,
-    ]);
-    return { id, name: name.trim(), qr_token: qrToken, qr_url: `${config.appUrl}/t/${qrToken}` };
+    // dining room. F6-13: the count + insert run under the location's
+    // advisory lock so concurrent creates can't overshoot the cap.
+    const created = await withAdvisoryLock(
+      `tables:${scopedId}`,
+      async () => {
+        const cnt = await query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM tables WHERE location_id = $1`, [scopedId]);
+        if ((cnt.rows[0]?.n ?? 0) >= 200) throw badRequest('table limit reached for this location (200)');
+        const id = randomUUID();
+        const qrToken = randomUUID().replace(/-/g, '');
+        await query(`INSERT INTO tables(id, location_id, name, qr_token, state) VALUES ($1,$2,$3,$4,'FREE')`, [
+          id,
+          scopedId,
+          name.trim(),
+          qrToken,
+        ]);
+        return { id, qrToken };
+      },
+      { runIfUnsupported: true },
+    );
+    if (!created) throw conflict('another table change is in progress; please retry', 'table_create_busy');
+    return { id: created.id, name: name.trim(), qr_token: created.qrToken, qr_url: `${config.appUrl}/t/${created.qrToken}` };
   });
 
   // Printable QR PNG for the table tent card (staff-only: the QR token is the table's guest credential).
   app.get('/api/tables/:id/qr', staffOnly, async (req, reply) => {
     const tableId = (req.params as { id: string }).id;
+    // F6-13: the PNG IS the guest credential — owner/manager only. (The
+    // platform-wide /api no-store hook covers its cache header.)
+    requirePortalRole(req, 'owner', 'manager');
     await loadTableScoped(req, tableId);
     const t = await query(`SELECT qr_token FROM tables WHERE id = $1`, [tableId]);
-    if (t.rowCount === 0) throw notFound('table not found');
+    if (t.rowCount === 0) throw notFound('not found');
     const png = await QRCode.toBuffer(`${config.appUrl}/t/${t.rows[0].qr_token}`, { width: 512, margin: 2 });
     return reply.type('image/png').send(png);
   });
@@ -89,7 +103,7 @@ export async function tableRoutes(app: FastifyInstance) {
        WHERE t.id = $1`,
       [tableId],
     );
-    if (t.rowCount === 0) throw notFound('table not found');
+    if (t.rowCount === 0) throw notFound('not found');
     const table = t.rows[0];
     assertPortalLocation(req, table.location_id);
     const ctx = await getLocationPos(table.location_id);
@@ -197,23 +211,70 @@ export async function tableRoutes(app: FastifyInstance) {
     const qrToken = randomUUID().replace(/-/g, '');
     await query(`UPDATE tables SET qr_token = $1 WHERE id = $2`, [qrToken, tableId]);
     await query(`INSERT INTO events(id, table_id, type) VALUES ($1,$2,'qr_rotated')`, [randomUUID(), tableId]);
+    await logAudit({
+      actorType: req.portalUser ? 'portal_user' : 'staff_token',
+      actorId: req.portalUser?.id ?? null,
+      role: req.portalUser?.role ?? null,
+      ip: req.ip,
+      action: 'qr_rotated',
+      target: tableId,
+    });
     return { qr_token: qrToken, qr_url: `${config.appUrl}/t/${qrToken}` };
   });
 
   // Reset the table for the next party.
+  // F6-3: freeing used to leave OPEN checks (and their group-pay claims)
+  // attached to the table — the next party could be shown, and pay, the
+  // previous party's bill. Now: an OPEN check blocks the free with a 409
+  // unless the caller explicitly forces it; a forced free drops the open
+  // checks' item claims so a stale claim can never be paid against.
   app.post('/api/tables/:id/free', staffOnly, async (req) => {
     const tableId = (req.params as { id: string }).id;
     requirePortalRole(req, 'owner', 'manager');
-    await loadTableScoped(req, tableId);
+    const tbl = await loadTableScoped(req, tableId);
+    const force = (req.body as { force?: unknown } | null)?.force === true;
+    const open = await query<{ id: string }>(`SELECT id FROM checks WHERE table_id = $1 AND state = 'OPEN'`, [tableId]);
+    if (open.rowCount > 0 && !force) {
+      throw conflict(
+        'this table still has an open check — settle it first, or free the table with force: true',
+        'open_check_exists',
+      );
+    }
+    if (open.rowCount > 0) {
+      const ids = open.rows.map((r) => r.id);
+      const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+      await query(`DELETE FROM item_claims WHERE check_id IN (${placeholders})`, ids);
+    }
     await query(`UPDATE tables SET state = 'FREE' WHERE id = $1`, [tableId]);
     await query(`INSERT INTO events(id, table_id, type) VALUES ($1,$2,'freed')`, [randomUUID(), tableId]);
+    await logAudit({
+      actorType: req.portalUser ? 'portal_user' : 'staff_token',
+      actorId: req.portalUser?.id ?? null,
+      role: req.portalUser?.role ?? null,
+      ip: req.ip,
+      action: 'table_freed',
+      locationId: tbl.location_id,
+      target: tableId,
+      detail: open.rowCount > 0 ? `forced with ${open.rowCount} open check(s); claims cleared` : null,
+    });
     return { ok: true };
   });
 
   // Acknowledge a waiter call (used for the response-time metric).
+  // F6-13: only record an ack when a call is actually open (latest
+  // call_waiter newer than the latest ack) — phantom acks skewed the
+  // response-time metric and hid unanswered calls.
   app.post('/api/tables/:id/ack-call', staffOnly, async (req) => {
     const tableId = (req.params as { id: string }).id;
     await loadTableScoped(req, tableId);
+    const last = await query<{ type: string }>(
+      `SELECT type FROM events WHERE table_id = $1 AND type IN ('call_waiter','waiter_ack')
+       ORDER BY created_at DESC LIMIT 1`,
+      [tableId],
+    );
+    if (last.rowCount === 0 || last.rows[0].type !== 'call_waiter') {
+      return { ok: true, no_open_call: true };
+    }
     await query(`INSERT INTO events(id, table_id, type) VALUES ($1,$2,'waiter_ack')`, [randomUUID(), tableId]);
     return { ok: true };
   });

@@ -11,11 +11,25 @@ import { getCheckPos, getLocationPos } from '../services/pos/context.js';
 import { getTables } from '../services/floor.js';
 import { assertSquareId, searchOpenOrders } from '../square.js';
 import { parsePaymentBody, payCheck } from '../services/payments.js';
+import { logAudit } from '../services/audit.js';
 import { requirePortalRole, scopedLocationId, staffOnly } from '../auth.js';
 
 /** C-11: validate a Google review URL by parsing it — the old regex accepted
  * https://google.attacker.com/maps. Hosts: google.<tld>[/maps...], g.page,
- * goo.gl, maps.app.goo.gl only. */
+ * goo.gl, maps.app.goo.gl only.
+ *
+ * F6-2: the label heuristic (each TLD label 2–3 letters) also accepted
+ * google.xy.com / google.abc.io — domains anyone can register. The suffix
+ * after "google." must now be on an exact allow-list of suffixes Google
+ * actually operates (single ccTLDs and the known two-part ones). */
+const GOOGLE_SUFFIXES = new Set([
+  'com', 'ca', 'us', 'de', 'fr', 'es', 'it', 'pt', 'nl', 'be', 'ch', 'at',
+  'se', 'no', 'dk', 'fi', 'ie', 'pl', 'gr', 'cz', 'hu',
+  'co.uk', 'com.au', 'co.nz', 'com.mx', 'com.br', 'com.ar', 'co.in',
+  'com.sg', 'com.hk', 'com.tw', 'co.jp', 'co.kr', 'co.za', 'com.tr',
+  'co.th', 'com.my', 'com.ph', 'co.id', 'com.vn', 'com.co', 'cl', 'pe',
+]);
+
 export function isValidGoogleReviewUrl(url: string): boolean {
   let u: URL;
   try {
@@ -25,14 +39,13 @@ export function isValidGoogleReviewUrl(url: string): boolean {
   }
   if (u.protocol !== 'https:') return false;
   const host = u.hostname.toLowerCase();
-  if (host === 'g.page' || host === 'goo.gl' || host === 'maps.app.goo.gl') return true;
+  if (host === 'g.page' || host === 'goo.gl' || host === 'maps.app.goo.gl' || host === 'share.google') return true;
   const parts = host.split('.');
   const bare = parts[0] === 'www' ? parts.slice(1) : parts;
-  // google.<tld> or maps.google.<tld>, TLD parts short alpha only — this is
-  // what stops google.attacker.com (its "tld" part is 7 chars + extra label).
+  // google.<suffix> or maps.google.<suffix>, suffix exactly allow-listed.
   const g = bare[0] === 'maps' ? bare.slice(1) : bare;
-  if (g[0] !== 'google' || g.length < 2 || g.length > 3) return false;
-  if (!g.slice(1).every((p) => /^[a-z]{2,3}$/.test(p))) return false;
+  if (g[0] !== 'google' || g.length < 2) return false;
+  if (!GOOGLE_SUFFIXES.has(g.slice(1).join('.'))) return false;
   return u.pathname.startsWith('/maps');
 }
 
@@ -64,7 +77,7 @@ export async function staffRoutes(app: FastifyInstance) {
     const { location_id } = req.query as { location_id?: string };
     let locId = location_id;
     if (u) {
-      if (location_id && location_id !== u.location_id) throw badRequest('not your location');
+      if (location_id && location_id !== u.location_id) throw notFound('not found');
       locId = u.location_id;
     }
     if (!locId) throw badRequest('location_id is required');
@@ -84,7 +97,7 @@ export async function staffRoutes(app: FastifyInstance) {
     const { location_id, status } = req.query as { location_id?: string; status?: string };
     let locId = location_id;
     if (u) {
-      if (location_id && location_id !== u.location_id) throw badRequest('not your location');
+      if (location_id && location_id !== u.location_id) throw notFound('not found');
       locId = u.location_id;
     }
     if (!locId) throw badRequest('location_id is required');
@@ -124,7 +137,7 @@ export async function staffRoutes(app: FastifyInstance) {
     const u = req.portalUser;
     const id = (req.params as { id: string }).id;
     // Portal users can only change their own location.
-    if (u && u.location_id !== id) throw badRequest('not your location');
+    if (u && u.location_id !== id) throw notFound('not found');
     // Settings are an owner/manager action (C-10).
     requirePortalRole(req, 'owner', 'manager');
     const body = (req.body ?? {}) as {
@@ -168,6 +181,18 @@ export async function staffRoutes(app: FastifyInstance) {
       vals,
     );
     if (r.rowCount === 0) throw notFound('location not found');
+    // F6-6: settings changes are audited (fields only, never values that
+    // could carry a URL someone pasted by mistake — the field names suffice).
+    await logAudit({
+      actorType: u ? 'portal_user' : 'staff_token',
+      actorId: u?.id ?? null,
+      role: u?.role ?? null,
+      ip: req.ip,
+      action: 'location_settings_update',
+      locationId: id,
+      target: id,
+      detail: `fields: ${sets.map((s) => s.split(' ')[0]).join(',')}`,
+    });
     return { ok: true, id: r.rows[0].id };
   });
 
@@ -177,8 +202,10 @@ export async function staffRoutes(app: FastifyInstance) {
   app.get('/api/pos-open-checks', staffOnly, async (req) => {
     const { location_id } = req.query as { location_id?: string };
     const scopedId = scopedLocationId(req, location_id);
-    const ctx = await getLocationPos(scopedId).catch(() => null);
-    if (!ctx) throw notFound('unknown location_id');
+    // F6-12: no catch-all here — getLocationPos already throws a clean 404
+    // for an unknown location; flattening EVERY error (decrypt failure, DB
+    // outage) into that same 404 hid real breakage behind "unknown id".
+    const ctx = await getLocationPos(scopedId);
     const checks = await ctx.adapter.listOpenChecks(ctx.locationRef, ctx.token);
     return {
       pos_type: ctx.posType,
@@ -200,11 +227,12 @@ export async function staffRoutes(app: FastifyInstance) {
   // per location, so a second portal tab costs nothing. Per-table
   // failures keep the portal's "Unavailable — retry" row shape.
   const openDetailCache = new Map<string, { at: number; orders: unknown[] }>();
-  app.get('/api/portal/open-checks-detail', staffOnly, async (req) => {
-    const { location_id } = req.query as { location_id?: string };
-    const scopedId = scopedLocationId(req, location_id);
-    const hit = openDetailCache.get(scopedId);
-    if (hit && Date.now() - hit.at < 4_000) return { orders: hit.orders };
+  // F6-7: single-flight — while one fan-out for a location is running,
+  // concurrent portal polls share it (or get the last cached result flagged
+  // stale) instead of each starting another full fan-out against a possibly
+  // degraded POS.
+  const openDetailInflight = new Map<string, Promise<unknown[]>>();
+  async function fetchOpenDetail(scopedId: string): Promise<unknown[]> {
     const tables = (await getTables(scopedId)).filter((t) => t.open_order_id);
     const orders: unknown[] = new Array(tables.length);
     let next = 0;
@@ -236,8 +264,30 @@ export async function staffRoutes(app: FastifyInstance) {
       }
     }
     await Promise.all(Array.from({ length: Math.min(3, tables.length) }, worker));
-    openDetailCache.set(scopedId, { at: Date.now(), orders });
-    return { orders };
+    return orders;
+  }
+  app.get('/api/portal/open-checks-detail', staffOnly, async (req) => {
+    const { location_id } = req.query as { location_id?: string };
+    const scopedId = scopedLocationId(req, location_id);
+    const hit = openDetailCache.get(scopedId);
+    if (hit && Date.now() - hit.at < 4_000) return { orders: hit.orders };
+    const inflight = openDetailInflight.get(scopedId);
+    if (inflight) {
+      // A refresh is already running: serve the last known result rather
+      // than piling another fan-out onto the POS; only block when there is
+      // nothing cached at all yet.
+      if (hit) return { orders: hit.orders, stale: true };
+      return { orders: await inflight };
+    }
+    const p = fetchOpenDetail(scopedId);
+    openDetailInflight.set(scopedId, p);
+    try {
+      const orders = await p;
+      openDetailCache.set(scopedId, { at: Date.now(), orders });
+      return { orders };
+    } finally {
+      openDetailInflight.delete(scopedId);
+    }
   });
 
   // Legacy (portal compat): Square-shaped open orders; Square locations only.
@@ -282,25 +332,48 @@ export async function staffRoutes(app: FastifyInstance) {
     const p = parsePaymentBody(req.body);
     requirePortalRole(req, 'owner', 'manager');
     const u = req.portalUser;
+    // F6-12: external refs are unique only per location. A staff-token
+    // caller has no home location, so it must name one — otherwise a ref
+    // collision across tenants resolved to an arbitrary restaurant's check.
+    const bodyLoc = (req.body as { location_id?: unknown } | null)?.location_id;
+    if (!u && (typeof bodyLoc !== 'string' || !bodyLoc)) {
+      throw badRequest('location_id is required for staff-token callers');
+    }
     const rows = await query<{ id: string; location_id: string | null }>(
       `SELECT c.id, COALESCE(c.location_id, t.location_id) AS location_id
        FROM checks c LEFT JOIN tables t ON t.id = c.table_id
        WHERE c.external_check_ref = $1 OR c.square_order_id = $1`,
       [ref],
     );
-    const row = u ? rows.rows.find((r) => r.location_id === u.location_id) : rows.rows[0];
+    const wantLoc = u ? u.location_id : (bodyLoc as string);
+    const row = rows.rows.find((r) => r.location_id === wantLoc);
     if (!row) throw notFound('check not found');
+    const actor = u ? u.id : 'staff-token';
     const result = await payCheck({
       checkRef: ref,
       checkId: row.id,
       ...p,
       source: { kind: 'external', label: 'Smart Table staff' },
+      // F6-6: the actor is written inside payCheck's reservation insert —
+      // atomic with the payment and immutable on replay.
+      recordedBy: actor,
     });
-    // B-11: audit who recorded this outside-rail payment.
-    await query(`UPDATE payments SET recorded_by = $1 WHERE idempotency_key = $2`, [
-      u ? u.id : 'staff-token',
+    // Legacy fallback for rows reserved before v0.8.7: set the actor only
+    // where it is still empty, never overwrite an existing one.
+    await query(`UPDATE payments SET recorded_by = $1 WHERE idempotency_key = $2 AND recorded_by IS NULL`, [
+      actor,
       p.idempotencyKey,
     ]).catch(() => undefined);
+    await logAudit({
+      actorType: u ? 'portal_user' : 'staff_token',
+      actorId: u?.id ?? null,
+      role: u?.role ?? null,
+      ip: req.ip,
+      action: 'external_payment_recorded',
+      locationId: row.location_id,
+      target: row.id,
+      detail: `ref=${ref} amount=${p.amountCents ?? 'full'}`,
+    });
     return result;
   });
 }
