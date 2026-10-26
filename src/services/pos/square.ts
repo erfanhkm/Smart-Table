@@ -111,12 +111,23 @@ const firstHeader = (v: string | string[] | undefined): string => (Array.isArray
  * INSUFFICIENT_PERMISSIONS) or the error text names the app fee. A card
  * decline never matches: retrying it without the fee would be a second,
  * pointless charge attempt on a doomed card.
+ *
+ * v0.8.9: also matches Square's application-currency rejection —
+ * "This application is not allowed to accept currency CAD" (proven live
+ * 2026-10-25: the sandbox app lives under a US test account, so a fee'd
+ * charge against the CAD demo seller was declined outright and the guest
+ * payment FAILED). The fee is the only application-scoped part of the
+ * request, and this branch only runs when a fee was attempted, so the
+ * no-fee retry + accrual is exactly the designed degradation.
  */
 function isAppFeeRejection(e: SquareError): boolean {
   for (const err of e.errors ?? []) {
     if (err?.code === 'INSUFFICIENT_PERMISSIONS') return true;
     const text = `${String(err?.code ?? '')} ${String(err?.detail ?? '')}`.toLowerCase();
     if (text.includes('app_fee') || text.includes('application fee') || text.includes('additional_recipients')) {
+      return true;
+    }
+    if (text.includes('not allowed to accept currency')) {
       return true;
     }
   }
