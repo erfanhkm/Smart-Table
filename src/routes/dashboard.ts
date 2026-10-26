@@ -195,8 +195,13 @@ export async function dashboardRoutes(app: FastifyInstance) {
     const scopedId = scopedLocationId(req, location_id);
     const windowDays = Math.min(Math.max(parseInt(days ?? '7', 10) || 7, 1), 90);
     const since = new Date(Date.now() - windowDays * 86400000).toISOString();
+    // F7-L1: the portal's Reports page formats money with this currency —
+    // it used to hard-code CAD, mislabeling every amount for a USD
+    // location.
+    const loc = await query<{ currency: string }>(`SELECT currency FROM locations WHERE id = $1`, [scopedId]);
     return {
       window_days: windowDays,
+      currency: loc.rows[0]?.currency ?? 'CAD',
       ...(await eventStats(scopedId, since)),
       daily: await dailyBreakdown(scopedId, since),
       tables: await tableBreakdown(scopedId, since),

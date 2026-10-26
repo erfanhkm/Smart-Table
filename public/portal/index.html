@@ -260,7 +260,7 @@ select.form-control { width: auto; margin-bottom: 0; }
       <div id="login-error" role="alert"></div>
       <button type="submit" id="login-btn">Sign In</button>
     </form>
-    <p class="login-hint">Use your owner credentials. v0.8.7</p>
+    <p class="login-hint">Use your owner credentials. v0.8.8</p>
   </div>
 </div>
 
@@ -276,7 +276,7 @@ select.form-control { width: auto; margin-bottom: 0; }
     <button class="nav-item" data-view="devices" aria-label="Devices" title="Devices"><span class="nav-emoji" aria-hidden="true">📟</span><span class="nav-label">Devices</span></button>
     <button class="nav-item" data-view="billing" aria-label="Billing" title="Billing"><span class="nav-emoji" aria-hidden="true">💳</span><span class="nav-label">Billing</span></button>
     <button class="nav-item" data-view="settings" aria-label="Settings" title="Settings"><span class="nav-emoji" aria-hidden="true">⚙️</span><span class="nav-label">Settings</span></button>
-    <div class="sidebar-footer">Smart Table · v0.8.7<br>Hardware: STT-101 · device API live</div>
+    <div class="sidebar-footer">Smart Table · v0.8.8<br>Hardware: STT-101 · device API live</div>
   </nav>
 
   <div class="main">
@@ -288,6 +288,7 @@ select.form-control { width: auto; margin-bottom: 0; }
     </div>
 
     <main class="main-content">
+      <div id="stale-banner" class="inline-note" style="display:none;border-color:#f59e0b;background:#fffbeb;color:#92400e;margin-bottom:16px" role="alert">⚠️ Live updates are having trouble — the numbers below may be out of date. Retrying automatically…</div>
       <!-- OVERVIEW -->
       <section class="view active" id="view-overview" aria-label="Overview">
         <div class="card" id="onboarding-card" style="display:none;margin-bottom:16px">
@@ -455,6 +456,6 @@ select.form-control { width: auto; margin-bottom: 0; }
   </div>
 </div>
 
-<script src="/portal/app.js?v=0.8.7"></script>
+<script src="/portal/app.js?v=0.8.8"></script>
 </body>
 </html>

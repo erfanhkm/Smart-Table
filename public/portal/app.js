@@ -1,4 +1,4 @@
-/* Smart Table — Restaurant Portal (v0.6.10)
+/* Smart Table — Restaurant Portal (v0.8.8)
  * Served from /portal/app.js with a strict Content-Security-Policy
  * (no inline script). The network layer below has no DOM *rendering*
  * dependencies; it uses sessionStorage only for the auth token. */
@@ -19,7 +19,11 @@ const esc = (s) =>
     .replace(/'/g, '&#39;');
 
 function money(cents, currency) {
-  const cur = currency || 'CAD';
+  // F7-7: the currency reaches innerHTML templates, so it must never carry
+  // raw markup. Anything that is not a plain 3-letter code falls back to
+  // CAD — previously the catch below returned the unvalidated string.
+  let cur = String(currency || 'CAD').toUpperCase();
+  if (!/^[A-Z]{3}$/.test(cur)) cur = 'CAD';
   try {
     return new Intl.NumberFormat('en-CA', { style: 'currency', currency: cur }).format((cents || 0) / 100);
   } catch {
@@ -83,20 +87,44 @@ const CONFIG = {
 /* ------------------------------------------------------------------ */
 class AuthExpired extends Error {}
 
+/* F7-2: when the server answers 429 it sends Retry-After; polling pauses
+   until then instead of hammering the shared per-IP bucket. */
+let pollsPausedUntil = 0;
+
 async function request(path, options = {}) {
   const { method = 'GET', body, auth = true } = options;
   if (auth && !token) throw new AuthExpired();
   const headers = { 'Content-Type': 'application/json' };
   if (auth && token) headers['Authorization'] = 'Bearer ' + token;
   let res;
+  // F7-1: GETs get a 15s abort so a hung POS-backed read can never wedge a
+  // render forever. Money POSTs deliberately keep NO timeout — an aborted
+  // money request is an unknown outcome and the idempotency-key discipline
+  // (not a client timeout) is what makes retries safe there.
+  let timer = null;
+  let signal;
+  if (method === 'GET' && typeof AbortController !== 'undefined') {
+    const ctl = new AbortController();
+    signal = ctl.signal;
+    timer = setTimeout(() => ctl.abort(), 15000);
+  }
   try {
     res = await fetch(CONFIG.API_BASE + path, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      signal,
     });
   } catch (e) {
     throw new Error('Network error — is the server reachable?');
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  if (res.status === 429) {
+    const ra = parseInt(res.headers.get('retry-after') || '', 10);
+    if (Number.isFinite(ra) && ra > 0) {
+      pollsPausedUntil = Date.now() + Math.min(ra, 300) * 1000;
+    }
   }
   if (res.status === 401 && auth) {
     handleSessionExpired();
@@ -157,7 +185,13 @@ const PortalAPI = {
    * request (server fans out to the POS with a cap + a 4s cache). */
   async getOpenChecksDetail() {
     const res = await request(`/api/portal/open-checks-detail?location_id=${encodeURIComponent(CONFIG.locationId)}`);
-    if (!res.ok) throw new Error('Could not load open checks.');
+    if (!res.ok) {
+      // F7-2: callers must be able to tell a throttle/transient failure
+      // (429/5xx — never fan out) from a shape failure, so keep the status.
+      const err = new Error('Could not load open checks.');
+      err.status = res.status;
+      throw err;
+    }
     const data = await readJson(res);
     return (data && data.orders) || [];
   },
@@ -200,10 +234,24 @@ const PortalAPI = {
     if (!res.ok) throw new Error('Could not resolve the alert.');
     return readJson(res);
   },
-  async freeTable(tableId) {
-    const res = await request(`/api/tables/${encodeURIComponent(tableId)}/free`, { method: 'POST' });
-    if (!res.ok) throw new Error('Could not free the table.');
-    return readJson(res);
+  async freeTable(tableId, force) {
+    // F7-5(b): the server refuses to free a table with an OPEN check (409,
+    // code open_check_exists) unless the caller explicitly forces it. The
+    // old client sent no body (force was unreachable) and discarded the
+    // server's error — a table with an open check could never be freed
+    // from the portal and staff were never told why.
+    const res = await request(`/api/tables/${encodeURIComponent(tableId)}/free`, {
+      method: 'POST',
+      body: { force: !!force },
+    });
+    const data = await readJson(res);
+    if (!res.ok) {
+      const err = new Error((data && data.error) || 'Could not free the table.');
+      err.status = res.status;
+      err.code = (data && data.code) || null;
+      throw err;
+    }
+    return data;
   },
   async linkCheck(tableId, squareOrderId) {
     const res = await request(`/api/tables/${encodeURIComponent(tableId)}/link-check`, {
@@ -238,10 +286,17 @@ const PortalAPI = {
     return data;
   },
   async getOpenOrders() {
-    const res = await request(`/api/square-open-orders?location_id=${encodeURIComponent(CONFIG.locationId)}`);
-    if (!res.ok) throw new Error('Could not load open orders from Square.');
+    // F7-L2: the generic POS route works for every adapter; the old
+    // Square-only route 400s for Clover/Shopify/Helcim locations. The
+    // shape is normalized here so showLinkCheck renders one way.
+    const res = await request(`/api/pos-open-checks?location_id=${encodeURIComponent(CONFIG.locationId)}`);
+    if (!res.ok) throw new Error('Could not load open orders from the POS.');
     const data = await readJson(res);
-    return (data && data.orders) || [];
+    return ((data && data.checks) || []).map((c) => ({
+      id: c.id,
+      total_money: { amount: c.total_cents, currency: c.currency },
+      items: c.display_label || '',
+    }));
   },
   /** Starts Square OAuth for this user; returns the Square authorize URL to navigate to. */
   async startOAuth() {
@@ -318,6 +373,10 @@ async function doLogin(email, password) {
   }
   token = data.token;
   portalUser = { email: data.user.email, role: data.user.role, location_id: data.user.location_id };
+  // F7-L3: don't leave the typed password sitting in the (hidden) login
+  // form for the whole session.
+  const pwField = $('login-password');
+  if (pwField) pwField.value = '';
   saveSession();
   enterApp();
 }
@@ -342,7 +401,10 @@ function resetUi() {
   tablesCache = [];
   drawerTable = null;
   drawerCheckId = null;
-  clearCashAttempt();
+  orderDetailCheckId = null;
+  clearCashAttempts();
+  clearRefundAttempts();
+  onboardingLoaded = false;
   const ids = [
     'overview-stats', 'overview-tables', 'recent-activity', 'floor-grid',
     'orders-list', 'order-detail', 'report-cards', 'report-table-body',
@@ -410,7 +472,31 @@ async function showView(view) {
   await renderView(view);
 }
 
+/* F7-1: renders are serialized — a poll tick that lands while a render is
+   still running queues ONE follow-up render instead of overlapping it, so
+   a slow POS response can never overwrite newer data out of order. */
+let renderActive = false;
+let renderQueuedView = null;
+/* F7-12: consecutive render failures surface a visible "data may be out
+   of date" banner instead of failing silently into console.error. */
+let renderFailCount = 0;
+
+function noteRenderSuccess() {
+  renderFailCount = 0;
+  const b = $('stale-banner');
+  if (b) b.style.display = 'none';
+}
+function noteRenderFailure() {
+  renderFailCount += 1;
+  if (renderFailCount >= 2) {
+    const b = $('stale-banner');
+    if (b) b.style.display = '';
+  }
+}
+
 async function renderView(view) {
+  if (renderActive) { renderQueuedView = view; return; }
+  renderActive = true;
   try {
     if (view === 'overview') await renderOverview();
     else if (view === 'tables') await renderTables();
@@ -420,9 +506,18 @@ async function renderView(view) {
     else if (view === 'devices') renderDevices();
     else if (view === 'billing') renderBilling();
     else if (view === 'settings') await renderSettings();
+    noteRenderSuccess();
   } catch (e) {
     if (e instanceof AuthExpired) return;
     console.error(e);
+    noteRenderFailure();
+  } finally {
+    renderActive = false;
+    if (renderQueuedView) {
+      const v = renderQueuedView;
+      renderQueuedView = null;
+      renderView(v);
+    }
   }
 }
 
@@ -524,7 +619,14 @@ function floorCard(t, showCall) {
 }
 
 async function renderOverview() {
-  loadOnboarding().catch(() => { /* wizard is best-effort; the overview must still render */ });
+  // F7-2/F7-L8: the onboarding wizard is fetched once per session, not on
+  // every 5s poll — re-rendering it each tick wiped the menu-verification
+  // result text and reset the table-count input while the owner typed.
+  // Its own actions refresh it explicitly.
+  if (!onboardingLoaded) {
+    onboardingLoaded = true;
+    loadOnboarding().catch(() => { /* wizard is best-effort; the overview must still render */ });
+  }
   const oRes = await PortalAPI.getOverview();
   const tables = oRes.tables || [];
   // Populate the drawer cache here too, so overview chips work on first load.
@@ -559,7 +661,7 @@ async function renderServiceAlerts() {
   $('service-alerts').innerHTML = alerts.map((a) => `
     <div class="order-row">
       <div class="grow">
-        <div class="tname">${a.kind === 'low_rating' ? '🚨' : a.kind === 'external_refund' ? '↩️' : '🔔'} ${esc(a.table_name || 'Table')}${a.kind === 'low_rating' && a.rating ? ` — ${a.rating}★ rating` : a.kind === 'external_refund' ? ' — refund completed in Square' : ' — repeated waiter calls'}</div>
+        <div class="tname">${a.kind === 'low_rating' ? '🚨' : a.kind === 'external_refund' ? '↩️' : '🔔'} ${esc(a.table_name || 'Table')}${a.kind === 'low_rating' && a.rating ? ` — ${num(a.rating)}★ rating` : a.kind === 'external_refund' ? ' — refund completed in Square' : ' — repeated waiter calls'}</div>
         <div class="meta">${a.comment ? esc(a.comment) + ' · ' : ''}${esc(timeAgo(a.created_at))} · ${a.kind === 'external_refund' ? 'review this payment' : 'go to the table now'}</div>
       </div>
       <button class="btn btn-sm" data-resolve-alert="${esc(a.id)}">Resolved</button>
@@ -573,6 +675,7 @@ async function renderServiceAlerts() {
 /* verification against the POS catalog, tables from the floor itself. */
 /* ------------------------------------------------------------------ */
 let onboardingBusy = false;
+let onboardingLoaded = false;
 
 async function loadOnboarding() {
   const card = $('onboarding-card');
@@ -613,7 +716,7 @@ async function loadOnboarding() {
       pos.done ? `Connected (${esc(pos.pos_type || 'POS')}) — Smart Table reads your checks and menu from it.`
                : 'Connect the POS you already use, so checks and menu flow in automatically.', posAction) +
     row(menu.done, '2. Verify your menu',
-      menu.done ? `${menu.item_count ?? 0} items found in your POS catalog${menu.verified_at ? ' · verified ' + esc(timeAgo(menu.verified_at)) : ''}. Guests see exactly this menu for QR ordering.`
+      menu.done ? `${num(menu.item_count)} items found in your POS catalog${menu.verified_at ? ' · verified ' + esc(timeAgo(menu.verified_at)) : ''}. Guests see exactly this menu for QR ordering.`
                 : 'We pull your menu straight from your POS catalog — nothing to type in.', menuAction) +
     row(tbl.done, '3. Add your tables',
       tbl.done ? `${num(tbl.count)} table${Number(tbl.count) === 1 ? '' : 's'} on your floor. Print each table's QR code from Floor &amp; Tables.`
@@ -668,6 +771,7 @@ async function loadOnboarding() {
       const res = await request('/api/portal/onboarding/quick-tables', { method: 'POST', body: { count: n } });
       const data = await readJson(res);
       if (!res.ok) throw new Error((data && data.error) || 'Could not add tables.');
+      await loadOnboarding();
       await renderOverview();
     } catch { /* wizard stays as-is; the owner can retry */ }
     finally { onboardingBusy = false; }
@@ -742,12 +846,25 @@ async function mapCapped(items, limit, fn) {
 
 async function getLiveOrders() {
   const oRes = await PortalAPI.getOverview();
+  // F7-6: keep the shared table cache fresh from the same response the
+  // Orders view already fetches — otherwise View / Record Cash / Free in
+  // this view resolve through a cache only Overview and Floor rebuild,
+  // and after a re-seat they act on the previous check.
+  if (Array.isArray(oRes.tables)) {
+    tablesCache = oRes.tables.map((t) => ({ id: t.id, name: t.name, state: t.state, checkId: t.open_order_id || null }));
+  }
   // I-1: prefer the one-request aggregate; fall back to the per-table
   // fan-out only if the aggregate route itself fails.
   try {
     const orders = await PortalAPI.getOpenChecksDetail();
     return { orders, waiter_calls: oRes.waiter_calls || [] };
-  } catch { /* fall through to the legacy per-table flow */ }
+  } catch (e) {
+    // F7-2: NEVER fan out on a throttle or transient server failure —
+    // multiplying requests per table is exactly what turns a 429 into an
+    // outage for every other tab and the guests' payment pages.
+    if (e && (e.status === 429 || e.status >= 500)) throw e;
+    /* otherwise fall through to the legacy per-table flow */
+  }
   const openTables = (oRes.tables || []).filter((t) => t.open_order_id);
   const orders = await mapCapped(openTables, 3, async (t) => {
     try {
@@ -775,13 +892,21 @@ function renderLiveOrders() {
   return renderLiveOrdersInner();
 }
 
+/* F7-3: the detail panel + its payments list are sequence-guarded — a
+   slow load for table A must never land after the staff member has
+   already clicked table B. */
+let orderSeq = 0;
+let orderDetailCheckId = null;
+
 async function renderLiveOrdersInner() {
+  const seq = ++orderSeq;
   const { orders } = await getLiveOrders();
+  if (seq !== orderSeq) return;
   const withCheck = orders.filter((o) => !o.error);
   const failed = orders.filter((o) => o.error);
   $('orders-updated').textContent = 'as of ' + new Date().toLocaleTimeString();
 
-  $('orders-list').innerHTML =
+  const html =
     (withCheck.length
       ? withCheck.map((o) => `
       <div class="order-row">
@@ -802,24 +927,43 @@ async function renderLiveOrdersInner() {
         <button class="btn btn-sm" data-retry-orders="1">Retry</button>
       </div>`).join('')
       : '');
+  // F7-L9: skip the DOM write when nothing changed — replacing the list
+  // every tick drops keyboard focus from the View button being used.
+  const list = $('orders-list');
+  if (list.dataset.lastHtml !== html) {
+    list.innerHTML = html;
+    list.dataset.lastHtml = html;
+  }
+  // F7-L9: keep an open detail panel fresh too — its remaining balance
+  // and refund limits used to sit stale for minutes while the list
+  // updated around it. Skipped while a money action is in flight.
+  if (orderDetailCheckId && !refundBusy && !cashBusy) {
+    const t = tablesCache.find((x) => x.checkId === orderDetailCheckId);
+    if (t) renderOrderDetail(t.id);
+  }
 }
 
 async function renderOrderDetail(tableId) {
+  const seq = ++orderSeq;
   const box = $('order-detail');
   const t = tablesCache.find((x) => x.id === tableId);
   if (!t || !t.checkId) {
+    orderDetailCheckId = null;
     box.innerHTML = '<p class="empty">No open check on this table.</p>';
     return;
   }
+  orderDetailCheckId = t.checkId;
   box.innerHTML = '<p class="empty">Loading…</p>';
   let check;
   try {
     check = await PortalAPI.getCheckDetail(t.checkId);
   } catch (e) {
     if (e instanceof AuthExpired) return;
+    if (seq !== orderSeq) return;
     box.innerHTML = '<p class="empty">Could not load the check. <button class="btn btn-sm" data-order="' + esc(tableId) + '">Retry</button></p>';
     return;
   }
+  if (seq !== orderSeq) return;
   const items = check.items || [];
   const tenders = check.tenders || [];
   box.innerHTML = `
@@ -833,23 +977,26 @@ async function renderOrderDetail(tableId) {
       <button class="btn btn-sm" data-freethis="${esc(t.id)}">Free Table</button>
     </div>
     <div id="order-payments"></div>`;
-  loadOrderPayments(t.checkId);
+  loadOrderPayments(t.checkId, seq, t.name);
 }
 
 /* ---- refunds --------------------------------------------------------- */
 /* Our own payment rows for this check, each with its refundable          */
 /* remainder and a Refund action. Cash rows are listed too — the server   */
 /* answers those with a clear "refund at the till" message.               */
-async function loadOrderPayments(checkRef) {
+async function loadOrderPayments(checkRef, seq, tableName) {
   const box = $('order-payments');
   if (!box) return;
   let data;
   try {
     data = await PortalAPI.getCheckPayments(checkRef);
   } catch {
-    box.innerHTML = '';
+    if (seq === orderSeq) box.innerHTML = '';
     return;
   }
+  // F7-3: a late payments response for a check the panel no longer shows
+  // must not land under another table's header.
+  if (seq !== orderSeq) return;
   const rows = (data.payments || []).filter((p) => p.status === 'AUTHORIZED' || p.status === 'COMPLETED');
   if (!rows.length) {
     box.innerHTML = '';
@@ -859,18 +1006,18 @@ async function loadOrderPayments(checkRef) {
     '<div style="margin-top:16px"><strong>Payments</strong></div>' +
     rows
       .map((p) => {
-        const total = p.amount_cents + p.tip_cents;
+        const total = num(p.amount_cents) + num(p.tip_cents);
         const label = p.payer_label || 'Payment';
         const refunded = p.refunded_cents > 0 ? ` <span class="chip">refunded ${money(p.refunded_cents, p.currency || 'CAD')}</span>` : '';
         const btn =
           p.refundable_cents > 0
-            ? `<button class="btn btn-sm" data-refund="${esc(p.id)}" data-max="${p.refundable_cents}" data-cur="${esc(p.currency || 'CAD')}">Refund</button>`
+            ? `<button class="btn btn-sm" data-refund="${esc(p.id)}" data-max="${num(p.refundable_cents)}" data-cur="${esc(p.currency || 'CAD')}">Refund</button>`
             : '<span class="chip">fully refunded</span>';
         return `<div class="bill-line"><span>${esc(label)} — ${money(total, p.currency || 'CAD')}${refunded}</span><span>${btn}</span></div>`;
       })
       .join('');
   box.querySelectorAll('[data-refund]').forEach((b) =>
-    b.addEventListener('click', () => startRefund(b.dataset.refund, Number(b.dataset.max), b.dataset.cur, checkRef)),
+    b.addEventListener('click', () => startRefund(b.dataset.refund, Number(b.dataset.max), b.dataset.cur, checkRef, tableName)),
   );
 }
 
@@ -880,10 +1027,26 @@ async function loadOrderPayments(checkRef) {
    or a confirmed rejection. */
 const REFUND_KEY = 'st_portal_refund';
 let refundBusy = false;
+/* F7-L4: attempts carry a timestamp and are pruned after 24h — the map
+   used to live forever inside the tab's sessionStorage. */
+const ATTEMPT_TTL_MS = 24 * 3600 * 1000;
 
+function pruneAttempts(map) {
+  const now = Date.now();
+  for (const k of Object.keys(map)) {
+    const v = map[k];
+    if (!v || typeof v !== 'object' || typeof v.ts !== 'number' || now - v.ts > ATTEMPT_TTL_MS) delete map[k];
+  }
+  return map;
+}
 function loadRefundAttempts() {
   try {
-    return JSON.parse(sessionStorage.getItem(REFUND_KEY) || '{}');
+    const raw = JSON.parse(sessionStorage.getItem(REFUND_KEY) || '{}');
+    // Migrate pre-v0.8.8 entries, which stored the bare key string.
+    for (const k of Object.keys(raw)) {
+      if (typeof raw[k] === 'string') raw[k] = { key: raw[k], ts: Date.now() };
+    }
+    return pruneAttempts(raw);
   } catch {
     return {};
   }
@@ -893,33 +1056,45 @@ function saveRefundAttempts(a) {
     sessionStorage.setItem(REFUND_KEY, JSON.stringify(a));
   } catch { /* ignore */ }
 }
+function clearRefundAttempts() {
+  try { sessionStorage.removeItem(REFUND_KEY); } catch { /* ignore */ }
+}
 function newRefundKey() {
   if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
   return 'k-' + Date.now() + '-' + Math.random().toString(36).slice(2);
 }
 
-async function startRefund(paymentId, maxCents, currency, checkRef) {
+async function startRefund(paymentId, maxCents, currency, checkRef, tableName) {
   if (refundBusy) return;
   const raw = prompt(
     `Refund amount — up to ${money(maxCents, currency)}. Leave unchanged for the full remaining amount:`,
     (maxCents / 100).toFixed(2),
   );
   if (raw === null) return;
-  const cents = Math.round(parseFloat(String(raw).replace(',', '.')) * 100);
-  if (!Number.isFinite(cents) || cents <= 0 || cents > maxCents) {
+  // F7-L5: the strict cash parser — the old lenient parseFloat turned
+  // "1,234.50" into 1.234 and "1e2" into 100.
+  const parsedAmt = parseCashAmount(raw);
+  if (parsedAmt === null) {
     alert('Enter a valid amount up to the refundable remainder.');
     return;
   }
-  if (!confirm(`Refund ${money(cents, currency)} to the guest's card?`)) return;
+  const cents = Math.round(parsedAmt * 100);
+  if (cents <= 0 || cents > maxCents) {
+    alert('Enter a valid amount up to the refundable remainder.');
+    return;
+  }
+  // F7-3: the confirmation names the table, so a refund can never be
+  // approved against the wrong table's panel.
+  if (!confirm(`Refund ${money(cents, currency)} to the guest's card?${tableName ? `\nTable: ${tableName}` : ''}`)) return;
   refundBusy = true;
   try {
     const attempts = loadRefundAttempts();
     const sig = `${paymentId}|${cents}`;
     if (!attempts[sig]) {
-      attempts[sig] = newRefundKey();
+      attempts[sig] = { key: newRefundKey(), ts: Date.now() };
       saveRefundAttempts(attempts);
     }
-    const out = await PortalAPI.refundPaymentRaw(paymentId, cents, attempts[sig]);
+    const out = await PortalAPI.refundPaymentRaw(paymentId, cents, attempts[sig].key);
     if (out.ok) {
       delete attempts[sig];
       saveRefundAttempts(attempts);
@@ -941,8 +1116,13 @@ async function startRefund(paymentId, maxCents, currency, checkRef) {
     alert('Network problem — the refund may or may not have gone through. Check the payment before retrying.');
   } finally {
     refundBusy = false;
-    const t = tablesCache.find((x) => x.checkId === checkRef);
-    if (t) renderOrderDetail(t.id);
+    // F7-3: refresh the panel only if it still shows THIS check — the old
+    // finally re-rendered by check lookup and could yank the panel back
+    // to a table the staff member had already clicked away from.
+    if (orderDetailCheckId === checkRef) {
+      const t = tablesCache.find((x) => x.checkId === checkRef);
+      if (t) renderOrderDetail(t.id);
+    }
   }
 }
 
@@ -953,19 +1133,27 @@ async function startRefund(paymentId, maxCents, currency, checkRef) {
 /* dropped only after a confirmed success or a confirmed rejection.      */
 const CASH_KEY = 'st_portal_cash';
 let cashBusy = false;
-let memCash = null;
 
-function loadCashAttempt() {
-  if (memCash) return memCash;
-  try { memCash = JSON.parse(sessionStorage.getItem(CASH_KEY) || 'null'); } catch { memCash = null; }
-  return memCash;
+/* F7-4: attempts are a map keyed by (check, amount) sig — the old store
+   held ONE global slot, so recording cash for check B evicted check A's
+   retry key, and a later retry of A minted a fresh key that could record
+   the same cash twice. Mirrors the refund store. */
+function loadCashAttempts() {
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(CASH_KEY) || '{}');
+    // Migrate a pre-v0.8.8 single-slot entry ({sig, key}), if present.
+    if (raw && typeof raw.sig === 'string' && typeof raw.key === 'string') {
+      return pruneAttempts({ [raw.sig]: { key: raw.key, ts: Date.now() } });
+    }
+    return pruneAttempts(raw && typeof raw === 'object' ? raw : {});
+  } catch {
+    return {};
+  }
 }
-function saveCashAttempt(a) {
-  memCash = a;
+function saveCashAttempts(a) {
   try { sessionStorage.setItem(CASH_KEY, JSON.stringify(a)); } catch { /* ignore */ }
 }
-function clearCashAttempt() {
-  memCash = null;
+function clearCashAttempts() {
   try { sessionStorage.removeItem(CASH_KEY); } catch { /* ignore */ }
 }
 
@@ -991,18 +1179,24 @@ async function recordCashPayment() {
   const amt = parseCashAmount($('cash-amount').value);
   if (amt === null) { alert('Enter a valid amount like 12.50.'); return; }
   const cents = Math.round(amt * 100);
-  if (!drawerCheckId || !drawerTable) return;
+  // F7-4: snapshot the drawer globals NOW. The old code re-read them after
+  // the await below, so closing this drawer and opening another table
+  // mid-flight recorded this amount on the WRONG check.
+  const checkId = drawerCheckId;
+  const table = drawerTable;
+  if (!checkId || !table) return;
 
   cashBusy = true;
   const btn = $('btn-record-cash');
   if (btn) btn.disabled = true;
   try {
-    const bill = await PortalAPI.getCheckDetail(drawerCheckId).catch(() => null);
+    const bill = await PortalAPI.getCheckDetail(checkId).catch(() => null);
     if (!bill) { alert('Could not load the check. Please retry.'); return; }
 
-    const sig = `${drawerCheckId}|${cents}`;
-    let attempt = loadCashAttempt();
-    if (!attempt || attempt.sig !== sig) {
+    const sig = `${checkId}|${cents}`;
+    const attempts = loadCashAttempts();
+    let attempt = attempts[sig];
+    if (!attempt) {
       // Fresh attempt: validate against the live balance and confirm with the human.
       if (cents > bill.remaining_cents) {
         alert(`That is more than the remaining balance (${money(bill.remaining_cents, bill.currency)}).`);
@@ -1015,18 +1209,20 @@ async function recordCashPayment() {
         ? `\nNote: on ${bill.pos_type === 'shopify' ? 'Shopify' : 'Helcim'}, recording a payment marks the ENTIRE check as paid in the POS, regardless of the amount entered.`
         : '';
       if (!confirm(
-        `Record ${money(cents, bill.currency)} cash for ${drawerTable.name}?\n` +
+        `Record ${money(cents, bill.currency)} cash for ${table.name}?\n` +
         `Check total: ${money(bill.total_cents, bill.currency)}\n` +
         `Remaining after: ${money(bill.remaining_cents - cents, bill.currency)}` +
         posClosureNote,
       )) return;
-      attempt = { sig, key: newCashKey() };
-      saveCashAttempt(attempt);
+      attempt = { key: newCashKey(), ts: Date.now() };
+      attempts[sig] = attempt;
+      saveCashAttempts(attempts);
     }
 
-    const res = await PortalAPI.recordCashPaymentRaw(drawerCheckId, cents, 0, attempt.key);
+    const res = await PortalAPI.recordCashPaymentRaw(checkId, cents, 0, attempt.key);
     if (res.ok) {
-      clearCashAttempt();
+      delete attempts[sig];
+      saveCashAttempts(attempts);
       alert('Cash payment recorded.');
       closeDrawer();
       await renderView(currentView);
@@ -1034,7 +1230,8 @@ async function recordCashPayment() {
     }
     if (res.status === 400 || res.status === 402 ||
         (res.status === 409 && (res.code === 'payment_failed' || res.code === 'payment_cancelled'))) {
-      clearCashAttempt(); // confirmed: nothing was recorded
+      delete attempts[sig]; // confirmed: nothing was recorded
+      saveCashAttempts(attempts);
       alert(res.error || 'Payment rejected.');
       return;
     }
@@ -1136,9 +1333,9 @@ async function showLinkCheck(table) {
     if (!(e instanceof AuthExpired)) alert(e.message);
     return;
   }
-  if (!orders.length) { alert('No open orders in Square right now.'); return; }
+  if (!orders.length) { alert('No open orders in your POS right now.'); return; }
   $('drawer-body').innerHTML = `
-    <h4 style="margin-bottom:10px">Link a Square check to ${esc(table.name)}</h4>
+    <h4 style="margin-bottom:10px">Link a check to ${esc(table.name)}</h4>
     <label class="f-label" for="link-order">Open order</label>
     <select class="form-control" id="link-order">
       <option value="">Select an order…</option>
@@ -1170,15 +1367,30 @@ async function showLinkCheck(table) {
 }
 
 async function confirmFreeTable(table) {
-  if (!confirm(`Free ${table.name}?\n\nThe table will be marked free. Any open check is left untouched in Square.`)) return;
+  if (!confirm(`Free ${table.name}?\n\nThe table will be marked free for the next guests.`)) return;
   try {
-    await PortalAPI.freeTable(table.id);
-    closeDrawer();
-    await renderView(currentView);
-    if (currentView !== 'overview') await renderOverview();
+    await PortalAPI.freeTable(table.id, false);
   } catch (e) {
-    if (!(e instanceof AuthExpired)) alert(e.message);
+    if (e instanceof AuthExpired) return;
+    // F7-5(b): the server refuses while a check is open. Offer the force
+    // path with its real consequence instead of a dead-end error — the
+    // old copy also wrongly claimed the check would be "left untouched".
+    if (e.code !== 'open_check_exists') { alert(e.message); return; }
+    if (!confirm(
+      `${table.name} still has an open check.\n\n` +
+      'Freeing the table anyway clears that check\'s group-pay claims; the check itself stays open and must still be settled.\n\n' +
+      'Free the table anyway?',
+    )) return;
+    try {
+      await PortalAPI.freeTable(table.id, true);
+    } catch (e2) {
+      if (!(e2 instanceof AuthExpired)) alert(e2.message);
+      return;
+    }
   }
+  closeDrawer();
+  await renderView(currentView);
+  if (currentView !== 'overview') await renderOverview();
 }
 
 /** Print the table's QR. The window opens synchronously in the click handler
@@ -1204,6 +1416,9 @@ async function printQr(tableId, tableName) {
     '</body></html>',
   );
   win.document.close();
+  // F7-L10: release the blob URL once printing has had a chance to run —
+  // it used to leak for the life of the tab.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
   const doPrint = () => { win.focus(); win.print(); };
   const img = win.document.getElementById('qrimg');
   if (img && img.complete) doPrint();
@@ -1233,9 +1448,12 @@ async function renderReports() {
   }
   if (seq !== reportSeq) return;
   const label = rangeLabel(met.window_days || days);
+  // F7-L1: reports used to hard-code CAD — a USD location saw every amount
+  // mislabeled CA$. The metrics API now returns the location's currency.
+  const repCur = met.currency || 'CAD';
   $('report-cards').innerHTML = `
     <div class="card"><div class="stat-num">${fmtDur(met.avg_settlement_secs)}</div><div class="stat-label">Avg settlement time · ${esc(label)}</div></div>
-    <div class="card"><div class="stat-num">${met.settled_checks ?? '—'}</div><div class="stat-label">Settled checks · ${esc(label)}</div></div>
+    <div class="card"><div class="stat-num">${met.settled_checks == null ? '—' : num(met.settled_checks)}</div><div class="stat-label">Settled checks · ${esc(label)}</div></div>
     <div class="card"><div class="stat-num">${fmtDur(met.avg_waiter_response_secs)}</div><div class="stat-label">Avg waiter response · ${esc(label)}</div></div>
     <div class="card"><div class="stat-num">${met.open_calls == null ? '—' : num(met.open_calls)}</div><div class="stat-label">Open waiter calls</div></div>`;
 
@@ -1243,7 +1461,7 @@ async function renderReports() {
   const daily = Array.isArray(met.daily) ? met.daily : [];
   $('report-table-body').innerHTML = daily.length
     ? daily.map((r) =>
-        `<tr><td>${esc(new Date(`${r.date}T12:00:00`).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }))}</td><td>${r.checks}</td><td>${money(r.revenue_cents, 'CAD')}</td><td>${money(r.avg_tip_cents, 'CAD')}</td></tr>`,
+        `<tr><td>${esc(new Date(`${r.date}T12:00:00`).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }))}</td><td>${num(r.checks)}</td><td>${money(r.revenue_cents, repCur)}</td><td>${money(r.avg_tip_cents, repCur)}</td></tr>`,
       ).join('')
     : '<tr><td colspan="4">No settled payments in this range yet.</td></tr>';
 
@@ -1258,13 +1476,13 @@ async function renderReports() {
         const top = maxRev > 0 && x.revenue_cents === maxRev && x.revenue_cents > 0;
         return `<div class="floor-card" style="${bg}">
           <span class="floor-card-head"><span class="floor-card-name">${esc(x.table_name)}${top ? ' ⭐' : ''}</span></span>
-          <span class="floor-card-body">${money(x.revenue_cents, 'CAD')} · ${num(x.checks)} check${Number(x.checks) === 1 ? '' : 's'}</span>
+          <span class="floor-card-body">${money(x.revenue_cents, repCur)} · ${num(x.checks)} check${Number(x.checks) === 1 ? '' : 's'}</span>
         </div>`;
       }).join('')
     : '<p class="empty">No tables yet.</p>';
   $('report-tables-body').innerHTML = tbl.length
     ? tbl.map((x) =>
-        `<tr><td>${esc(x.table_name)}</td><td>${money(x.revenue_cents, 'CAD')}</td><td>${num(x.checks)}</td><td>${money(x.avg_bill_cents, 'CAD')}</td><td>${money(x.tips_cents, 'CAD')}</td><td>${num(x.share_pct)}%</td></tr>`,
+        `<tr><td>${esc(x.table_name)}</td><td>${money(x.revenue_cents, repCur)}</td><td>${num(x.checks)}</td><td>${money(x.avg_bill_cents, repCur)}</td><td>${money(x.tips_cents, repCur)}</td><td>${num(x.share_pct)}%</td></tr>`,
       ).join('')
     : '<tr><td colspan="6">No tables yet.</td></tr>';
 }
@@ -1369,8 +1587,19 @@ async function renderDevices() {
     grid.querySelectorAll('[data-revoke]').forEach((b) =>
       b.addEventListener('click', async () => {
         if (!confirm('Revoke this device? It stops working until it is paired again.')) return;
-        await request(`/api/portal/devices/${encodeURIComponent(b.getAttribute('data-revoke'))}/revoke`, { method: 'POST', body: {} });
-        renderDevices();
+        // F7-L7: the old handler ignored the response entirely — a 403 or
+        // 500 looked exactly like success, and a network failure became
+        // an unhandled rejection.
+        try {
+          const res = await request(`/api/portal/devices/${encodeURIComponent(b.getAttribute('data-revoke'))}/revoke`, { method: 'POST', body: {} });
+          if (!res.ok) {
+            const d = await readJson(res);
+            throw new Error((d && d.error) || 'Could not revoke the device.');
+          }
+          renderDevices();
+        } catch (e) {
+          if (!(e instanceof AuthExpired)) alert(e.message || 'Could not revoke the device.');
+        }
       }),
     );
   } catch (e) {
@@ -1402,6 +1631,13 @@ function loadScriptOnce(src) {
 
 async function renderBilling() {
   const box = $('billing-content');
+  // F7-8: a previous render's Square card instance is attached to a DOM
+  // node this render is about to replace — destroy it, or "Add card"
+  // reopens an empty container and Save tokenizes a detached instance.
+  if (billingCardInstance) {
+    try { if (billingCardInstance.destroy) billingCardInstance.destroy(); } catch { /* already gone */ }
+    billingCardInstance = null;
+  }
   box.innerHTML = '<div class="card"><p class="empty">Loading…</p></div>';
   let st;
   let entries = [];
@@ -1410,13 +1646,21 @@ async function renderBilling() {
     const data = await readJson(res);
     if (!res.ok) throw new Error((data && data.error) || 'Could not load billing.');
     st = data;
-    const hres = await request('/api/portal/billing/history');
-    if (hres.ok) entries = (await readJson(hres)).entries || [];
   } catch (e) {
     if (e instanceof AuthExpired) return;
     box.innerHTML = `<div class="card"><p class="empty">${esc(e.message || 'Could not load billing.')}</p></div>`;
     return;
   }
+  // F7-L13: history is isolated — its failure must not take the whole
+  // billing page down with it (a 200 with a non-JSON body used to throw
+  // here and discard the already-loaded billing state).
+  try {
+    const hres = await request('/api/portal/billing/history');
+    if (hres.ok) {
+      const hd = await readJson(hres);
+      entries = (hd && hd.entries) || [];
+    }
+  } catch { /* history stays empty; the rest of the page still renders */ }
 
   const cur = st.currency;
   const isCommission = st.effective_plan === 'commission';
@@ -1536,8 +1780,13 @@ async function initBillingCardForm() {
     await loadScriptOnce(`https://${env}web.squarecdn.com/v1/square.js`);
     if (!window.Square) throw new Error('Could not load the secure card form — check your connection and try again.');
     const payments = window.Square.payments(cfg.publishableKey, cfg.extra.locationId);
-    billingCardInstance = await payments.card();
-    await billingCardInstance.attach('#billing-sq-card');
+    // F7-8: assign the shared instance only AFTER attach succeeds — the
+    // old order assigned first, so an attach failure left a non-null
+    // instance that blocked every later attempt (and the Save listener
+    // below was never registered).
+    const card = await payments.card();
+    await card.attach('#billing-sq-card');
+    billingCardInstance = card;
     $('billing-card-save').addEventListener('click', saveBillingCard);
   } catch (e) {
     if (msg) msg.textContent = e.message || 'Could not load the card form.';
@@ -1733,7 +1982,7 @@ async function renderSettings() {
         list.innerHTML = '<p class="inline-note">No feedback yet.</p>';
       } else {
         list.innerHTML = fb.map((f) => `
-          <div class="kv"><span>${'⭐'.repeat(f.rating)}${f.comment ? ` — ${esc(f.comment)}` : ''}</span>
+          <div class="kv"><span>${'⭐'.repeat(Math.min(5, Math.max(0, Math.round(num(f.rating)))))}${f.comment ? ` — ${esc(f.comment)}` : ''}</span>
           <span class="k" style="font-size:0.75rem;">${new Date(f.created_at).toLocaleDateString()}</span></div>
         `).join('');
       }
@@ -1769,7 +2018,11 @@ setInterval(() => {
   if (anyOverlayOpen()) return;
   if (!$('app-shell').classList.contains('on')) return;
   if (!token) return;
-  if (currentView === 'staff' || currentView === 'devices' || currentView === 'billing' || currentView === 'settings') return;
+  // F7-2: honor the server's Retry-After (set by request() on a 429).
+  if (Date.now() < pollsPausedUntil) return;
+  // F7-2: Reports is NOT polled — re-running its aggregate queries every
+  // 5s bought nothing; it renders on view entry and on range change.
+  if (currentView === 'staff' || currentView === 'devices' || currentView === 'billing' || currentView === 'settings' || currentView === 'reports') return;
   renderView(currentView).catch(() => { /* next tick */ });
 }, 5000);
 
