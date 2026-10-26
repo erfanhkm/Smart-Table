@@ -98,6 +98,20 @@ export function orderRemaining(order: SquareOrder): number {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const due = (order as any)?.net_amount_due_money?.amount;
   if (typeof due === 'number') return due;
+  return orderTenderRemaining(order);
+}
+
+/**
+ * Bill coverage from the order's tenders alone: total − Σ(amount − tip)
+ * (a tender's amount_money INCLUDES its tip; the tip is not bill
+ * coverage). Unlike orderRemaining this ignores net_amount_due_money,
+ * which does NOT fall for an authorized (autocomplete:false) payment —
+ * Square settles those only at PayOrder (v0.8.10, proven live
+ * 2026-10-25). The Square adapter's post-charge close-out decision
+ * uses this: the question there is whether the tenders ON the order
+ * cover the bill, and the just-landed payment's tender is already on it.
+ */
+export function orderTenderRemaining(order: SquareOrder): number {
   const total: number = order?.total_money?.amount ?? 0;
   const paid: number = (order?.tenders ?? []).reduce(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -24,6 +24,7 @@ import {
   getMerchantProfile,
   listLocations,
   orderRemaining,
+  orderTenderRemaining,
   payOrder,
   retrieveOrder,
   retrievePayment,
@@ -287,8 +288,17 @@ export const squareAdapter: PosAdapter = {
       return { paymentId: payment.id, remainingCents: null, currency: args.currency, replayed: false, feeCollected };
     }
     const d = mapDetail(order);
-    if (d.remainingCents > 0) {
-      return { paymentId: payment.id, remainingCents: d.remainingCents, currency: d.currency, replayed: false, feeCollected };
+    // v0.8.10: net_amount_due_money does NOT fall for an authorized
+    // (autocomplete:false) payment — Square settles it only at PayOrder
+    // (proven live 2026-10-25: minutes after a full-coverage charge the
+    // order still showed the full amount due, so this net-due gate
+    // parked every charge at AUTHORIZED and the order never closed).
+    // Coverage is judged from the order's tenders instead: the
+    // just-landed payment's tender is already on the order, and each
+    // tender covers (amount − tip) of the bill.
+    const tenderRemaining = orderTenderRemaining(order);
+    if (d.remainingCents > 0 && tenderRemaining > 0) {
+      return { paymentId: payment.id, remainingCents: tenderRemaining, currency: d.currency, replayed: false, feeCollected };
     }
     // Fully covered: close the order in Square. PayOrder requires the ids
     // of EVERY payment tendered on the order — including tenders recorded
