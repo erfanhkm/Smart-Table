@@ -7,6 +7,7 @@ import { requirePortalRole, staffOnly } from '../auth.js';
 import { badRequest, forbidden, notFound } from '../http.js';
 import { query } from '../db.js';
 import { listCheckPayments, refundPayment } from '../services/refunds.js';
+import { assertNotDemoLocation } from '../services/demo-guard.js';
 
 async function locationOfCheck(checkId: string): Promise<string | null> {
   const r = await query<{ location_id: string }>(
@@ -63,6 +64,9 @@ export async function refundRoutes(app: FastifyInstance): Promise<void> {
     if (!row) throw notFound('payment not found');
     const locationId = await locationOfCheck(row.check_id);
     assertScope(req, locationId);
+    // v0.8.12 (F9-3): refunds move real money at the POS — refused for
+    // demo locations (owner-demo prospects share the demo location).
+    if (locationId) await assertNotDemoLocation(locationId, 'Refunds');
     return refundPayment({
       paymentRowId: paymentId,
       amountCents: typeof body.amount_cents === 'number' ? body.amount_cents : undefined,

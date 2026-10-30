@@ -1,0 +1,5 @@
+Contact: mailto:info@smarttablepay.com
+Expires: 2027-10-29T00:00:00.000Z
+Preferred-Languages: en
+Policy: https://smarttablepay.com/privacy.html
+Canonical: https://smarttablepay.com/.well-known/security.txt

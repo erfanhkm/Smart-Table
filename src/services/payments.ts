@@ -25,6 +25,7 @@ import {
   createPayment, orderRemaining, payOrder, retrieveOrder, SquareError, squareErrorCode,
 } from '../square.js';
 import { getCheckPos, TENDER_BLIND_POS } from './pos/context.js';
+import { config } from '../config.js';
 import { effectivePlan, ensureBillingAccount, feeFor, recordFee } from './billing.js';
 import { badRequest, conflict, httpError, isClientError } from '../http.js';
 
@@ -289,6 +290,15 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
   const ctx = await getCheckPos(checkId);
   const { adapter, posType, token } = ctx;
   const nativeRef = ctx.checkRef;
+  // v0.8.12 (F9-2): demo locations are SANDBOX-ONLY. Their "test mode,
+  // nothing is charged" promise rests entirely on the Square
+  // environment; if the platform ever flips to production, a demo
+  // location still pointing at sandbox credentials (or, worse, at a
+  // seller's live account) must refuse payment attempts outright
+  // rather than charge — or fail confusingly against — a real card.
+  if (ctx.demo && config.squareEnv === 'production') {
+    throw badRequest('demo location: payments are disabled while Square is in production mode');
+  }
   // F1-15: a location with no configured currency used to skip the D-6
   // mismatch check silently. Locations always carry CAD by schema default,
   // so a missing value means broken data — refuse outside demo mode.

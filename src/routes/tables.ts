@@ -13,6 +13,7 @@ import { badRequest, conflict, forbidden, notFound } from '../http.js';
 import { getTables } from '../services/floor.js';
 import { logAudit } from '../services/audit.js';
 import { getLocationPos } from '../services/pos/context.js';
+import { assertNotDemoLocation } from '../services/demo-guard.js';
 import { PosCheckDetail } from '../services/pos/types.js';
 import { retrieveOrder, SquareError } from '../square.js';
 import { assertPortalLocation, requirePortalRole, scopedLocationId, staffOnly } from '../auth.js';
@@ -207,7 +208,10 @@ export async function tableRoutes(app: FastifyInstance) {
   app.post('/api/tables/:id/rotate-qr', staffOnly, async (req) => {
     const tableId = (req.params as { id: string }).id;
     requirePortalRole(req, 'owner', 'manager');
-    await loadTableScoped(req, tableId);
+    const tbl = await loadTableScoped(req, tableId);
+    // v0.8.12 (F9-3): rotating a demo location's QR would kill the
+    // token the marketing site publishes — refused for demo locations.
+    await assertNotDemoLocation(tbl.location_id, 'QR rotation');
     const qrToken = randomUUID().replace(/-/g, '');
     await query(`UPDATE tables SET qr_token = $1 WHERE id = $2`, [qrToken, tableId]);
     await query(`INSERT INTO events(id, table_id, type) VALUES ($1,$2,'qr_rotated')`, [randomUUID(), tableId]);

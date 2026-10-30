@@ -87,6 +87,16 @@ export async function demoAccessRoutes(app: FastifyInstance) {
     const locationsCount = intField(b, 'locations_count');
     const tablesCount = intField(b, 'tables_count');
 
+    // v0.8.12 (F9-4/F9-16): dedupe — a double-submit (or an impatient
+    // retry after a slow response) with the same email while a request
+    // is still pending must not insert a second row or send Erfan a
+    // second notification. The caller still sees the same success.
+    const dupe = await query(
+      `SELECT id FROM demo_access_requests WHERE lower(email) = lower($1) AND status = 'pending' LIMIT 1`,
+      [email],
+    );
+    if ((dupe.rowCount ?? 0) > 0) return { ok: true };
+
     const id = randomUUID();
     const submittedAt = new Date().toISOString();
     await query(

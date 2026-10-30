@@ -118,12 +118,14 @@ function wireHead() {
   if (sel) sel.addEventListener('change', () => {
     state.lang = sel.value;
     phoneApp.dir = state.lang === 'fa' ? 'rtl' : 'ltr';
+    phoneApp.lang = state.lang;
     render();
   });
 }
 
 function render() {
   wireHeadCleanup();
+  phoneApp.lang = state.lang;
   if (state.phase === 'scan') renderScan();
   else if (state.phase === 'bill') renderBill();
   else if (state.phase === 'card') renderCard();
@@ -225,7 +227,7 @@ function renderCard() {
     '<div class="g-body">' +
       '<div class="g-card"><div class="g-total" style="padding-top:0;"><span>' + t('totalBill') + '</span><span>' + fmt(dueCents()) + '</span></div>' +
       '<p style="font-size:0.83rem;color:var(--text-muted);">' + t('yourShare') + ' ' + fmt(shareCents()) + ' · ' + t('addTip') + ' ' + fmt(tipCents()) + '</p></div>' +
-      '<button class="g-applepay" id="applePayBtn"> Pay with Apple&nbsp;Pay</button>' +
+      '<button class="g-applepay" id="applePayBtn">Pay with Apple&nbsp;Pay</button>' +
       '<div class="g-or">' + t('orPayWithCard') + '</div>' +
       '<div class="g-card"><h4>' + t('cardWord') + '</h4>' +
       '<input class="g-input" id="ccNum" value="4242 4242 4242 4242" inputmode="numeric" aria-label="' + t('cardNumber') + '">' +
@@ -260,7 +262,7 @@ function doPay() {
     $('liveChip').className = 'chip paid';
     $('liveSub').textContent = '4 guests · settled ' + fmt(dueCents());
     const secs = Math.max(1, Math.round((Date.now() - state.scanAt) / 1000));
-    $('settleTimer').textContent = '0:' + String(secs).padStart(2, '0');
+    $('settleTimer').textContent = Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
     feed('✅ Payment received — ' + fmt(dueCents()) + ' · Table 5 is PAID');
     render();
   }, 1400);

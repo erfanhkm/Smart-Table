@@ -11,6 +11,7 @@ import { getCheckPos, getLocationPos } from '../services/pos/context.js';
 import { getTables } from '../services/floor.js';
 import { assertSquareId, searchOpenOrders } from '../square.js';
 import { parsePaymentBody, payCheck } from '../services/payments.js';
+import { assertNotDemoLocation } from '../services/demo-guard.js';
 import { logAudit } from '../services/audit.js';
 import { requirePortalRole, scopedLocationId, staffOnly } from '../auth.js';
 
@@ -172,6 +173,11 @@ export async function staffRoutes(app: FastifyInstance) {
       if (url && !isValidGoogleReviewUrl(url)) {
         throw badRequest('google_review_url must be a Google Maps / g.page link');
       }
+      // v0.8.12 (F9-3): the review URL is where 4-5 star demo guests are
+      // sent — a prospect with a demo login must not be able to point
+      // it somewhere malicious. Review-URL changes are refused for
+      // demo locations (other settings stay editable).
+      await assertNotDemoLocation(id, 'Google review URL changes');
       sets.push(`google_review_url = $${i++}`); vals.push(url || null);
     }
     if (!sets.length) throw badRequest('nothing to update');
@@ -348,6 +354,9 @@ export async function staffRoutes(app: FastifyInstance) {
     const wantLoc = u ? u.location_id : (bodyLoc as string);
     const row = rows.rows.find((r) => r.location_id === wantLoc);
     if (!row) throw notFound('check not found');
+    // v0.8.12 (F9-3): recording a cash payment closes a demo check with
+    // fake money — refused for demo locations.
+    if (row.location_id) await assertNotDemoLocation(row.location_id, 'Recording cash payments');
     const actor = u ? u.id : 'staff-token';
     const result = await payCheck({
       checkRef: ref,

@@ -79,10 +79,8 @@
       ]
     }
     </script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="dns-prefetch" href="https://static.cloudflareinsights.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="/fonts/fonts.css" rel="stylesheet">
     <style>
         :root {
             --navy: #0E1B2C;
@@ -465,7 +463,7 @@
                 </div>
                 <div class="card">
                     <h3>Waiter calls, timestamped</h3>
-                    <p>Guests press the call button on the table's Smart Table device. Staff see a timestamped queue and acknowledge in one tap.</p>
+                    <p>Coming with the Smart Table device: guests press its physical call button, and staff see a timestamped queue they can acknowledge in one tap.</p>
                 </div>
                 <div class="card">
                     <h3>No app download</h3>
@@ -518,7 +516,7 @@
                         <div class="spec-icon" aria-hidden="true">🔔</div>
                         <div class="spec-text">
                             <h4>Waiter-call button</h4>
-                            <p>Today: guests tap Call waiter on the bill page and it lands in your queue. Planned: a physical button on the device.</p>
+                            <p>Planned: a physical button on the device — presses land in a timestamped queue in your dashboard.</p>
                         </div>
                     </div>
                     <div class="spec-item">
@@ -625,7 +623,8 @@
                         <li>2% of each card payment made through Smart Table</li>
                         <li>No fixed monthly cost — ideal for trying it out</li>
                         <li>Pay at the table, bill splitting and tips</li>
-                        <li>Review capture (happy guests go to Google)</li>
+                        <li>Review capture — guests can leave private feedback or a public review</li>
+                        <li>Optional loyalty program</li>
                         <li>Email and print receipts</li>
                     </ul>
                     <a href="#partner" class="btn-primary">Get started</a>
@@ -634,10 +633,11 @@
                     <div class="pricing-badge">Available now</div>
                     <h3>Base</h3>
                     <div class="plan-price">$99 <span>/ month</span></div>
-                    <p class="plan-sub">One flat monthly price. No per-payment commission, ever.</p>
+                    <p class="plan-sub">One flat monthly price. No per-payment commission.</p>
                     <ul>
                         <li>Unlimited table payments — no 2% fee</li>
-                        <li>Everything in Commission, plus QR ordering</li>
+                        <li>Everything in Commission</li>
+                        <li>QR ordering from your POS menu</li>
                         <li>Owner dashboard and sales reporting</li>
                         <li>Less than one server shift a month</li>
                         <li>Switch plans any time from your portal</li>
@@ -653,7 +653,6 @@
                         <li>Multiple locations under one account</li>
                         <li>Advanced analytics — per table, per server, peak hours</li>
                         <li>Your own branding on the guest page</li>
-                        <li>Loyalty program included</li>
                         <li>Device health monitoring and priority replacement</li>
                         <li>On-site setup, staff training and priority support</li>
                     </ul>
@@ -697,27 +696,27 @@
                     <div class="form-grid">
                         <div class="form-group">
                             <label for="f-restaurant">Restaurant name</label>
-                            <input type="text" id="f-restaurant" name="restaurant_name" class="form-control" placeholder="e.g. Your Bistro" required autocomplete="organization">
+                            <input type="text" id="f-restaurant" name="restaurant_name" class="form-control" placeholder="e.g. Your Bistro" required autocomplete="organization" maxlength="160">
                         </div>
                         <div class="form-group">
                             <label for="f-name">Your name</label>
-                            <input type="text" id="f-name" name="name" class="form-control" placeholder="e.g. Jordan Lee" required autocomplete="name">
+                            <input type="text" id="f-name" name="name" class="form-control" placeholder="e.g. Jordan Lee" required autocomplete="name" maxlength="120">
                         </div>
                     </div>
                     <div class="form-grid">
                         <div class="form-group">
                             <label for="f-email">Work email</label>
-                            <input type="email" id="f-email" name="email" class="form-control" placeholder="e.g. you@yourrestaurant.ca" required autocomplete="email">
+                            <input type="email" id="f-email" name="email" class="form-control" placeholder="e.g. you@yourrestaurant.ca" required autocomplete="email" maxlength="200">
                         </div>
                         <div class="form-group">
                             <label for="f-phone">Phone number <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
-                            <input type="tel" id="f-phone" name="phone" class="form-control" placeholder="(604) 555-0000" autocomplete="tel">
+                            <input type="tel" id="f-phone" name="phone" class="form-control" placeholder="(604) 555-0000" autocomplete="tel" maxlength="40">
                         </div>
                     </div>
                     <div class="form-grid">
                         <div class="form-group">
                             <label for="f-city">City</label>
-                            <input type="text" id="f-city" name="city" class="form-control" placeholder="e.g. Vancouver" required autocomplete="address-level2">
+                            <input type="text" id="f-city" name="city" class="form-control" placeholder="e.g. Vancouver" required autocomplete="address-level2" maxlength="120">
                         </div>
                         <div class="form-group">
                             <label for="f-tables">Number of tables</label>
@@ -735,11 +734,11 @@
                     </div>
                     <div class="form-group">
                         <label for="f-message">Message</label>
-                        <textarea id="f-message" name="message" class="form-control" rows="4" placeholder="Tell us about your service style..."></textarea>
+                        <textarea id="f-message" name="message" class="form-control" rows="4" placeholder="Tell us about your service style..." maxlength="2000"></textarea>
                     </div>
                     <label class="consent" for="f-consent">
                         <input type="checkbox" id="f-consent" name="consent" required>
-                        <span>I agree to be contacted about Smart Table.</span>
+                        <span>I agree to be contacted about Smart Table. See our <a href="/privacy.html">Privacy Policy</a>.</span>
                     </label>
                     <button type="submit" class="btn-primary" style="width: 100%; border: none; cursor: pointer; margin-top: 10px;">Submit application</button>
                     <div class="form-microcopy">We reply within 2 business days. We use your details only to respond to your inquiry.</div>
@@ -793,24 +792,24 @@
                     <div class="form-grid">
                         <div class="form-group" style="text-align: left;">
                             <label for="c-name">Name</label>
-                            <input type="text" id="c-name" name="name" class="form-control" placeholder="Your name" required autocomplete="name">
+                            <input type="text" id="c-name" name="name" class="form-control" placeholder="Your name" required autocomplete="name" maxlength="120">
                         </div>
                         <div class="form-group" style="text-align: left;">
                             <label for="c-restaurant">Restaurant</label>
-                            <input type="text" id="c-restaurant" name="restaurant" class="form-control" placeholder="Restaurant name" required autocomplete="organization">
+                            <input type="text" id="c-restaurant" name="restaurant" class="form-control" placeholder="Restaurant name" required autocomplete="organization" maxlength="160">
                         </div>
                     </div>
                     <div class="form-group" style="text-align: left;">
                         <label for="c-email">Email</label>
-                        <input type="email" id="c-email" name="email" class="form-control" placeholder="you@yourrestaurant.ca" required autocomplete="email">
+                        <input type="email" id="c-email" name="email" class="form-control" placeholder="you@yourrestaurant.ca" required autocomplete="email" maxlength="200">
                     </div>
                     <div class="form-group" style="text-align: left;">
                         <label for="c-message">Message</label>
-                        <textarea id="c-message" name="message" class="form-control" rows="4" placeholder="What's on your mind?" required></textarea>
+                        <textarea id="c-message" name="message" class="form-control" rows="4" placeholder="What's on your mind?" required maxlength="2000"></textarea>
                     </div>
                     <label class="consent" for="c-consent" style="text-align: left;">
                         <input type="checkbox" id="c-consent" name="consent" required>
-                        <span>I agree to be contacted about Smart Table.</span>
+                        <span>I agree to be contacted about Smart Table. See our <a href="/privacy.html">Privacy Policy</a>.</span>
                     </label>
                     <button type="submit" class="btn-primary" style="width: 100%; border: none; cursor: pointer; margin-top: 10px;">Send message</button>
                 </form>

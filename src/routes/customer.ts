@@ -591,7 +591,7 @@ export async function customerRoutes(app: FastifyInstance) {
   app.post('/api/t/:token/receipt-email', { preHandler: tokenWriteLimiter }, async (req) => {
     const { token } = req.params as { token: string };
     const t = await query(
-      `SELECT t.id, t.name AS table_name, t.location_id, l.name AS location_name
+      `SELECT t.id, t.name AS table_name, t.location_id, l.name AS location_name, l.demo AS location_demo
        FROM tables t JOIN locations l ON l.id = t.location_id WHERE t.qr_token = $1`,
       [token],
     );
@@ -618,6 +618,15 @@ export async function customerRoutes(app: FastifyInstance) {
     );
     if (p.rowCount === 0) throw badRequest('no recent completed payment found for this table');
     const pay = p.rows[0];
+    // v0.8.12 (F9-1): DEMO locations never actually send. The published
+    // demo token would otherwise turn this route into an email relay to
+    // arbitrary addresses. The response is indistinguishable from an
+    // accepted send (guest UX identical), the one-send slot is NOT
+    // claimed, and the suppression is logged.
+    if (t.rows[0].location_demo) {
+      console.log(`[demo] receipt email suppressed for demo location ${t.rows[0].location_id} (payment ${pay.id})`);
+      return { ok: true, sent: true };
+    }
     // One send per payment: claim the receipt slot atomically.
     const claim = await query(
       `UPDATE payments SET receipt_emailed_at = now() WHERE id = $1 AND receipt_emailed_at IS NULL RETURNING id`,
@@ -658,7 +667,7 @@ export async function customerRoutes(app: FastifyInstance) {
   app.post('/api/t/:token/receipt-print', { preHandler: tokenWriteLimiter }, async (req) => {
     const { token } = req.params as { token: string };
     const t = await query(
-      `SELECT t.id, t.name AS table_name, t.location_id, l.name AS location_name
+      `SELECT t.id, t.name AS table_name, t.location_id, l.name AS location_name, l.demo AS location_demo
        FROM tables t JOIN locations l ON l.id = t.location_id WHERE t.qr_token = $1`,
       [token],
     );
@@ -679,6 +688,15 @@ export async function customerRoutes(app: FastifyInstance) {
     );
     if (p.rowCount === 0) throw badRequest('no recent completed payment found for this table');
     const pay = p.rows[0];
+    // v0.8.12 (F9-1): DEMO locations never queue a print job — the
+    // published demo token must not be able to drive a paired device's
+    // printer. The response matches a successful queue (guest UX
+    // identical); no job is created and the one-print slot is NOT
+    // claimed.
+    if (t.rows[0].location_demo) {
+      console.log(`[demo] receipt print suppressed for demo location ${t.rows[0].location_id} (payment ${pay.id})`);
+      return { ok: true, printed: true, demo: true };
+    }
     const dev = await query<{ id: string }>(
       `SELECT id FROM devices WHERE table_id = $1 AND revoked_at IS NULL`,
       [t.rows[0].id],

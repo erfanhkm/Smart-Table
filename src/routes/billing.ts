@@ -13,6 +13,7 @@ import {
   switchPlan,
   type BillingPlan,
 } from '../services/billing.js';
+import { assertNotDemoLocation } from '../services/demo-guard.js';
 
 function resolveLocationId(req: FastifyRequest, given?: unknown): string {
   const u = req.portalUser;
@@ -60,6 +61,9 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     requirePortalRole(req, 'owner', 'manager');
     const body = (req.body ?? {}) as Record<string, unknown>;
     const locationId = resolveLocationId(req, body.location_id);
+    // v0.8.12 (F9-3): a card saved on the demo location would be charged
+    // on the platform's real Square account — refused for demo locations.
+    await assertNotDemoLocation(locationId, 'Billing card changes');
     const sourceId = typeof body.source_id === 'string' ? body.source_id : '';
     const verificationToken =
       typeof body.verification_token === 'string' ? body.verification_token : undefined;
@@ -72,6 +76,8 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     requirePortalRole(req, 'owner', 'manager');
     const body = (req.body ?? {}) as Record<string, unknown>;
     const locationId = resolveLocationId(req, body.location_id);
+    // v0.8.12 (F9-3): plan changes on the shared demo location are refused.
+    await assertNotDemoLocation(locationId, 'Billing plan changes');
     const plan = body.plan;
     if (plan !== 'commission' && plan !== 'subscription') {
       throw badRequest('plan must be commission or subscription');
