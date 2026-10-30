@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
     <title>Smart Table Staff Dashboard</title>
     <style>
         :root {
@@ -80,7 +81,7 @@
         <div class="auth-box">
             <h2>Staff Authentication</h2>
             <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:16px;">Enter your staff API token to access the floor dashboard.</p>
-            <input type="password" id="staff-token-input" placeholder="Enter bearer token...">
+            <input type="password" id="staff-token-input" autocomplete="off" placeholder="Enter bearer token...">
             <div id="auth-error" role="alert" style="color:#dc2626;font-size:0.85rem;margin-bottom:10px;display:none;"></div>
             <button class="btn-action" data-action="save-token">Authenticate</button>
         </div>
@@ -148,7 +149,7 @@
     <script>
 'use strict';
 // ---------------------------------------------------------------------------
-// Smart Table — staff dashboard. API contract (backend v0.2), all staff calls need `Authorization: Bearer <STAFF_API_TOKEN>`:
+// Smart Table — staff dashboard. API contract (current backend), all staff calls need `Authorization: Bearer <STAFF_API_TOKEN>`:
 //   GET  /api/locations                          -> { locations:[{id,square_location_id,name,currency}] }
 //   GET  /api/dashboard/overview?location_id=    -> { tables:[{id,name,state,qr_token,open_order_id,paid_cents}], waiter_calls:[{id,table_id,table_name,created_at}] }
 //   GET  /api/dashboard/metrics?location_id=&days= -> { settled_checks, avg_settlement_secs|null, avg_waiter_response_secs|null, answered_calls, open_calls }

@@ -205,7 +205,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // ---- Overview stats ----
   app.get('/api/admin/overview', { onRequest: founderOnly }, async () => {
-    const [locs, tables, checks, pays] = await Promise.all([
+    const [locs, tables, checks, pays, revByCur] = await Promise.all([
       query(`SELECT COUNT(*)::int AS n FROM locations`),
       query(`SELECT COUNT(*)::int AS n FROM tables`),
       query(`SELECT COUNT(*)::int AS n FROM checks WHERE state = 'OPEN'`),
@@ -214,6 +214,14 @@ export async function adminRoutes(app: FastifyInstance) {
          FROM payments WHERE status IN ('AUTHORIZED','COMPLETED')
          AND created_at > now() - interval '24 hours'`,
       ),
+      // F10-5: revenue grouped by its real currency — the panel must
+      // never present one mixed-currency sum labeled as CAD.
+      query(
+        `SELECT currency, COALESCE(SUM(amount_cents + tip_cents), 0)::bigint AS total
+         FROM payments WHERE status IN ('AUTHORIZED','COMPLETED')
+         AND created_at > now() - interval '24 hours'
+         GROUP BY currency ORDER BY currency`,
+      ),
     ]);
     return {
       locations: locs.rows[0].n,
@@ -221,6 +229,10 @@ export async function adminRoutes(app: FastifyInstance) {
       open_checks: checks.rows[0].n,
       payments_24h: pays.rows[0].n,
       revenue_24h_cents: Number(pays.rows[0].total),
+      revenue_24h_by_currency: revByCur.rows.map((r: any) => ({
+        currency: r.currency ?? null,
+        total_cents: Number(r.total),
+      })),
     };
   });
 
