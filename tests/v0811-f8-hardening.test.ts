@@ -103,7 +103,7 @@ describe('v0.8.11 F8 guest hardening', () => {
     assert.ok(src.includes('rel="noopener noreferrer"'), 'review link hardened');
     assert.ok(src.includes('let receiptEmailSending = false'), 'receipt email double-tap guard');
     assert.ok(src.includes("receiptPrintState === 'failed' || receiptPrintState === 'unavailable'"), 'failed print offers a retry');
-    assert.ok(html.includes('/t/app.js?v=0.8.13'), 'guest script is version-pinned against the CDN cache');
+    assert.ok(html.includes('/t/app.js?v=0.8.14'), 'guest script is version-pinned against the CDN cache');
   });
 
   it('i18n: all five languages keep identical keys and placeholders', () => {

@@ -192,6 +192,12 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   const payLimiter = rateLimit({ name: 'pay', windowMs: 60_000, max: 20 });
   const generalLimiter = rateLimit({ name: 'general', windowMs: 60_000, max: 200 });
   const webhookLimiter = rateLimit({ name: 'webhook', windowMs: 60_000, max: 600 });
+  // v0.8.14 (F11-6): device traffic gets its own generous bucket. A floor
+  // of STT-101s polls state every 5s from behind one venue NAT; sharing
+  // the 200/min general bucket with guest traffic let a busy rush 429 the
+  // restaurant's own devices. 600/min/IP is far above any real floor
+  // (dozens of devices) while staying bounded.
+  const deviceLimiter = rateLimit({ name: 'device', windowMs: 60_000, max: 600 });
   app.addHook('onRequest', async (req, reply) => {
     // Redirect the raw Render hostname to the custom domain (v0.2).
     // portal.smarttablepay.com is the canonical host; smart-table-vc0t.onrender.com
@@ -205,6 +211,8 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
       return reply.code(req.method === 'GET' || req.method === 'HEAD' ? 301 : 308).header('Location', target).send();
     }
     if (req.url.startsWith('/api/webhooks/')) return webhookLimiter(req, reply);
+    // v0.8.14 (F11-6): device paths leave the general bucket (see above).
+    if (req.url.split('?')[0].startsWith('/api/device/')) return deviceLimiter(req, reply);
     // G-5: match the two money-moving POST routes EXACTLY. The old
     // substring test (url.includes('/pay')) also swept read-only routes
     // like GET /api/portal/checks/:id/payments and /api/admin/payments

@@ -115,7 +115,7 @@ describe('v0.8.13 F10 admin + shells hardening', () => {
 
   it('F10-2/4/7/8/9/14: admin client source shapes', () => {
     const js = readFileSync(new URL('../public/admin/app.js', import.meta.url), 'utf8');
-    assert.ok(js.startsWith('// Smart Table — Founder Admin (v0.8.13)'), 'stale v0.6.10 header replaced');
+    assert.ok(js.startsWith('// Smart Table — Founder Admin (v0.8.14)'), 'stale v0.6.10 header replaced');
     assert.ok(js.includes("fetch('/api/admin/logout'"), 'signOut calls the server logout endpoint');
     assert.ok(js.includes('clearInterval(pollTimer)'), 'polling interval is cleared');
     assert.ok(js.includes('loadInFlight'), 'load has an in-flight guard');
@@ -126,7 +126,7 @@ describe('v0.8.13 F10 admin + shells hardening', () => {
     assert.ok(js.includes('not-configured'), 'analytics distinguishes unconfigured from failed');
     const html = readFileSync(new URL('../public/admin/index.html', import.meta.url), 'utf8');
     assert.ok(html.includes('id="load-error"'), 'admin shell has the load-error banner element');
-    assert.ok(html.includes('v0.8.13'), 'admin shell carries the current version label');
+    assert.ok(html.includes('v0.8.14'), 'admin shell carries the current version label');
   });
 
   it('F10-10/13: portal + dashboard shell shapes', () => {

@@ -82,6 +82,9 @@ describe('pairing', () => {
 
   it('rejects an expired code', async () => {
     const code = '42424242';
+    // Stored under the LEGACY sha256 hash on purpose: v0.8.14 moved claim
+    // codes to keyed HMAC storage, and the claim path's legacy fallback
+    // must still find pre-change rows (they live 10 minutes at most).
     await query(
       `INSERT INTO device_claim_codes(code_hash, location_id, table_id, expires_at)
        VALUES ($1,$2,$3, now() - interval '1 minute')`,
@@ -89,7 +92,10 @@ describe('pairing', () => {
     );
     const res = await claim(code);
     assert.equal(res.statusCode, 400);
-    assert.match(res.body, /expired/);
+    // v0.8.14 (F11-1): expired answers with the SAME generic error as an
+    // unknown code — the old distinct "expired" message confirmed the
+    // probed code existed.
+    assert.match(res.body, /invalid claim code/);
   });
 
   it('claim code for an unknown table 404s', async () => {
@@ -113,7 +119,9 @@ describe('pairing', () => {
     deviceId = body.device_id;
     const again = await claim(code);
     assert.equal(again.statusCode, 400);
-    assert.match(again.body, /already used/);
+    // v0.8.14 (F11-1): used codes get the same generic error as unknown
+    // ones (was: a distinct "already used" message).
+    assert.match(again.body, /invalid claim code/);
   });
 
   it('stores only the token hash', async () => {

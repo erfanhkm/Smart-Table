@@ -14,6 +14,23 @@ export interface ReceiptLineInput {
   paidAt: string; // pre-formatted date/time line
 }
 
+// v0.8.14 (F11-3): receipt lines are printed by ESC/POS hardware. Any C0/C1
+// control byte in a line is a printer instruction, not text: ESC starts a
+// command sequence (cut, drawer kick, density), BEL rings the buzzer, the
+// rest corrupt the job. POS item names and staff free-text lines are
+// merchant-controlled, so strip every control character except the plain
+// newline at job-creation time (and from the formatter's own inputs, whose
+// column math counts characters — a control byte is not a column).
+const CONTROL_CHARS = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/g;
+
+export function stripControlChars(text: string): string {
+  return text.replace(CONTROL_CHARS, '');
+}
+
+export function sanitizePrintLines(lines: string[]): string[] {
+  return lines.map((l) => stripControlChars(l));
+}
+
 const WIDTH = 32;
 const RULE = '-'.repeat(WIDTH);
 
@@ -38,18 +55,18 @@ function twoCol(left: string, right: string): string[] {
 export function buildReceiptLines(input: ReceiptLineInput): string[] {
   const currency = input.currency || 'CAD';
   const lines: string[] = [];
-  lines.push(centered(input.restaurantName || 'Smart Table'));
-  lines.push(centered(`Table ${input.tableName}`));
+  lines.push(centered(stripControlChars(input.restaurantName || 'Smart Table')));
+  lines.push(centered(`Table ${stripControlChars(input.tableName)}`));
   lines.push(RULE);
   for (const item of input.items) {
-    lines.push(...twoCol(`${item.quantity} x ${item.name}`, money(item.amountCents, currency)));
+    lines.push(...twoCol(`${item.quantity} x ${stripControlChars(item.name)}`, money(item.amountCents, currency)));
   }
   if (input.items.length > 0) lines.push(RULE);
   lines.push(...twoCol('Paid', money(input.amountCents, currency)));
   if (input.tipCents > 0) lines.push(...twoCol('Tip', money(input.tipCents, currency)));
   lines.push(...twoCol('Total', money(input.amountCents + input.tipCents, currency)));
   lines.push(RULE);
-  lines.push(input.paidAt.slice(0, 80));
+  lines.push(stripControlChars(input.paidAt).slice(0, 80));
   lines.push(centered('Thank you!'));
   return lines;
 }

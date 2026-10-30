@@ -12,7 +12,8 @@ import { getCachedMenu, getCheckPos, getLocationPos } from '../services/pos/cont
 import { PosCheckDetail } from '../services/pos/types.js';
 import { CARD_NONCE_RE, parsePaymentBody, payCheck } from '../services/payments.js';
 import { sendReceiptEmail } from '../services/email.js';
-import { buildReceiptLines } from '../services/receiptLines.js';
+import { buildReceiptLines, sanitizePrintLines } from '../services/receiptLines.js';
+import { countActivePrintJobs, MAX_ACTIVE_PRINT_JOBS } from './device.js';
 import { raiseServiceAlert } from '../services/alerts.js';
 import { badRequest, conflict, httpError, notFound } from '../http.js';
 import { claimItem, listClaims, listDeviceClaimIndexes, releaseAllClaims, releaseClaimIndexes, unclaimItem } from '../services/grouppay.js';
@@ -702,6 +703,12 @@ export async function customerRoutes(app: FastifyInstance) {
       [t.rows[0].id],
     );
     if (dev.rowCount === 0) return { ok: true, printed: false, reason: 'no_device' };
+    // v0.8.14 (F11-3): same per-device queue cap as the staff print route —
+    // checked BEFORE claiming the one-print slot so a full queue doesn't
+    // burn the guest's single print.
+    if ((await countActivePrintJobs(dev.rows[0].id)) >= MAX_ACTIVE_PRINT_JOBS) {
+      return { ok: true, printed: false, reason: 'queue_full' };
+    }
     // One device print per payment: claim the slot atomically.
     const claim = await query(
       `UPDATE payments SET receipt_printed_at = now() WHERE id = $1 AND receipt_printed_at IS NULL RETURNING id`,
@@ -728,7 +735,8 @@ export async function customerRoutes(app: FastifyInstance) {
     try {
       await query(
         `INSERT INTO print_jobs(id, device_id, location_id, table_id, check_id, lines) VALUES ($1,$2,$3,$4,$5,$6)`,
-        [jobId, dev.rows[0].id, t.rows[0].location_id, t.rows[0].id, pay.check_id, JSON.stringify(lines)],
+        // v0.8.14 (F11-3): sanitize at creation like every print-job path.
+        [jobId, dev.rows[0].id, t.rows[0].location_id, t.rows[0].id, pay.check_id, JSON.stringify(sanitizePrintLines(lines))],
       );
     } catch (err) {
       // Release the claim so the guest can retry.
