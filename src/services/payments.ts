@@ -285,7 +285,7 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
   // From here on, every POS call goes through ctx.adapter: a Clover location
   // can never reach Square and vice versa.
   const chk = await query<{ id: string }>(`SELECT id FROM checks WHERE id = $1`, [input.checkId]);
-  if (chk.rowCount === 0) throw badRequest('check is not linked to a table yet — link it first');
+  if (chk.rowCount === 0) throw badRequest('check not found');
   const checkId = chk.rows[0].id;
   const ctx = await getCheckPos(checkId);
   const { adapter, posType, token } = ctx;
@@ -404,13 +404,20 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
       //    what guests can be charged);
       //  - PENDING rows that already carry a tender ref are counted: the
       //    charge landed at the POS even though our row never finalized.
+      //  - v0.8.15 (C3-1-6): PENDING rows whose charge_started_at marker
+      //    is set are ALSO counted — an attempt that crashed between the
+      //    charge and the ref write is invisible otherwise, and a
+      //    DIFFERENT guest (new key) could be charged the same money
+      //    again. Counting them errs toward under-charging, the safe
+      //    side, until reconcile resolves the stranded row.
       if (TENDER_BLIND_POS.has(posType)) {
         const base = posTotalCents > 0 ? posTotalCents : check.total_cents;
         if (base > 0) {
           const settled = await client.query<{ s: string }>(
             `SELECT COALESCE(SUM(amount_cents), 0) AS s FROM payments
              WHERE check_id = $1 AND (status IN ('AUTHORIZED','COMPLETED')
-               OR (status = 'PENDING' AND pos_tender_ref IS NOT NULL))`,
+               OR (status = 'PENDING' AND pos_tender_ref IS NOT NULL)
+               OR (status = 'PENDING' AND charge_started_at IS NOT NULL))`,
             [checkId],
           );
           remaining = Math.max(0, base - Number(settled.rows[0]?.s ?? 0));
@@ -496,12 +503,44 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
       // reconcile's amount matching is blind without the real figure if
       // the post-charge write is lost.
       const markChargeStarted = async (): Promise<void> => {
-        await query(
-          `UPDATE payments SET charge_started_at = COALESCE(charge_started_at, now()),
-             amount_cents = $2, tip_cents = $3
-           WHERE idempotency_key = $1 AND status = 'PENDING'`,
-          [key, amount, tipCents],
-        ).catch((e) => console.error('[payments] failed to persist charge_started_at:', e));
+        // v0.8.15 (C3-1-3): FAIL CLOSED. This write used to swallow its
+        // own failure and charge anyway — under pool saturation (each
+        // in-flight payment holds a transaction connection while these
+        // autocommit writes need a second one) the marker silently went
+        // missing, which disarmed the F1-2/D-1 crash-window guards
+        // while the card was still charged. If the marker cannot be
+        // persisted, the charge must not happen: refuse with a
+        // retryable 503 before any POS call.
+        try {
+          await query(
+            `UPDATE payments SET charge_started_at = COALESCE(charge_started_at, now()),
+               amount_cents = $2, tip_cents = $3
+             WHERE idempotency_key = $1 AND status = 'PENDING'`,
+            [key, amount, tipCents],
+          );
+        } catch (e) {
+          console.error('[payments] charge_started_at could not be persisted; refusing to charge:', e);
+          throw httpError(503, 'the payment service is temporarily unavailable — please ask staff', 'pos_unavailable');
+        }
+      };
+
+      // v0.8.15 (C3-1-3): post-charge durable writes (tender ref, fee
+      // ledger) get bounded retries before giving up — a transient
+      // pool timeout must not be the single attempt that decides
+      // whether a landed charge stays reconcilable. Failures are
+      // still logged loudly after the last attempt (never silent).
+      const persistDurable = async (label: string, fn: () => Promise<unknown>): Promise<void> => {
+        let lastErr: unknown;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            await fn();
+            return;
+          } catch (e) {
+            lastErr = e;
+            if (attempt < 3) await new Promise((r) => setTimeout(r, 25 * attempt));
+          }
+        }
+        console.error(`[payments] ${label} failed after 3 attempts:`, lastErr);
       };
 
       if (resumeResolved) {
@@ -513,6 +552,10 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
         // `remaining` already excludes this charge: live tenders reflect
         // it on tender-capable POS, and the F1-1 cap counts PENDING rows
         // carrying a tender ref on tender-blind ones.
+        // v0.8.15 (C3-1-2): for Square this is now actually true — the
+        // pre-charge figure is tender-aware (C3-1-1), so a resolved
+        // authorization no longer reads as "the full total still due"
+        // and strands the check at AUTHORIZED forever.
         newRemaining = remaining;
         // Commission fee, if the first attempt died before recording it
         // (card only — external recordings never carry a fee; mirrors
@@ -542,6 +585,28 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
             }
           } catch (feeErr) {
             console.error('[payments] resume fee recording failed:', feeErr);
+          }
+        }
+        // v0.8.15 (C3-1-2): a resolved Square CARD charge that covers the
+        // bill may still sit on an OPEN Square order — the first attempt
+        // can die after the adapter's charge but before its PayOrder, and
+        // the completion tail below only re-runs PayOrder for external
+        // payments. Retry the close-out here under the same deterministic
+        // key the tail uses; a failure is logged for reconcile, never
+        // thrown (the money exists; the tail still finalizes our rows).
+        if (posType === 'square' && input.source.kind === 'card' && remaining <= 0) {
+          try {
+            const rows = await query<{ pid: string }>(
+              `SELECT DISTINCT COALESCE(square_payment_id, external_payment_ref, pos_tender_ref) AS pid
+               FROM payments WHERE check_id = $1 AND status IN ('AUTHORIZED','COMPLETED')
+                 AND COALESCE(square_payment_id, external_payment_ref, pos_tender_ref) IS NOT NULL`,
+              [checkId],
+            );
+            const ids = rows.rows.map((r) => String(r.pid));
+            if (!ids.includes(externalPaymentId)) ids.push(externalPaymentId);
+            await payOrder(nativeRef, ids, `${key}:payorder`, token);
+          } catch (e) {
+            console.error(`[payments] resume close-out PayOrder failed (check ${nativeRef}, key ${key}); needs reconcile:`, e);
           }
         }
       } else if (input.source.kind === 'card') {
@@ -597,26 +662,29 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
           // Autocommit on purpose (same reasoning as the H5 tender-ref write
           // below): Square may already have taken this fee, so the ledger
           // row must survive even if the surrounding transaction rolls back.
-          await recordFee({
-            locationId: ctx.locationId,
-            paymentRowId: reservation.id,
-            posPaymentRef: res.paymentId,
-            chargeCents: amount + tipCents,
-            feeCents,
-            currency: resultCurrency,
-            method: posType === 'square' && res.feeCollected ? 'square_app_fee' : 'accrued',
-          }).catch((e) => {
-            // Never silent (v0.6.4): if this write fails, money was taken (or a
-            // fee is owed) with no ledger row — reconciliation needs the log.
-            console.error('[payments] recordFee failed after a successful charge:', e);
-          });
+          // v0.8.15 (C3-1-3): bounded retries via persistDurable — if the
+          // write still fails, money was taken (or a fee is owed) with no
+          // ledger row, which persistDurable logs loudly for reconciliation.
+          await persistDurable('recordFee after a successful charge', () =>
+            recordFee({
+              locationId: ctx.locationId,
+              paymentRowId: reservation.id,
+              posPaymentRef: res.paymentId,
+              chargeCents: amount + tipCents,
+              feeCents,
+              currency: resultCurrency,
+              method: posType === 'square' && res.feeCollected ? 'square_app_fee' : 'accrued',
+            }),
+          );
         }
         // H5 fix: persist the POS reference outside the transaction (see above).
-        await query(
-          `UPDATE payments SET pos_tender_ref = $2, amount_cents = $3, tip_cents = $4
-           WHERE idempotency_key = $1 AND status = 'PENDING'`,
-          [key, res.paymentId, amount, tipCents],
-        ).catch((e) => console.error('[payments] failed to persist pos_tender_ref:', e));
+        await persistDurable('failed to persist pos_tender_ref', () =>
+          query(
+            `UPDATE payments SET pos_tender_ref = $2, amount_cents = $3, tip_cents = $4
+             WHERE idempotency_key = $1 AND status = 'PENDING'`,
+            [key, res.paymentId, amount, tipCents],
+          ),
+        );
       } else if (posType === 'square') {
         // ---- Square orchestration (unchanged verified flow; order already retrieved above) ----
         // This branch only runs for EXTERNAL (cash) payments now; card
@@ -637,13 +705,18 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
         );
         chargeCreated = true;
         externalPaymentId = payment.id;
+        // v0.8.15 (C3-1-1/C3-1-2): `remaining` is now tender-aware (see
+        // orderRemaining), so this subtraction starts from a figure that
+        // already reflects earlier authorizations.
         newRemaining = remaining - amount;
         // H5 fix: persist the POS reference outside the transaction (see above).
-        await query(
-          `UPDATE payments SET pos_tender_ref = $2, amount_cents = $3, tip_cents = $4
-           WHERE idempotency_key = $1 AND status = 'PENDING'`,
-          [key, payment.id, amount, tipCents],
-        ).catch((e) => console.error('[payments] failed to persist pos_tender_ref:', e));
+        await persistDurable('failed to persist pos_tender_ref', () =>
+          query(
+            `UPDATE payments SET pos_tender_ref = $2, amount_cents = $3, tip_cents = $4
+             WHERE idempotency_key = $1 AND status = 'PENDING'`,
+            [key, payment.id, amount, tipCents],
+          ),
+        );
       } else {
         // ---- Generic external payment via the location's adapter ----
         await markChargeStarted();
@@ -664,11 +737,13 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
         resultCurrency = res.currency || currency;
         // H5 parity with the card/Square branches: persist the POS ref
         // outside the transaction so a rollback leaves the row reconcilable.
-        await query(
-          `UPDATE payments SET pos_tender_ref = $2, amount_cents = $3, tip_cents = $4
-           WHERE idempotency_key = $1 AND status = 'PENDING'`,
-          [key, res.paymentId, amount, tipCents],
-        ).catch((e) => console.error('[payments] failed to persist pos_tender_ref:', e));
+        await persistDurable('failed to persist pos_tender_ref', () =>
+          query(
+            `UPDATE payments SET pos_tender_ref = $2, amount_cents = $3, tip_cents = $4
+             WHERE idempotency_key = $1 AND status = 'PENDING'`,
+            [key, res.paymentId, amount, tipCents],
+          ),
+        );
       }
 
       const completes = newRemaining <= 0;
@@ -721,6 +796,22 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
       // The POS accepted money but our DB work rolled back. Leave the row PENDING
       // (retry with the same key resumes safely) and surface it loudly; a reconciliation job must pick these up.
       console.error(`[payments] RECONCILE: POS payment created but bill not closed (check ${nativeRef}, key ${key}):`, e);
+      throw httpError(
+        409,
+        'the payment was taken but the bill could not be closed; ask staff to check the table',
+        'payment_needs_reconciliation',
+      );
+    }
+    if (rawPosErrorCode(e) === 'IDEMPOTENCY_KEY_REUSED') {
+      // v0.8.15 (C3-1-4): Square saw this key before with a different
+      // payload — a resumed request re-sends the key with a fresh nonce
+      // (F8-1). The first attempt may well have charged (its tender ref
+      // is exactly what can be missing, F1-2), so the outcome is UNKNOWN,
+      // never a definitive decline: the row stays PENDING and the guest
+      // gets the reconcilable 409, mirroring refunds.ts (F1-12). Before
+      // this, the definitive branch below marked the row FAILED and
+      // answered 402 while money could exist at Square.
+      console.error(`[payments] POS reported IDEMPOTENCY_KEY_REUSED (key ${key}); outcome unknown:`, e);
       throw httpError(
         409,
         'the payment was taken but the bill could not be closed; ask staff to check the table',

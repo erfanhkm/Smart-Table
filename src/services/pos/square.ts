@@ -296,7 +296,20 @@ export const squareAdapter: PosAdapter = {
     // Coverage is judged from the order's tenders instead: the
     // just-landed payment's tender is already on the order, and each
     // tender covers (amount − tip) of the bill.
-    const tenderRemaining = orderTenderRemaining(order);
+    // v0.8.15 (C3-1-7): orderTenderRemaining now fails closed on a
+    // malformed order (no total_money). After a charge has landed that
+    // must never become a throw from here — report unknown remaining
+    // instead (F3-1 semantics), exactly like the read-failure path above.
+    let tenderRemaining: number;
+    try {
+      tenderRemaining = orderTenderRemaining(order);
+    } catch (e) {
+      console.error(
+        `[square] tender coverage could not be computed after a successful charge (order ${args.checkId}, payment ${payment.id}); reporting unknown remaining:`,
+        e,
+      );
+      return { paymentId: payment.id, remainingCents: null, currency: d.currency, replayed: false, feeCollected };
+    }
     if (d.remainingCents > 0 && tenderRemaining > 0) {
       return { paymentId: payment.id, remainingCents: tenderRemaining, currency: d.currency, replayed: false, feeCollected };
     }

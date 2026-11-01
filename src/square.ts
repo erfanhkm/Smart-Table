@@ -70,7 +70,17 @@ async function sq<T>(method: string, path: string, body: unknown, token: string 
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data: any = await res.json().catch(() => ({}));
-  if (!res.ok || data.errors) throw new SquareError(res.status, data.errors ?? []);
+  if (!res.ok) throw new SquareError(res.status, data.errors ?? []);
+  // v0.8.15 (C3-1-8): Square can answer 200 with BOTH the created
+  // object and an errors array (warnings). Throwing there reported a
+  // landed charge as an unknown-outcome failure and stranded it for
+  // reconcile. When a real payload accompanies the warnings, return
+  // it and log the warnings; errors with no payload still throw.
+  if (data.errors) {
+    const hasPayload = Object.keys(data).some((k) => k !== 'errors');
+    if (!hasPayload) throw new SquareError(res.status, data.errors ?? []);
+    console.warn(`[square] ${method} ${path} returned warnings alongside a result:`, JSON.stringify(data.errors).slice(0, 300));
+  }
   return data as T;
 }
 
@@ -97,7 +107,22 @@ export function orderRemaining(order: SquareOrder): number {
   // with tips likewise under-reported the balance still owed).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const due = (order as any)?.net_amount_due_money?.amount;
-  if (typeof due === 'number') return due;
+  if (typeof due === 'number') {
+    // v0.8.15 (C3-1-1): net_amount_due does NOT fall for an authorized
+    // (autocomplete:false) payment (see orderTenderRemaining), so on
+    // its own it overstates what is still chargeable — a $100 bill
+    // with $40 authorized still read $100 due, and a second guest
+    // could be accepted for another $100. The tender-based figure
+    // reflects authorizations immediately, so the true remaining is
+    // the SMALLER of the two. (When Square has settled, net due is
+    // the smaller and stays authoritative — discounts and order
+    // edits are reflected there first.)
+    try {
+      return Math.min(due, orderTenderRemaining(order));
+    } catch {
+      return due;
+    }
+  }
   return orderTenderRemaining(order);
 }
 
@@ -112,10 +137,21 @@ export function orderRemaining(order: SquareOrder): number {
  * cover the bill, and the just-landed payment's tender is already on it.
  */
 export function orderTenderRemaining(order: SquareOrder): number {
-  const total: number = order?.total_money?.amount ?? 0;
+  // v0.8.15 (C3-1-7): fail closed on a malformed order. Reading a
+  // missing total as 0 produced a negative remaining, which callers
+  // read as "fully covered" and could trigger a premature close-out
+  // attempt against an order whose real total is unknown.
+  const total: unknown = order?.total_money?.amount;
+  if (typeof total !== 'number' || !Number.isFinite(total)) {
+    throw new Error('orderTenderRemaining: order has no total_money amount');
+  }
   const paid: number = (order?.tenders ?? []).reduce(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (sum: number, t: any) => sum + ((t?.amount_money?.amount ?? 0) - (t?.tip_money?.amount ?? 0)),
+    (sum: number, t: any) => {
+      const amt = t?.amount_money?.amount;
+      const tip = t?.tip_money?.amount;
+      return sum + ((typeof amt === 'number' && Number.isFinite(amt) ? amt : 0) - (typeof tip === 'number' && Number.isFinite(tip) ? tip : 0));
+    },
     0,
   );
   return total - paid;
@@ -183,6 +219,12 @@ export async function searchCatalogItems(token?: string): Promise<any[]> {
     out.push(...(data?.objects ?? []));
     cursor = data?.cursor || undefined;
   } while (cursor && out.length < 1000);
+  // v0.8.15 (C3-1 Low): the 1000-object cap used to be silent — a
+  // catalog larger than that would serve a truncated menu with no
+  // trace. Log it so the truncation is at least visible.
+  if (cursor && out.length >= 1000) {
+    console.warn(`[square] searchCatalogItems hit the 1000-object cap; the menu is truncated`);
+  }
   return out;
 }
 
@@ -300,7 +342,7 @@ export function squareAuthorizeUrl(state: string): string {
   // fee-only retry drops the in-flight fee and it accrues instead.
   const scopes = ['ORDERS_READ', 'ORDERS_WRITE', 'PAYMENTS_READ', 'PAYMENTS_WRITE', 'PAYMENTS_WRITE_ADDITIONAL_RECIPIENTS', 'MERCHANT_PROFILE_READ'].join('+');
   const redirect = encodeURIComponent(`${config.appUrl}/api/oauth/callback`);
-  return `${BASE}/oauth2/authorize?client_id=${clientId}&scope=${scopes}&session=false&state=${encodeURIComponent(state)}&redirect_uri=${redirect}`;
+  return `${BASE}/oauth2/authorize?client_id=${encodeURIComponent(clientId)}&scope=${scopes}&session=false&state=${encodeURIComponent(state)}&redirect_uri=${redirect}`;
 }
 
 export async function exchangeOAuthCode(code: string): Promise<{
@@ -396,9 +438,15 @@ export async function createSubscriptionPlanVariation(
   priceCents: number,
   currency: string,
 ): Promise<string> {
+  // v0.8.15 (C3-1-12): deterministic idempotency keys (hashed to stay
+  // inside Square's 45-char key limit, same pattern as createPlatformCard).
+  // With random keys, a timeout that hid a successful create produced a
+  // duplicate plan/variation on retry; with derived keys the retry
+  // returns the original objects.
+  const planKey = `st-plan-${createHash('sha256').update('smart-table-plan').digest('hex').slice(0, 32)}`;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const plan: any = await sq('POST', '/v2/catalog/object', {
-    idempotency_key: randomUUID(),
+    idempotency_key: planKey,
     object: {
       type: 'SUBSCRIPTION_PLAN',
       id: '#smart-table-plan',
@@ -407,9 +455,10 @@ export async function createSubscriptionPlanVariation(
   }, requireSquareToken());
   const planId = plan?.catalog_object?.id ?? plan?.object?.id;
   if (!planId) throw new Error('subscription plan creation returned no id');
+  const variationKey = `st-planvar-${createHash('sha256').update(`${planId}:${priceCents}:${currency}`).digest('hex').slice(0, 32)}`;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const variation: any = await sq('POST', '/v2/catalog/object', {
-    idempotency_key: randomUUID(),
+    idempotency_key: variationKey,
     object: {
       type: 'SUBSCRIPTION_PLAN_VARIATION',
       id: '#smart-table-plan-monthly',
@@ -500,9 +549,17 @@ export async function createPlatformSubscription(input: {
   locationId: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 }): Promise<any> {
+  // v0.8.15 (C3-1-12): deterministic key derived from the subscription's
+  // identity (customer + variation + card + platform location), hashed
+  // inside Square's 45-char limit — the same pattern as createPlatformCard.
+  // A create whose response was lost now replays to the SAME subscription
+  // instead of stacking a second one that bills the restaurant twice.
+  // (Search-before-create in billing.ts remains the primary guard and
+  // already fails closed, F2-8.)
+  const subKey = `st-sub-${createHash('sha256').update(`${input.customerId}:${input.planVariationId}:${input.cardId}:${input.locationId}`).digest('hex').slice(0, 32)}`;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data: any = await sq('POST', '/v2/subscriptions', {
-    idempotency_key: randomUUID(),
+    idempotency_key: subKey,
     customer_id: input.customerId,
     location_id: input.locationId,
     plan_variation_id: input.planVariationId,

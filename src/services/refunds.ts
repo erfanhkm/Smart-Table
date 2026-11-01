@@ -279,7 +279,30 @@ export async function refundPayment(input: {
       reason: input.reason,
       token: ctx.token,
     });
-    await query(`UPDATE refunds SET status = 'COMPLETED', pos_refund_ref = $2 WHERE id = $1`, [rowId, res.refundId]);
+    // v0.8.15 (C3-1-9): the POS accepting a refund request is not the
+    // refund finishing — Square refunds are created PENDING and can
+    // later complete or be rejected. The POS status is now persisted
+    // (migration 030) and drives our row:
+    //  - COMPLETED / CANCELED (a void releases the money at once):
+    //    the row completes and fees reverse, as before.
+    //  - REJECTED / FAILED: the row fails and the caller hears the
+    //    rejection (the catch below keeps the FAILED marking).
+    //  - anything else (PENDING): the row STAYS PENDING — it keeps
+    //    counting against the refundable amount (safe), fees are NOT
+    //    reversed yet, and a replay answers the 409 "still being
+    //    confirmed" instead of pretending finality. Resolving PENDING
+    //    refunds (poll / refund webhook) remains the F1-11 gap.
+    const posStatus = String(res.status ?? 'PENDING').toUpperCase();
+    if (posStatus === 'REJECTED' || posStatus === 'FAILED') {
+      await query(`UPDATE refunds SET pos_refund_ref = $2, pos_status = $3 WHERE id = $1`, [rowId, res.refundId, posStatus]).catch(() => undefined);
+      throw badRequest('refund failed: the POS rejected the refund');
+    }
+    if (posStatus !== 'COMPLETED' && posStatus !== 'CANCELED') {
+      await query(`UPDATE refunds SET pos_refund_ref = $2, pos_status = $3 WHERE id = $1`, [rowId, res.refundId, posStatus]);
+      console.warn(`[refunds] refund ${res.refundId} accepted by the POS as ${posStatus}; row ${rowId} stays PENDING until the refund completes (F1-11 resolution)`);
+      return summarize(rowId, res.refundId, amount, false);
+    }
+    await query(`UPDATE refunds SET status = 'COMPLETED', pos_refund_ref = $2, pos_status = $3 WHERE id = $1`, [rowId, res.refundId, posStatus]);
     // F1-10: the refund itself has SUCCEEDED at this point — a fee-reversal
     // failure must not turn it into a 409 (the retry would replay the
     // COMPLETED row, which now retries the reversal itself; see above).
