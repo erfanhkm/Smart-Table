@@ -122,6 +122,9 @@ let lastRenderKey = '';
 let renderDeferred = false;
 // QR ordering state
 let orderingEnabled = false;
+// v0.9.0: Starter locations have no table device — receipt printing does
+// not exist there, so the Print / Print + Email options are hidden.
+let printEnabled = true;
 let view = 'bill';           // 'bill' | 'menu'
 let menuItems = [];
 let menuLoaded = false;
@@ -517,6 +520,7 @@ async function fetchBill() {
         if (check) check.items.forEach((it, idx) => { const c = claimAt(idx); if (c && c.mine) items[idx] = true; });
         orderingEnabled = !!data.ordering_enabled;
         loyaltyEnabled = !!data.loyalty_enabled;
+        printEnabled = !data.capabilities || data.capabilities.print !== false;
         reconcileAttempt();
     } catch (err) {
         if (!table) loadFailed = true; // keep showing the last good bill on transient errors
@@ -1011,11 +1015,13 @@ function renderReceiptOptions() {
         : receiptPrintState === 'unavailable' ? `<p style="font-size:0.9rem;text-align:center;">${t('receiptPrintUnavailable')}</p>`
         : receiptPrintState === 'failed' ? `<p style="font-size:0.9rem;text-align:center;">${t('receiptPrintFailed')}</p>` : '';
     if (!receiptChoice) {
+        // v0.9.0: on the Starter tier (printEnabled false) only the Email
+        // and No-receipt options exist — there is no printer to send to.
         return `<div class="card" style="text-align:start;"><h2>${t('receiptOptions')}</h2>
         <div style="display:flex;flex-direction:column;gap:10px;">
-            <button class="btn-primary" data-action="rc-print">${t('printReceipt')}</button>
+            ${printEnabled ? `<button class="btn-primary" data-action="rc-print">${t('printReceipt')}</button>` : ''}
             <button class="btn-primary" data-action="rc-email" style="background:var(--blue);">${t('emailReceipt')}</button>
-            <button class="btn-primary" data-action="rc-both" style="background:var(--blue);">${t('printAndEmail')}</button>
+            ${printEnabled ? `<button class="btn-primary" data-action="rc-both" style="background:var(--blue);">${t('printAndEmail')}</button>` : ''}
             <button class="btn-primary" data-action="rc-none" style="background:var(--text-muted);">${t('noReceipt')}</button>
         </div></div>`;
     }
@@ -1024,7 +1030,7 @@ function renderReceiptOptions() {
     }
     // F8-Low: a failed/unavailable print used to leave no way to retry —
     // the choice buttons were gone. Offer the print action again.
-    const printRetry = (receiptPrintState === 'failed' || receiptPrintState === 'unavailable')
+    const printRetry = printEnabled && (receiptPrintState === 'failed' || receiptPrintState === 'unavailable')
         ? `<div style="text-align:center;margin-bottom:10px;"><button class="btn-primary" data-action="rc-print">${t('printReceipt')}</button></div>` : '';
     const emailPart = receiptChoice === 'email' || receiptChoice === 'both'
         ? (receiptEmailDone

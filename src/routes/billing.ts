@@ -8,8 +8,10 @@ import { badRequest } from '../http.js';
 import {
   billingHistory,
   getBillingState,
+  isLocationTier,
   platformCardConfig,
   saveCard,
+  setLocationTier,
   switchPlan,
   type BillingPlan,
 } from '../services/billing.js';
@@ -28,6 +30,7 @@ function resolveLocationId(req: FastifyRequest, given?: unknown): string {
 function present(state: Awaited<ReturnType<typeof getBillingState>>) {
   const a = state.account;
   return {
+    tier: state.tier,
     plan: a.plan,
     effective_plan: state.effective_plan,
     pending_plan: a.pending_plan,
@@ -83,6 +86,21 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
       throw badRequest('plan must be commission or subscription');
     }
     return present(await switchPlan(locationId, plan as BillingPlan));
+  });
+
+  // v0.9.0: service tier (starter/base) — settable during onboarding and
+  // later from Billing settings. Switching applies the tier's default
+  // price/commission pair to the billing account and flips the product
+  // gates (device pairing + receipt printing follow locations.tier).
+  app.post('/api/portal/billing/tier', staffOnly, async (req) => {
+    requirePortalRole(req, 'owner', 'manager');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const locationId = resolveLocationId(req, body.location_id);
+    await assertNotDemoLocation(locationId, 'Billing tier changes');
+    if (!isLocationTier(body.tier)) {
+      throw badRequest('tier must be starter or base');
+    }
+    return present(await setLocationTier(locationId, body.tier));
   });
 
   app.get('/api/portal/billing/history', staffOnly, async (req) => {

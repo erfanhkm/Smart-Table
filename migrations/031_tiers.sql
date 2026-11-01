@@ -1,0 +1,14 @@
+-- v0.9.0: service tiers. Every location is on exactly one tier:
+--   starter — printed QR code per table only. Guests scan and pay from
+--             their phone (bill view, split/group pay, tip, card/wallet,
+--             email receipt, reviews, loyalty). NO STT-101 device, NO
+--             receipt printing, NO waiter-call button.
+--             $49.99/mo subscription OR 1% commission.
+--   base    — the full product incl. the STT-101 table device (printer +
+--             waiter-call button). $99/mo subscription OR 2% commission.
+--             This is the tier every existing location is on.
+-- The tier lives on locations (it gates product capabilities: device
+-- pairing and receipt printing); the tier's price/commission defaults are
+-- applied to billing_accounts when the account is created and when the
+-- tier is switched (services/billing.ts TIER_DEFAULTS).
+ALTER TABLE locations ADD COLUMN IF NOT EXISTS tier TEXT NOT NULL DEFAULT 'base' CHECK (tier IN ('starter','base'));

@@ -22,7 +22,8 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createHash, createHmac, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { query, withTx } from '../db.js';
-import { badRequest, conflict, notFound } from '../http.js';
+import { badRequest, conflict, httpError, notFound } from '../http.js';
+import { getLocationTier } from '../services/billing.js';
 import { assertPortalLocation, extractBearer, requirePortalRole, scopedLocationId, staffOnly } from '../auth.js';
 import { hashToken } from './portal.js';
 import { raiseServiceAlert } from '../services/alerts.js';
@@ -54,6 +55,16 @@ export function hashClaimCode(code: string): string {
 // generic limiter counts successes too, which is correct here: a minted
 // code is single-use, so a successful claim needs no follow-up attempts.
 const claimLimiter = rateLimit({ name: 'device-claim', windowMs: 10 * 60_000, max: 15 });
+
+// v0.9.0: the Starter tier is printed QR codes only — no STT-101 device,
+// so pairing is refused for starter locations (both minting a claim code
+// and redeeming one), with a distinct 403 code the portal/firmware can
+// tell apart from a bad code.
+async function assertDevicesIncluded(locationId: string): Promise<void> {
+  if ((await getLocationTier(locationId)) === 'starter') {
+    throw httpError(403, 'table devices are not included in the Starter plan', 'devices_not_included');
+  }
+}
 
 // v0.8.14 (F11-3/F11-4): print-queue bounds. A device pulls at most 20 jobs
 // per fetch, so more than 20 active (pending+sent) jobs per device is a
@@ -135,6 +146,17 @@ export async function deviceRoutes(app: FastifyInstance) {
     if (typeof code !== 'string' || !/^\d{8}$/.test(code)) {
       throw badRequest('claim code is required (8 digits)');
     }
+    // v0.9.0: a live code belonging to a Starter location is refused
+    // BEFORE it is consumed — Starter has no devices to pair. Unknown /
+    // used / expired codes fall through to the generic error below (the
+    // tier check must not become a code-existence oracle).
+    const live = await query<{ location_id: string }>(
+      `SELECT location_id FROM device_claim_codes
+       WHERE code_hash IN ($1, $2) AND used_at IS NULL AND expires_at > now()`,
+      [hashClaimCode(code), hashToken(code)],
+    );
+    if (live.rowCount > 0) await assertDevicesIncluded(live.rows[0].location_id);
+
     let cc: { location_id: string; table_id: string } | undefined;
     for (const hash of [hashClaimCode(code), hashToken(code)]) {
       const r = await query<{ location_id: string; table_id: string }>(
@@ -395,6 +417,8 @@ export async function deviceRoutes(app: FastifyInstance) {
     const t = await query<{ id: string; location_id: string }>(`SELECT id, location_id FROM tables WHERE id = $1`, [table_id]);
     if (t.rowCount === 0) throw notFound('table not found');
     assertPortalLocation(req, t.rows[0].location_id);
+    // v0.9.0: Starter locations cannot mint claim codes (no devices).
+    await assertDevicesIncluded(t.rows[0].location_id);
     // One live code per table: a fresh code replaces any unused predecessor.
     await query(`DELETE FROM device_claim_codes WHERE table_id = $1 AND used_at IS NULL`, [table_id]);
     // v0.8.14 (F11 Low): used/expired code rows were never purged — sweep

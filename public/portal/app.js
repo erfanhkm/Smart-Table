@@ -1,4 +1,4 @@
-/* Smart Table — Restaurant Portal (v0.8.15)
+/* Smart Table — Restaurant Portal (v0.9.0)
  * Served from /portal/app.js with a strict Content-Security-Policy
  * (no inline script). The network layer below has no DOM *rendering*
  * dependencies; it uses sessionStorage only for the auth token. */
@@ -58,6 +58,27 @@ const timeAgo = (iso) => {
 const SESSION_KEY = 'st_portal_session';
 let token = null;
 let portalUser = null; // { email, role, location_id }
+// v0.9.0: the location's service tier — 'starter' hides the Devices view
+// (printed QR codes only, no STT-101 hardware on that tier). Loaded from
+// the billing state on entering the app; 'base' until known.
+let portalTier = 'base';
+
+function applyTierNav() {
+  const btn = document.querySelector('.nav-item[data-view="devices"]');
+  if (btn) btn.style.display = portalTier === 'starter' ? 'none' : '';
+}
+
+async function loadPortalTier() {
+  try {
+    const res = await request('/api/portal/billing');
+    if (!res.ok) return;
+    const data = await readJson(res);
+    if (data && (data.tier === 'starter' || data.tier === 'base')) {
+      portalTier = data.tier;
+      applyTierNav();
+    }
+  } catch { /* tier stays 'base'; the billing view itself shows the truth */ }
+}
 
 function saveSession() {
   try {
@@ -402,6 +423,8 @@ function resetUi() {
   drawerTable = null;
   drawerCheckId = null;
   orderDetailCheckId = null;
+  portalTier = 'base';
+  applyTierNav();
   clearCashAttempts();
   clearRefundAttempts();
   onboardingLoaded = false;
@@ -435,6 +458,7 @@ function enterApp() {
   clearLoginError();
   $('user-email').textContent = portalUser.email;
   showApp();
+  loadPortalTier();
   showView('overview');
 }
 
@@ -1522,6 +1546,11 @@ function renderStaff() {
    as online when it was seen within the last 90 seconds. */
 async function renderDevices() {
   const grid = $('devices-grid');
+  // v0.9.0: Starter is printed QR codes only — no devices exist to manage.
+  if (portalTier === 'starter') {
+    grid.innerHTML = '<div class="card"><h4>Devices</h4><p>The Starter plan uses printed QR codes on each table — there is no table device to pair or manage. Switch to the Base plan in Billing to add STT-101 devices (receipt printing + waiter-call button).</p></div>';
+    return;
+  }
   grid.innerHTML = '<div class="card"><p>Loading devices…</p></div>';
   try {
     const loc = encodeURIComponent(CONFIG.locationId);
@@ -1609,9 +1638,10 @@ async function renderDevices() {
 
 /* ------------------------------------------------------------------ */
 /* billing (v0.4 — real billing)                                       */
-/* Two ways to pay for Smart Table:                                    */
-/*  - Commission: 2% of each guest card payment (Square takes it as an */
-/*    application fee at charge time; other POS accrue monthly).       */
+/* Two tiers (v0.9.0): Starter (printed QR only — $49.99/mo or 1%) and */
+/* Base (with the STT-101 device — $99/mo or 2%). Each tier offers:     */
+/*  - Commission: a % of each guest card payment (Square takes it as   */
+/*    an application fee at charge time; other POS accrue monthly).    */
 /*  - Subscription: flat monthly price via Square Subscriptions,       */
 /*    charged to the card on file. No per-payment fees.                */
 /* ------------------------------------------------------------------ */
@@ -1662,6 +1692,16 @@ async function renderBilling() {
     }
   } catch { /* history stays empty; the rest of the page still renders */ }
 
+  // v0.9.0: keep the shell's tier (Devices nav visibility) in sync with
+  // the billing truth.
+  if (st.tier === 'starter' || st.tier === 'base') {
+    portalTier = st.tier;
+    applyTierNav();
+  }
+  const tierName = st.tier === 'starter' ? 'Starter' : 'Base';
+  const otherTier = st.tier === 'starter' ? 'base' : 'starter';
+  const otherTierName = otherTier === 'starter' ? 'Starter' : 'Base';
+
   const cur = st.currency;
   const isCommission = st.effective_plan === 'commission';
   const price = money(st.subscription_price_cents, cur);
@@ -1673,6 +1713,15 @@ async function renderBilling() {
     : '';
 
   box.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h4>Your tier: ${tierName}</h4>
+      <div class="stat-label">${st.tier === 'starter'
+        ? 'Printed QR code on each table — guests scan and pay from their phone. No table device, no receipt printing, no waiter-call button.'
+        : 'The full Smart Table, including the STT-101 device on each table (receipt printing + waiter-call button).'}</div>
+      <div style="margin-top:12px">
+        <button class="btn" id="billing-tier-switch">Switch to ${otherTierName}</button>
+      </div>
+    </div>
     <div class="grid grid-2" style="margin-bottom:16px">
       <div class="card" style="${isCommission ? 'outline:2px solid var(--accent)' : ''}">
         <h4>Commission ${isCommission ? '· Current plan' : ''}</h4>
@@ -1684,12 +1733,12 @@ async function renderBilling() {
         </div>
       </div>
       <div class="card" style="${!isCommission ? 'outline:2px solid var(--accent)' : ''}">
-        <h4>Base — Subscription ${!isCommission ? '· Current plan' : ''}</h4>
+        <h4>${tierName} — Subscription ${!isCommission ? '· Current plan' : ''}</h4>
         <div class="stat-num" style="font-size:1.4rem">${price}/month</div>
         <div class="stat-label">Flat monthly fee charged to your card on file. No per-payment fees, ever.</div>
         ${subStatus}
         <div style="margin-top:12px">
-          <button class="btn" id="billing-plan-subscription" ${!isCommission ? 'disabled' : ''}>${!isCommission ? 'Current plan' : 'Switch to Base'}</button>
+          <button class="btn" id="billing-plan-subscription" ${!isCommission ? 'disabled' : ''}>${!isCommission ? 'Current plan' : `Switch to ${tierName}`}</button>
         </div>
       </div>
     </div>
@@ -1699,7 +1748,7 @@ async function renderBilling() {
         ${st.has_card
           ? `<div class="stat-num" style="font-size:1.15rem">${esc(st.card_brand || 'Card')} •••• ${esc(st.card_last4 || '')}</div>
              <div class="stat-label">Used for the subscription plan and monthly fee collection.</div>`
-          : `<div class="stat-label">No card on file. Add one to use the Base plan.</div>`}
+          : `<div class="stat-label">No card on file. Add one to use the ${tierName} subscription plan.</div>`}
         <div id="billing-card-form-wrap" style="margin-top:12px">
           <button class="btn" id="billing-card-toggle">${st.has_card ? 'Update card' : 'Add card'}</button>
           <div id="billing-card-form" style="display:none;margin-top:12px">
@@ -1713,7 +1762,8 @@ async function renderBilling() {
         <h4>This Month</h4>
         <div class="kv"><span class="k">Fees collected</span><span>${money(st.collected_this_month_cents, cur)}</span></div>
         <div class="kv"><span class="k">Fees accrued (unbilled)</span><span>${money(st.accrued_cents, cur)}</span></div>
-        <div class="kv"><span class="k">Plan</span><span>${isCommission ? 'Commission' : 'Base — Subscription'}</span></div>
+        <div class="kv"><span class="k">Tier</span><span>${tierName}</span></div>
+        <div class="kv"><span class="k">Plan</span><span>${isCommission ? 'Commission' : `${tierName} — Subscription`}</span></div>
       </div>
     </div>
     <div class="card" style="margin-bottom:16px;opacity:.85">
@@ -1739,15 +1789,18 @@ async function renderBilling() {
   if (commBtn) commBtn.addEventListener('click', () => switchBillingPlan('commission', st));
   const subBtn = $('billing-plan-subscription');
   if (subBtn) subBtn.addEventListener('click', () => switchBillingPlan('subscription', st));
+  const tierBtn = $('billing-tier-switch');
+  if (tierBtn) tierBtn.addEventListener('click', () => switchBillingTier(otherTier, st));
   const toggle = $('billing-card-toggle');
   if (toggle) toggle.addEventListener('click', initBillingCardForm);
 }
 
 async function switchBillingPlan(plan, st) {
   if (billingBusy) return;
+  const tierName = st.tier === 'starter' ? 'Starter' : 'Base';
   if (plan === 'subscription') {
-    if (!st.has_card) { alert('Add a payment card first, then switch to the Base plan.'); return; }
-    if (!confirm(`Switch to the Base plan? Your card will be charged ${money(st.subscription_price_cents, st.currency)} today and monthly. Per-payment fees stop immediately.`)) return;
+    if (!st.has_card) { alert(`Add a payment card first, then switch to the ${tierName} subscription plan.`); return; }
+    if (!confirm(`Switch to the ${tierName} subscription plan? Your card will be charged ${money(st.subscription_price_cents, st.currency)} today and monthly. Per-payment fees stop immediately.`)) return;
   } else if (st.plan === 'subscription' && !confirm('Switch to the Commission plan? Your subscription stays active until the end of the paid period; the per-payment fee starts after that.')) {
     return;
   }
@@ -1760,6 +1813,33 @@ async function switchBillingPlan(plan, st) {
   } catch (e) {
     if (e instanceof AuthExpired) return;
     alert(e.message || 'Could not switch plans.');
+  } finally {
+    billingBusy = false;
+  }
+}
+
+// v0.9.0: tier switch (starter <-> base). Applies the tier's default
+// price/commission pair; the plan (commission/subscription) is unchanged.
+async function switchBillingTier(tier, st) {
+  if (billingBusy) return;
+  const name = tier === 'starter' ? 'Starter' : 'Base';
+  const msg = tier === 'starter'
+    ? 'Switch to the Starter plan? Your tables keep working with printed QR codes, but device pairing and receipt printing turn off, and your pricing becomes $49.99/month or 1% commission.'
+    : 'Switch to the Base plan? Your pricing becomes $99/month or 2% commission, and STT-101 devices (receipt printing + waiter-call button) become available for your tables.';
+  if (!confirm(msg)) return;
+  billingBusy = true;
+  try {
+    const res = await request('/api/portal/billing/tier', { method: 'POST', body: { tier } });
+    const data = await readJson(res);
+    if (!res.ok) throw new Error((data && data.error) || 'Could not switch tiers.');
+    if (data && (data.tier === 'starter' || data.tier === 'base')) {
+      portalTier = data.tier;
+      applyTierNav();
+    }
+    await renderBilling();
+  } catch (e) {
+    if (e instanceof AuthExpired) return;
+    alert(e.message || 'Could not switch tiers.');
   } finally {
     billingBusy = false;
   }

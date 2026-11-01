@@ -23,6 +23,7 @@ import { badRequest, notFound } from '../http.js';
 import { requirePortalRole, staffOnly } from '../auth.js';
 import { getLocationPos } from '../services/pos/context.js';
 import { PosType } from '../services/pos/types.js';
+import { TIER_DEFAULTS, type LocationTier } from '../services/billing.js';
 
 /** v0.6.5 (C-5): "connected" means a real credential row exists, or the
  * location is explicitly flagged demo (founder-controlled). The mere
@@ -53,12 +54,13 @@ interface LocationRow {
   menu_verified_at: string | null;
   menu_item_count: number | null;
   demo: boolean;
+  tier: LocationTier;
 }
 
 async function loadLocation(locationId: string): Promise<LocationRow> {
   const r = await query<LocationRow>(
     `SELECT id, merchant_id, pos_type, pos_location_ref, square_location_id,
-            onboarding_dismissed, menu_verified_at, menu_item_count, demo
+            onboarding_dismissed, menu_verified_at, menu_item_count, demo, tier
      FROM locations WHERE id = $1`,
     [locationId],
   );
@@ -80,6 +82,15 @@ async function onboardingState(loc: LocationRow) {
     location_id: loc.id,
     dismissed: !!loc.onboarding_dismissed,
     complete: posConnected && menuVerified && tablesCount > 0,
+    // v0.9.0: the wizard's plan step reads the current tier + both tiers'
+    // price/commission pairs from here; switching goes through
+    // POST /api/portal/billing/tier.
+    tier: loc.tier,
+    tier_options: (Object.keys(TIER_DEFAULTS) as LocationTier[]).map((tier) => ({
+      tier,
+      subscription_price_cents: TIER_DEFAULTS[tier].subscription_price_cents,
+      commission_bps: TIER_DEFAULTS[tier].commission_bps,
+    })),
     steps: {
       pos_connected: { done: posConnected, pos_type: loc.pos_type },
       menu_verified: { done: menuVerified, verified_at: loc.menu_verified_at, item_count: loc.menu_item_count },

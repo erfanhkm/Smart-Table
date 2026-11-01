@@ -1,5 +1,10 @@
 // v0.4 billing: how restaurants pay Smart Table.
 //
+// Tiers (locations.tier, v0.9.0): starter ($49.99/mo or 1% — printed QR
+// codes only) and base ($99/mo or 2% — with the STT-101 device). The
+// tier supplies the default price/commission pair below; see
+// TIER_DEFAULTS and setLocationTier.
+//
 // Plans (billing_accounts.plan):
 //   commission   — 2% of each guest card payment. Square locations: the fee
 //                  is taken in-flight as a Square application fee (see
@@ -64,6 +69,29 @@ export interface BillingAccount {
 export const DEFAULT_COMMISSION_BPS = 200; // 2.00%
 export const DEFAULT_SUBSCRIPTION_PRICE_CENTS = 9900; // $99.00/mo — Base plan price (Erfan, 2026-10-21); per-account adjustable
 
+// v0.9.0: service tiers (locations.tier, migration 031). The tier picks
+// the DEFAULT price/commission pair for the location's billing account —
+// each tier offers the same two plans: subscription OR commission.
+//   starter — printed QR codes only (no device, no printing, no waiter
+//             button): $49.99/mo or 1% commission.
+//   base    — full product incl. the STT-101 device: $99/mo or 2%.
+export type LocationTier = 'starter' | 'base';
+
+export const TIER_DEFAULTS: Record<LocationTier, { subscription_price_cents: number; commission_bps: number }> = {
+  starter: { subscription_price_cents: 4999, commission_bps: 100 },
+  base: { subscription_price_cents: DEFAULT_SUBSCRIPTION_PRICE_CENTS, commission_bps: DEFAULT_COMMISSION_BPS },
+};
+
+export function isLocationTier(v: unknown): v is LocationTier {
+  return v === 'starter' || v === 'base';
+}
+
+/** The location's tier; anything unexpected reads as 'base' (the full product). */
+export async function getLocationTier(locationId: string): Promise<LocationTier> {
+  const r = await query<{ tier: string | null }>(`SELECT tier FROM locations WHERE id = $1`, [locationId]);
+  return isLocationTier(r.rows[0]?.tier) ? r.rows[0].tier : 'base';
+}
+
 /** 2% of the charged amount (amount + tip), rounded to the nearest cent; never negative, never the whole charge. */
 export function feeFor(chargeCents: number, bps: number): number {
   if (!Number.isSafeInteger(chargeCents) || chargeCents <= 0) return 0;
@@ -97,19 +125,46 @@ function isDefinitiveSquareFailure(e: unknown): boolean {
 }
 
 export async function ensureBillingAccount(locationId: string): Promise<BillingAccount> {
+  // v0.9.0: a NEW account inherits its location tier's default price +
+  // commission (starter $49.99/1%, base $99/2%). Existing rows keep the
+  // values already stored — tier changes go through setLocationTier.
+  const defaults = TIER_DEFAULTS[await getLocationTier(locationId)];
   await query(
-    `INSERT INTO billing_accounts(location_id, subscription_price_cents) VALUES ($1, $2) ON CONFLICT (location_id) DO NOTHING`,
-    [locationId, DEFAULT_SUBSCRIPTION_PRICE_CENTS],
+    `INSERT INTO billing_accounts(location_id, commission_bps, subscription_price_cents) VALUES ($1, $2, $3) ON CONFLICT (location_id) DO NOTHING`,
+    [locationId, defaults.commission_bps, defaults.subscription_price_cents],
   );
   const r = await query<BillingAccount>(`SELECT * FROM billing_accounts WHERE location_id = $1`, [locationId]);
   return r.rows[0];
+}
+
+/**
+ * v0.9.0: switch a location's service tier (starter <-> base). The tier
+ * lives on locations (it gates device pairing + receipt printing) and its
+ * default price/commission pair is applied to the billing account, so the
+ * NEXT subscription creation / commission charge uses the tier's numbers.
+ * A Square subscription that is already live keeps the plan variation it
+ * was created with (Square prices a subscription at creation) — the new
+ * price takes over when the subscription is next created, e.g. after a
+ * plan switch away and back. Plan (commission/subscription) is untouched.
+ */
+export async function setLocationTier(locationId: string, tier: LocationTier): Promise<BillingState> {
+  return withBillingLock(locationId, async () => {
+    await ensureBillingAccount(locationId);
+    await query(`UPDATE locations SET tier = $2 WHERE id = $1`, [locationId, tier]);
+    const defaults = TIER_DEFAULTS[tier];
+    await updateAccount(locationId, {
+      commission_bps: defaults.commission_bps,
+      subscription_price_cents: defaults.subscription_price_cents,
+    });
+    return getBillingState(locationId);
+  });
 }
 
 // E-low: updateAccount interpolates column NAMES into SQL. All callers
 // are internal today, but the allow-list makes the interpolation safe by
 // construction — an unexpected key is a programming error, not SQL.
 const BILLING_ACCOUNT_COLUMNS = new Set([
-  'plan', 'pending_plan', 'commission_bps', 'currency', 'square_customer_id', 'square_card_id',
+  'plan', 'pending_plan', 'commission_bps', 'subscription_price_cents', 'currency', 'square_customer_id', 'square_card_id',
   'card_brand', 'card_last4',
   'square_subscription_id', 'square_plan_variation_id', 'subscription_status',
   'subscription_paid_through',
@@ -242,6 +297,8 @@ export async function syncAllSubscriptions(): Promise<{ synced: number }> {
 
 export interface BillingState {
   account: BillingAccount;
+  /** v0.9.0: the location's service tier (locations.tier). */
+  tier: LocationTier;
   effective_plan: BillingPlan;
   accrued_cents: number;
   /** F2-14: fees claimed by an in-flight collection batch — previously
@@ -278,6 +335,7 @@ export async function getBillingState(locationId: string): Promise<BillingState>
   );
   return {
     account: acct,
+    tier: await getLocationTier(locationId),
     effective_plan: effectivePlan(acct),
     accrued_cents: Number(agg.rows[0]?.accrued ?? 0),
     processing_cents: Number(agg.rows[0]?.processing ?? 0),
@@ -391,8 +449,14 @@ async function saveCardLocked(
   return acct;
 }
 
-async function ensurePlanVariation(priceCents: number, currency: string): Promise<string> {
-  const key = `sq_plan_variation_${priceCents}_${currency}`;
+async function ensurePlanVariation(priceCents: number, currency: string, tier: LocationTier): Promise<string> {
+  // v0.9.0: the cache key carries the tier alongside the price it already
+  // encoded, so a starter ($49.99) and base ($99) variation never share a
+  // cache slot even if a future price change makes the amounts collide.
+  // (The Square-side variation idempotency key in square.ts derives from
+  // plan + price + currency, so a re-create at the same price returns the
+  // original variation — no duplicate catalog objects.)
+  const key = `sq_plan_variation_${tier}_${priceCents}_${currency}`;
   const existing = await query<{ value: string }>(`SELECT value FROM billing_settings WHERE key = $1`, [key]);
   if (existing.rows[0]?.value) return existing.rows[0].value;
   const variationId = await createSubscriptionPlanVariation(priceCents, currency);
@@ -434,7 +498,11 @@ async function switchPlanLocked(locationId: string, target: BillingPlan): Promis
       throw badRequest('add a payment card first, then choose the subscription plan');
     }
     const loc = await platformLocation();
-    const variationId = await ensurePlanVariation(acct.subscription_price_cents, loc.currency);
+    const variationId = await ensurePlanVariation(
+      acct.subscription_price_cents,
+      loc.currency,
+      await getLocationTier(locationId),
+    );
     // Search-before-create (E-3): if a previous attempt created the Square
     // subscription but its response or our DB write was lost, adopt the
     // existing live subscription instead of stacking a second one that

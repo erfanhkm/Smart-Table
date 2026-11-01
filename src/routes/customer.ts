@@ -148,13 +148,17 @@ export async function customerRoutes(app: FastifyInstance) {
   app.get('/api/t/:token', async (req) => {
     const { token } = req.params as { token: string };
     const t = await query(
-      `SELECT t.*, l.currency, l.qr_ordering_enabled, l.loyalty_enabled FROM tables t
+      `SELECT t.*, l.currency, l.qr_ordering_enabled, l.loyalty_enabled, l.tier FROM tables t
        JOIN locations l ON l.id = t.location_id
        WHERE t.qr_token = $1`,
       [token],
     );
     if (t.rowCount === 0) throw badRequest('unknown table — ask staff for help');
     const table = t.rows[0];
+    // v0.9.0: Starter locations have no table device, so receipt printing
+    // does not exist there — the guest page hides the Print / Print+Email
+    // receipt options from this capability flag (email stays available).
+    const tier = table.tier === 'starter' ? 'starter' : 'base';
     // Review observation fix: return ALL open checks, not just the newest.
     // Each QR order creates its own check; earlier unpaid ones must stay visible.
     const c = await query(
@@ -189,6 +193,8 @@ export async function customerRoutes(app: FastifyInstance) {
       table: { id: table.id, name: table.name, state: table.state },
       check,
       checks,
+      tier,
+      capabilities: { print: tier !== 'starter' },
       ordering_enabled: !!table.qr_ordering_enabled,
       loyalty_enabled: !!table.loyalty_enabled,
       // Open checks exist but none could be loaded from the POS.
@@ -668,7 +674,7 @@ export async function customerRoutes(app: FastifyInstance) {
   app.post('/api/t/:token/receipt-print', { preHandler: tokenWriteLimiter }, async (req) => {
     const { token } = req.params as { token: string };
     const t = await query(
-      `SELECT t.id, t.name AS table_name, t.location_id, l.name AS location_name, l.demo AS location_demo
+      `SELECT t.id, t.name AS table_name, t.location_id, l.name AS location_name, l.demo AS location_demo, l.tier AS location_tier
        FROM tables t JOIN locations l ON l.id = t.location_id WHERE t.qr_token = $1`,
       [token],
     );
@@ -697,6 +703,14 @@ export async function customerRoutes(app: FastifyInstance) {
     if (t.rows[0].location_demo) {
       console.log(`[demo] receipt print suppressed for demo location ${t.rows[0].location_id} (payment ${pay.id})`);
       return { ok: true, printed: true, demo: true };
+    }
+    // v0.9.0: Starter locations have no device and no printing — a clean
+    // not-available answer (same shape as no_device), never a print job
+    // and never a claim on the one-print slot. The guest page hides the
+    // print options for starter locations; this is the server-side gate
+    // behind it.
+    if (t.rows[0].location_tier === 'starter') {
+      return { ok: true, printed: false, reason: 'not_available_on_plan' };
     }
     const dev = await query<{ id: string }>(
       `SELECT id FROM devices WHERE table_id = $1 AND revoked_at IS NULL`,
