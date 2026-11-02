@@ -7,15 +7,21 @@
 // access — the staff token is tenant-wide by design and must never be a
 // skeleton key to billing runs and cross-location data.
 import { FastifyInstance } from 'fastify';
-import { randomUUID } from 'node:crypto';
-import { query } from '../db.js';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { query, withTx } from '../db.js';
 import { extractBearer } from '../auth.js';
-import { verifyPassword } from '../crypto.js';
+import { hashPassword, verifyPassword } from '../crypto.js';
 import { config } from '../config.js';
-import { badRequest, httpError, unauthorized } from '../http.js';
+import { badRequest, conflict, httpError, unauthorized } from '../http.js';
 import { rateLimit } from '../rate-limit.js';
 import { logAudit } from '../services/audit.js';
-import { processAccruedFees } from '../services/billing.js';
+import {
+  isLocationTier,
+  processAccruedFees,
+  TIER_DEFAULTS,
+  type BillingPlan,
+  type LocationTier,
+} from '../services/billing.js';
 
 // Founder login is the highest-value credential in the system: strict
 // per-IP limiter (10 attempts / 15 min) on top of scrypt (v0.6.4).
@@ -249,6 +255,123 @@ export async function adminRoutes(app: FastifyInstance) {
       detail: JSON.stringify(result).slice(0, 400),
     });
     return result;
+  });
+
+  // ---- Provision a brand-new restaurant (v0.10.0) ----
+  // POST /api/admin/locations { name, owner_email, tier?, plan?, table_count? }
+  // Creates merchant + location + billing account + owner portal login +
+  // tables in ONE transaction. The restaurant connects Square later from
+  // its portal (OAuth/manual token replaces the pending refs below).
+  //
+  // POS-not-connected representation: the merchant mirrors the shape
+  // upsertMerchant() writes BEFORE any credential exists — pos_type
+  // 'square', square_merchant_id NULL, access/refresh token columns ''
+  // (they are NOT NULL), external ref 'pending-<merchant id>'. The
+  // location carries 'pending-<location id>' in BOTH pos_location_ref
+  // and square_location_id (the latter is NOT NULL + UNIQUE; the
+  // 'pending-' prefix uses only [A-Za-z0-9-] so it passes the Square id
+  // shape check, and uniqueness comes from the embedded uuid). No
+  // pos_credentials row is created, so getLocationPos() resolves
+  // token=undefined for this non-demo location and NO code path can fall
+  // back to the platform env token (that fallback is demo-only since
+  // v0.6.5, and sq() itself refuses token-less calls). Card payments
+  // additionally hit the explicit pos_not_connected guard in payCheck().
+  app.post('/api/admin/locations', { onRequest: founderOnly }, async (req) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const name = typeof b.name === 'string' ? b.name.trim() : '';
+    if (!name || name.length > 120) throw badRequest('restaurant name is required (max 120 characters)');
+    const ownerEmail = typeof b.owner_email === 'string' ? b.owner_email.trim().toLowerCase() : '';
+    if (!ownerEmail || ownerEmail.length > 200 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) {
+      throw badRequest('a valid owner email is required');
+    }
+    const tier: LocationTier = b.tier === undefined ? 'base' : (b.tier as LocationTier);
+    if (!isLocationTier(tier)) throw badRequest("tier must be 'starter' or 'base'");
+    const plan: BillingPlan = b.plan === undefined ? 'commission' : (b.plan as BillingPlan);
+    if (plan !== 'commission' && plan !== 'subscription') {
+      throw badRequest("plan must be 'commission' or 'subscription'");
+    }
+    const tableCount = b.table_count === undefined ? 10 : b.table_count;
+    if (typeof tableCount !== 'number' || !Number.isInteger(tableCount) || tableCount < 1 || tableCount > 100) {
+      throw badRequest('table_count must be a whole number between 1 and 100');
+    }
+
+    // Readable one-time password (no ambiguous characters), shown to the
+    // founder exactly once in this response — only its scrypt hash is
+    // stored and it is never written to any log.
+    const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    const pwBytes = randomBytes(16);
+    const tempPassword = Array.from(pwBytes, (x) => ALPHABET[x % ALPHABET.length]).join('');
+    const passwordHash = await hashPassword(tempPassword);
+
+    const merchantId = randomUUID();
+    const locationId = randomUUID();
+    const ownerId = randomUUID();
+    const defaults = TIER_DEFAULTS[tier];
+    try {
+      await withTx(async (client) => {
+        const dupe = await client.query(`SELECT id FROM portal_users WHERE email = $1`, [ownerEmail]);
+        if (dupe.rowCount && dupe.rowCount > 0) {
+          throw conflict('owner email already in use', 'owner_email_in_use');
+        }
+        await client.query(
+          `INSERT INTO merchants(id, pos_type, external_merchant_ref, square_merchant_id, access_token_enc, refresh_token_enc)
+           VALUES ($1,'square',$2,NULL,'','')`,
+          [merchantId, `pending-${merchantId}`],
+        );
+        await client.query(
+          `INSERT INTO locations(id, merchant_id, pos_type, pos_location_ref, square_location_id, name, currency, demo, tier)
+           VALUES ($1,$2,'square',$3,$3,$4,'CAD',false,$5)`,
+          [locationId, merchantId, `pending-${locationId}`, name, tier],
+        );
+        // Same seed ensureBillingAccount() writes (tier defaults + chosen
+        // plan), inlined so provisioning stays ONE transaction. A
+        // 'subscription' plan here is the owner's choice recorded ahead
+        // of a card on file — no Square subscription is created until
+        // they add a card and switch plans from the portal.
+        await client.query(
+          `INSERT INTO billing_accounts(location_id, plan, commission_bps, subscription_price_cents, currency)
+           VALUES ($1,$2,$3,$4,'CAD')`,
+          [locationId, plan, defaults.commission_bps, defaults.subscription_price_cents],
+        );
+        await client.query(
+          `INSERT INTO portal_users(id, email, password_hash, role, location_id) VALUES ($1,$2,$3,'owner',$4)`,
+          [ownerId, ownerEmail, passwordHash, locationId],
+        );
+        for (let i = 1; i <= tableCount; i++) {
+          await client.query(
+            `INSERT INTO tables(id, location_id, name, qr_token, state) VALUES ($1,$2,$3,$4,'FREE')`,
+            [randomUUID(), locationId, String(i), randomUUID().replace(/-/g, '')],
+          );
+        }
+      });
+    } catch (e) {
+      // Lost a race on the UNIQUE email (the in-tx check passed, or a
+      // concurrent create landed first): same clean 409, nothing partial.
+      const msg = e instanceof Error ? e.message : '';
+      if ((e as { statusCode?: number })?.statusCode !== 409 && /unique|duplicate/i.test(msg) && /portal_users|email/i.test(msg)) {
+        throw conflict('owner email already in use', 'owner_email_in_use');
+      }
+      throw e;
+    }
+    await logAudit({
+      actorType: 'founder',
+      actorId: null,
+      role: null,
+      ip: req.ip,
+      action: 'admin_location_created',
+      locationId,
+      target: ownerEmail,
+      detail: `tier=${tier} plan=${plan} tables=${tableCount} name=${name}`.slice(0, 400),
+    });
+    return {
+      location_id: locationId,
+      merchant_id: merchantId,
+      owner_email: ownerEmail,
+      temp_password: tempPassword,
+      tier,
+      plan,
+      tables_created: tableCount,
+    };
   });
 
   // ---- All locations with per-location stats ----

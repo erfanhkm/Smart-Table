@@ -34,6 +34,23 @@
   .hidden { display: none; }
   .load-error { background: rgba(244,67,54,0.15); color: #ff8a80; border: 1px solid rgba(244,67,54,0.4); padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 0.9rem; }
   .logout { float: right; background: none; border: 1px solid #333; color: var(--muted); padding: 8px 16px; border-radius: 8px; cursor: pointer; }
+  .btn { background: var(--accent); color: white; border: none; padding: 10px 18px; border-radius: 8px; font-size: 0.95rem; cursor: pointer; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .btn.secondary { background: none; border: 1px solid #333; color: var(--muted); margin-left: 8px; }
+  .nr-form label { display: block; color: var(--muted); font-size: 0.85rem; margin: 14px 0 6px; }
+  .nr-form input[type="text"], .nr-form input[type="email"], .nr-form input[type="number"] { width: 100%; max-width: 420px; padding: 10px; background: #0f1115; border: 1px solid #333; color: var(--text); border-radius: 8px; font-size: 1rem; }
+  .nr-form .radio-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .nr-form .radio-card { border: 1px solid #333; border-radius: 8px; padding: 10px 14px; cursor: pointer; font-size: 0.95rem; }
+  .nr-form .radio-card input { margin-right: 8px; }
+  .nr-form .radio-card .hint { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 3px; }
+  .nr-form .error { color: var(--red); margin-top: 12px; font-size: 0.9rem; }
+  .nr-actions { margin-top: 18px; }
+  .summary-card { border: 1px solid rgba(76,175,80,0.5); border-radius: 8px; padding: 16px; }
+  .summary-card .kv { margin: 6px 0; font-size: 0.95rem; }
+  .summary-card .kv .k { color: var(--muted); display: inline-block; min-width: 170px; }
+  .summary-card code { background: #0f1115; border: 1px solid #333; border-radius: 6px; padding: 3px 8px; font-size: 1rem; }
+  .summary-card .warn { color: var(--yellow); margin-top: 10px; font-size: 0.9rem; }
+  .summary-card .note { color: var(--muted); margin-top: 10px; font-size: 0.9rem; }
 </style>
 </head>
 <body>
@@ -49,11 +66,51 @@
 <div id="dash-view" class="hidden">
   <button class="logout" id="logout-btn">Sign out</button>
   <h1>Founder Dashboard</h1>
-  <p class="subtitle">All locations · v0.9.1</p>
+  <p class="subtitle">All locations · v0.10.0</p>
 
   <div id="load-error" class="load-error hidden" role="alert"></div>
 
   <div class="stats" id="stats"></div>
+
+  <div class="section">
+    <h2>New Restaurant</h2>
+    <button class="btn" id="nr-open-btn">+ New Restaurant</button>
+
+    <form class="nr-form hidden" id="nr-form">
+      <label for="nr-name">Restaurant name</label>
+      <input type="text" id="nr-name" maxlength="120" autocomplete="off" required>
+
+      <label for="nr-email">Owner email (their portal login)</label>
+      <input type="email" id="nr-email" maxlength="200" autocomplete="off" required>
+
+      <label>Tier</label>
+      <div class="radio-row">
+        <label class="radio-card"><input type="radio" name="nr-tier" value="starter">Starter
+          <span class="hint">$49.99/mo or 1% commission — printed QR codes only, no device</span></label>
+        <label class="radio-card"><input type="radio" name="nr-tier" value="base" checked>Base
+          <span class="hint">$99/mo or 2% commission — with the STT-101 table device</span></label>
+      </div>
+
+      <label>Plan</label>
+      <div class="radio-row">
+        <label class="radio-card"><input type="radio" name="nr-plan" value="subscription">Subscription
+          <span class="hint">Flat monthly price (starts when they add a card)</span></label>
+        <label class="radio-card"><input type="radio" name="nr-plan" value="commission" checked>Commission
+          <span class="hint">Percentage of each guest card payment</span></label>
+      </div>
+
+      <label for="nr-tables">Number of tables</label>
+      <input type="number" id="nr-tables" min="1" max="100" step="1" value="10" required>
+
+      <p class="error hidden" id="nr-error"></p>
+      <div class="nr-actions">
+        <button type="submit" class="btn" id="nr-create-btn">Create restaurant</button>
+        <button type="button" class="btn secondary" id="nr-cancel-btn">Cancel</button>
+      </div>
+    </form>
+
+    <div class="hidden" id="nr-summary"></div>
+  </div>
 
   <div class="section">
     <h2>Locations</h2>

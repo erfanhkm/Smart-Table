@@ -1,4 +1,4 @@
-// Smart Table — Founder Admin (v0.9.1)
+// Smart Table — Founder Admin (v0.10.0)
 (function () {
   const $ = (id) => document.getElementById(id);
   const TOKEN_KEY = 'st_admin_token';
@@ -63,6 +63,10 @@
     $('username-input').value = '';
     $('token-input').value = '';
     $('stats').innerHTML = '';
+    // The one-time summary card can hold a temporary password — wipe it
+    // (and any half-filled create form) from the DOM on sign-out.
+    $('nr-summary').innerHTML = '';
+    $('nr-form').reset();
     $('locations-body').innerHTML = '';
     $('payments-body').innerHTML = '';
     $('health-body').innerHTML = '';
@@ -149,6 +153,81 @@
       loadInFlight = false;
     }
   }
+
+  // ---- New Restaurant provisioning (v0.10.0) ----
+  async function apiPost(path, body) {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401) { signOut(); throw new Error('Session expired'); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  }
+
+  function nrShow(el) {
+    ['nr-form', 'nr-summary'].forEach((id) => $(id).classList.add('hidden'));
+    $('nr-open-btn').classList.add('hidden');
+    if (el) el.classList.remove('hidden'); else $('nr-open-btn').classList.remove('hidden');
+  }
+
+  $('nr-open-btn').addEventListener('click', () => nrShow($('nr-form')));
+  $('nr-cancel-btn').addEventListener('click', () => { $('nr-error').classList.add('hidden'); nrShow(null); });
+
+  $('nr-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errBox = $('nr-error');
+    errBox.classList.add('hidden');
+    const tier = document.querySelector('input[name="nr-tier"]:checked').value;
+    const plan = document.querySelector('input[name="nr-plan"]:checked').value;
+    const tablesRaw = $('nr-tables').value;
+    const body = {
+      name: $('nr-name').value.trim(),
+      owner_email: $('nr-email').value.trim(),
+      tier,
+      plan,
+      table_count: tablesRaw === '' ? 10 : Number(tablesRaw),
+    };
+    const btn = $('nr-create-btn');
+    btn.disabled = true;
+    try {
+      const r = await apiPost('/api/admin/locations', body);
+      // One-time summary: the temporary password exists ONLY in this
+      // response — it is never stored or shown again.
+      $('nr-summary').innerHTML = `
+        <div class="summary-card">
+          <div class="kv"><span class="k">Restaurant</span>${esc(body.name)}</div>
+          <div class="kv"><span class="k">Portal</span>https://portal.smarttablepay.com/portal</div>
+          <div class="kv"><span class="k">Owner email</span>${esc(r.owner_email)}</div>
+          <div class="kv"><span class="k">Temporary password</span><code id="nr-temp-pw">${esc(r.temp_password)}</code>
+            <button type="button" class="btn secondary" id="nr-copy-btn">Copy</button></div>
+          <div class="kv"><span class="k">Tier / Plan</span>${esc(r.tier)} · ${esc(r.plan)}</div>
+          <div class="kv"><span class="k">Tables created</span>${num(r.tables_created)}</div>
+          <p class="warn">This password is shown only once — copy it now and send it to the owner. They can change it later from the portal.</p>
+          <p class="note">Table QR codes live in the owner's Portal → Tables. For Base locations, devices are paired from the portal's Devices view. The restaurant connects its own Square account from the portal before it can take payments.</p>
+          <div class="nr-actions"><button type="button" class="btn secondary" id="nr-done-btn">Done</button></div>
+        </div>`;
+      nrShow($('nr-summary'));
+      const copyBtn = $('nr-copy-btn');
+      if (copyBtn) copyBtn.addEventListener('click', () => {
+        const pw = $('nr-temp-pw').textContent;
+        if (navigator.clipboard) navigator.clipboard.writeText(pw).catch(() => {});
+        copyBtn.textContent = 'Copied';
+      });
+      const doneBtn = $('nr-done-btn');
+      if (doneBtn) doneBtn.addEventListener('click', () => { $('nr-summary').innerHTML = ''; nrShow(null); });
+      $('nr-form').reset();
+      $('nr-tables').value = '10';
+      load(); // refresh the locations list (and counts) with the new restaurant
+    } catch (err) {
+      errBox.textContent = err.message || 'Could not create the restaurant.';
+      errBox.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+    }
+  });
 
   $('login-btn').addEventListener('click', async () => {
     const username = $('username-input').value.trim();

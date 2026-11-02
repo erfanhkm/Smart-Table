@@ -306,6 +306,21 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
     throw badRequest('this location has no billing currency configured');
   }
 
+  // v0.10.0: a location provisioned from the founder admin before the
+  // restaurant connects its POS has NO credential row, so ctx.token is
+  // undefined. Refuse card charges here with a clean, stable error —
+  // never let the attempt reach an adapter, where a token-less Square
+  // call would surface as a generic 500 (and could never be mistaken
+  // for a charge against the platform env token: that fallback is
+  // demo-only and sq() refuses token-less calls outright).
+  if (input.source.kind === 'card' && !token) {
+    throw httpError(
+      409,
+      'this restaurant has not connected its payment system yet — card payments are unavailable until it does',
+      'pos_not_connected',
+    );
+  }
+
   if (input.source.kind === 'card' && !adapter.chargeCard) {
     throw badRequest(`card payments are not supported for ${posType} locations yet`);
   }
