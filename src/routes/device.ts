@@ -291,6 +291,13 @@ export async function deviceRoutes(app: FastifyInstance) {
   // ---- Service button --------------------------------------------------------
   app.post('/api/device/call', deviceOnly, async (req) => {
     const d = device(req);
+    // C3-2-4(c): tier is enforced at USE time, not only at pairing — a
+    // device paired on Base keeps its token after a downgrade to
+    // Starter, and the waiter-call button is a Base feature. (The
+    // downgrade device-REVOCATION policy itself is a product decision,
+    // deferred; state polling stays available so the unit keeps
+    // showing its table/QR instead of error-looping.)
+    await assertDevicesIncluded(d.location_id);
     // Button-bounce guard: a press within 20s of the previous call is the
     // same press, not a new request.
     const last = await query<{ created_at: string }>(
@@ -317,6 +324,9 @@ export async function deviceRoutes(app: FastifyInstance) {
   // ---- Print jobs ------------------------------------------------------------
   app.get('/api/device/print-jobs', deviceOnly, async (req) => {
     const d = device(req);
+    // C3-2-4(c): receipt printing is a Base feature — a paired device
+    // on a location downgraded to Starter must not keep pulling jobs.
+    await assertDevicesIncluded(d.location_id);
     // v0.8.14 (F11-4): jobs nobody collected within the TTL fail
     // server-side instead of printing whenever the device returns.
     await expireStalePrintJobs(d.id);
@@ -509,6 +519,10 @@ export async function deviceRoutes(app: FastifyInstance) {
     const t = await query<{ id: string; location_id: string }>(`SELECT id, location_id FROM tables WHERE id = $1`, [tableId]);
     if (t.rowCount === 0) throw notFound('table not found');
     assertPortalLocation(req, t.rows[0].location_id);
+    // C3-2-4(c): queueing a print for a Starter location is refused at
+    // creation too (the device fetch path refuses as well) — printing
+    // is not part of the Starter tier at any point in the chain.
+    await assertDevicesIncluded(t.rows[0].location_id);
     const dev = await query<{ id: string }>(
       `SELECT id FROM devices WHERE table_id = $1 AND revoked_at IS NULL`,
       [tableId],

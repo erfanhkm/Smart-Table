@@ -8,6 +8,7 @@ import { badRequest } from '../http.js';
 import {
   billingHistory,
   getBillingState,
+  getLocationTier,
   isLocationTier,
   platformCardConfig,
   saveCard,
@@ -15,6 +16,7 @@ import {
   switchPlan,
   type BillingPlan,
 } from '../services/billing.js';
+import { logAudit } from '../services/audit.js';
 import { assertNotDemoLocation } from '../services/demo-guard.js';
 
 function resolveLocationId(req: FastifyRequest, given?: unknown): string {
@@ -70,6 +72,12 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     const sourceId = typeof body.source_id === 'string' ? body.source_id : '';
     const verificationToken =
       typeof body.verification_token === 'string' ? body.verification_token : undefined;
+    // C3-2 Low: every other token surface is length-bounded (the card
+    // source id is capped at 200 by regex in saveCardLocked); the
+    // verification token was passed through unbounded.
+    if (verificationToken && verificationToken.length > 512) {
+      throw badRequest('verification_token is too long');
+    }
     if (!sourceId) throw badRequest('source_id is required');
     await saveCard(locationId, { sourceId, verificationToken, email: req.portalUser?.email });
     return present(await getBillingState(locationId));
@@ -100,7 +108,22 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     if (!isLocationTier(body.tier)) {
       throw badRequest('tier must be starter or base');
     }
-    return present(await setLocationTier(locationId, body.tier));
+    // C3-2-4: an explicit reset_pricing asks setLocationTier to move the
+    // account to the new tier's defaults even when its pricing was
+    // customized; without it, negotiated pricing survives a tier change.
+    // Tier changes are pricing events — audit them (C3-2-4(d)).
+    const before = await getLocationTier(locationId);
+    const state = await setLocationTier(locationId, body.tier, { resetPricing: body.reset_pricing === true });
+    await logAudit({
+      actorType: req.portalUser ? 'portal_user' : 'staff_token',
+      actorId: req.portalUser?.id ?? null,
+      role: req.portalUser?.role ?? null,
+      ip: req.ip,
+      action: 'billing.tier_changed',
+      locationId,
+      detail: `${before} -> ${body.tier}${body.reset_pricing === true ? ' (pricing reset to tier defaults)' : ''}`,
+    });
+    return present(state);
   });
 
   app.get('/api/portal/billing/history', staffOnly, async (req) => {

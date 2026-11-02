@@ -70,30 +70,51 @@ async function reconcileRun(): Promise<{ reconciled: number; failed: number; sti
   // Postgres `2 ^ n` is double precision and make_interval(mins => double)
   // does not exist, so EVERY run failed there (pg-mem tolerated it, which
   // is why the suite never noticed; and pg-mem's parser rejects the
-  // integer-cast form real Postgres needs). The due check now happens in
-  // JS: portable to both, and the exponent is capped before it can
-  // overflow anything.
+  // integer-cast form real Postgres needs). The due check therefore
+  // compares against JS-computed timestamps (portable to both engines),
+  // and the exponent is capped before it can overflow anything.
   // (Both cutoffs are computed in JS and passed as plain timestamps:
   // make_interval with a bound parameter parses on neither pg-mem nor —
   // with the old expression — real Postgres.)
+  //
+  // C3-2-8: the JS due-filter itself became the starvation bug — the run
+  // fetched the oldest 500 PENDING rows and filtered in JS, so a few
+  // hundred permanent manual-review rows (PENDING forever by design)
+  // filled the whole window and newer stranded payments behind them
+  // were never even examined. The due check now runs IN SQL: one cutoff
+  // timestamp per attempts bucket, each computed in JS exactly as the
+  // old filter computed it (portable to both engines, no interval
+  // arithmetic in SQL). Ordering puts never-attempted rows first
+  // (last_reconcile_at NULL sorts as the epoch), then the longest-idle.
   const stuckBefore = new Date(Date.now() - STUCK_AFTER_MIN * 60000).toISOString();
-  const { rows: candidates } = await query<PendingRow>(
+  const backoffCutoff = (attempts: number): string =>
+    new Date(Date.now() - Math.min(2 ** Math.min(attempts, 8), 240) * 60000).toISOString();
+  const { rows } = await query<PendingRow>(
     `SELECT id, check_id, amount_cents, tip_cents, idempotency_key, pos_tender_ref,
             reconcile_attempts, created_at, last_reconcile_at
      FROM payments
      WHERE status = 'PENDING'
        AND created_at < $1
-     ORDER BY created_at ASC LIMIT 500`,
-    [stuckBefore],
+       AND (last_reconcile_at IS NULL
+            OR (reconcile_attempts <= 0 AND last_reconcile_at < $3)
+            OR (reconcile_attempts = 1 AND last_reconcile_at < $4)
+            OR (reconcile_attempts = 2 AND last_reconcile_at < $5)
+            OR (reconcile_attempts = 3 AND last_reconcile_at < $6)
+            OR (reconcile_attempts = 4 AND last_reconcile_at < $7)
+            OR (reconcile_attempts = 5 AND last_reconcile_at < $8)
+            OR (reconcile_attempts = 6 AND last_reconcile_at < $9)
+            OR (reconcile_attempts = 7 AND last_reconcile_at < $10)
+            OR (reconcile_attempts >= 8 AND last_reconcile_at < $11))
+     ORDER BY COALESCE(last_reconcile_at, $2) ASC, created_at ASC
+     LIMIT 100`,
+    [
+      stuckBefore,
+      '1970-01-01T00:00:00.000Z',
+      backoffCutoff(0), backoffCutoff(1), backoffCutoff(2), backoffCutoff(3),
+      backoffCutoff(4), backoffCutoff(5), backoffCutoff(6), backoffCutoff(7),
+      backoffCutoff(8),
+    ],
   );
-  const nowMs = Date.now();
-  const rows = candidates
-    .filter((p) => {
-      if (!p.last_reconcile_at) return true;
-      const backoffMin = Math.min(2 ** Math.min(p.reconcile_attempts, 8), 240);
-      return new Date(p.last_reconcile_at).getTime() < nowMs - backoffMin * 60000;
-    })
-    .slice(0, 100);
 
   for (const p of rows) {
     const outcome = await reconcileRow(p);
@@ -138,7 +159,17 @@ async function reconcileRow(p: PendingRow): Promise<'reconciled' | 'failed' | 'p
     }
 
     if (matched) {
-      const closed = detail.remainingCents <= 0;
+      // C3-2-7: the closed decision takes tender coverage as positive
+      // evidence too — an adapter whose remaining figure is stale-high
+      // (it lags its own tender list) must not leave a fully-tendered
+      // check "open" in our books. Tenders demonstrably covering the
+      // total is proof of payment; remainingCents alone was the only
+      // voice before. (For Square the adapter's remaining is already
+      // tender-aware since C3-1-1; this guards the other adapters.)
+      const tenderSum = detail.tenders.reduce((s: number, t: PosTender) => s + t.amountCents, 0);
+      const closed =
+        detail.remainingCents <= 0 ||
+        (canSeeTenders && detail.totalCents > 0 && tenderSum >= detail.totalCents);
       // Per-row write transaction: re-check PENDING under the row lock,
       // then settle the payment (+ check/table when closed).
       const settled = await withTx(async (client) => {
@@ -228,6 +259,27 @@ async function reconcileRow(p: PendingRow): Promise<'reconciled' | 'failed' | 'p
         console.error(`[reconcile] fee recording failed for payment ${p.id}:`, feeErr);
       }
       console.log(`[reconcile] ${p.idempotency_key}: POS tender ${matched.id} -> ${closed ? 'COMPLETED' : 'AUTHORIZED'}`);
+      // C3-2-7: reconcile settles RECORDS — it never captures money. A
+      // Square card charge runs autocomplete:false and is captured by
+      // the PayOrder close-out in the live path; when that path died
+      // (why this row was PENDING at all), the Square payment can sit
+      // APPROVED while our books say COMPLETED, and the authorization
+      // lapses unpaid days later. Automating the capture/cancel here
+      // is adapter surgery (deferred to the F-10/F1-11 lane); until
+      // then every reconcile-closed Square check, and every Square
+      // authorization left standing for hours, is routed loudly to
+      // manual review so a human verifies the capture in Square.
+      if (ctx.posType === 'square' && closed) {
+        console.error(
+          `[reconcile] MANUAL REVIEW ${p.idempotency_key}: reconcile closed Square check ${p.check_id} from tender ${matched.id} ` +
+            'but does not run the PayOrder capture — verify in Square that the payment is COMPLETED, not still APPROVED',
+        );
+      } else if (ctx.posType === 'square' && ageH > 6) {
+        console.error(
+          `[reconcile] MANUAL REVIEW ${p.idempotency_key}: Square payment settled as AUTHORIZED ${ageH.toFixed(1)}h after the charge ` +
+            'with the check still open — verify it completes (PayOrder) before the authorization lapses',
+        );
+      }
       return 'reconciled';
     }
 
@@ -245,6 +297,25 @@ async function reconcileRow(p: PendingRow): Promise<'reconciled' | 'failed' | 'p
         [p.id],
       );
       console.error(`[reconcile] MANUAL REVIEW ${p.idempotency_key}: ${freshTenders.length} unmatched tender(s) after ${ageH.toFixed(1)}h — left PENDING`);
+      return 'pending';
+    }
+
+    if (ageH > GIVE_UP_AFTER_H && canSeeTenders && !p.pos_tender_ref
+        && detail.tenders.length === 0 && detail.totalCents > 0 && detail.remainingCents < detail.totalCents) {
+      // C3-2-11: the adapter's detail is internally inconsistent — it
+      // reports money tendered (remaining below the total) yet lists
+      // NO tenders at all. That is a partial/malformed POS response,
+      // indistinguishable in shape from "no payment exists" but opposite
+      // in meaning: the FAILED branch below would have destroyed a
+      // charged payment's record on it. Contradictory evidence is a
+      // human's call, exactly like the ambiguous branch above.
+      await query(
+        `UPDATE payments SET reconcile_attempts = reconcile_attempts + 1, last_reconcile_at = now(),
+           last_reconcile_error = 'MANUAL REVIEW: POS detail inconsistent after 24h (remaining < total but no tenders listed)'
+         WHERE id = $1`,
+        [p.id],
+      );
+      console.error(`[reconcile] MANUAL REVIEW ${p.idempotency_key}: POS detail inconsistent (remaining ${detail.remainingCents} < total ${detail.totalCents}, zero tenders listed) after ${ageH.toFixed(1)}h — left PENDING`);
       return 'pending';
     }
 

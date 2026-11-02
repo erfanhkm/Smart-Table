@@ -508,6 +508,19 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
       let newRemaining: number;
       let resultCurrency = currency;
 
+      // C3-2-1 (migration 032): the commission fee decision made for
+      // THIS payment, stamped on the row by the settle UPDATE below so
+      // the missing-fee sweep can honor the plan/rate in force at
+      // charge time instead of re-judging with today's plan. External
+      // (staff-recorded) payments never carry a fee; the card branch
+      // fills in 'commission' (+ the bps applied) or 'subscription'
+      // once the billing account is known. A failed billing lookup
+      // leaves the row unstamped and the sweep's bounded-window legacy
+      // fallback judges it, exactly as before this column existed.
+      let feeDecision: 'commission' | 'subscription' | 'external' | null =
+        input.source.kind === 'external' ? 'external' : null;
+      let feeDecisionBps: number | null = null;
+
       // F1-2: durable "a charge is about to happen" marker, written in
       // autocommit BEFORE any POS charge call in the branches below. If
       // the process dies between the charge and the tender-ref write, a
@@ -648,8 +661,14 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
             console.error('[payments] ensureBillingAccount failed; charging without a fee:', e);
             return null;
           });
-          if (acct && effectivePlan(acct) === 'commission') {
-            feeCents = feeFor(amount + tipCents, acct.commission_bps);
+          if (acct) {
+            if (effectivePlan(acct) === 'commission') {
+              feeCents = feeFor(amount + tipCents, acct.commission_bps);
+              feeDecision = 'commission';
+              feeDecisionBps = acct.commission_bps;
+            } else {
+              feeDecision = 'subscription';
+            }
           }
         }
         await markChargeStarted();
@@ -766,9 +785,10 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
 
       await client.query(
         `UPDATE payments SET status='AUTHORIZED', square_payment_id=$1, external_payment_ref=$2, amount_cents=$3, tip_cents=$4,
-           remaining_after_cents=$5, check_state=$6, currency=$7
+           remaining_after_cents=$5, check_state=$6, currency=$7,
+           fee_decision=COALESCE(fee_decision,$9), fee_bps=COALESCE(fee_bps,$10)
          WHERE idempotency_key=$8`,
-        [posType === 'square' ? externalPaymentId : null, externalPaymentId, amount, tipCents, Math.max(0, newRemaining), checkState, resultCurrency, key],
+        [posType === 'square' ? externalPaymentId : null, externalPaymentId, amount, tipCents, Math.max(0, newRemaining), checkState, resultCurrency, key, feeDecision, feeDecisionBps],
       );
 
       if (completes) {
