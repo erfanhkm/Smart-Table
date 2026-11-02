@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog | Smart Table — QR Code Payments &amp; Restaurant Operations Guides</title>
+    <meta name="description" content="Practical guides for BC restaurant owners: QR code payment, split bills, tipping, Square POS tips and running a faster floor. From the Smart Table team in Metro Vancouver.">
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+    <meta name="author" content="Smart Table">
+    <meta name="geo.region" content="CA-BC">
+    <meta name="geo.placename" content="Vancouver">
+    <link rel="canonical" href="https://smarttablepay.com/blog/">
+    <meta name="theme-color" content="#0E1B2C">
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Smart Table">
+    <meta property="og:title" content="Smart Table Blog — Guides for Restaurant Owners">
+    <meta property="og:description" content="Practical guides for BC restaurant owners: QR code payment, split bills, tipping, Square POS tips and running a faster floor.">
+    <meta property="og:url" content="https://smarttablepay.com/blog/">
+    <meta property="og:locale" content="en_CA">
+    <meta property="og:image" content="https://smarttablepay.com/og-image.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Smart Table — QR code table payments for restaurants. The bill, without the wait.">
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Smart Table Blog — Guides for Restaurant Owners">
+    <meta name="twitter:description" content="Practical guides for BC restaurant owners: QR code payment, split bills, tipping, Square POS tips and running a faster floor.">
+    <meta name="twitter:image" content="https://smarttablepay.com/og-image.jpg">
+    <meta name="twitter:image:alt" content="Smart Table — QR code table payments for restaurants. The bill, without the wait.">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230E1B2C'/%3E%3Ctext x='50' y='70' font-size='54' text-anchor='middle' fill='%23F59E0B' font-family='sans-serif' font-weight='bold'%3ES%3C/text%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Blog",
+          "@id": "https://smarttablepay.com/blog/#blog",
+          "url": "https://smarttablepay.com/blog/",
+          "name": "Smart Table Blog",
+          "description": "Practical guides for BC restaurant owners on QR code table payment, split bills, tipping, Square POS and restaurant operations.",
+          "publisher": { "@id": "https://smarttablepay.com/#organization" },
+          "inLanguage": "en-CA",
+          "blogPost": [
+            {
+              "@type": "BlogPosting",
+              "headline": "QR Code Payment for Restaurants: The Complete 2026 Guide for BC Restaurant Owners",
+              "url": "https://smarttablepay.com/blog/qr-code-payment-restaurants-guide.html",
+              "datePublished": "2026-11-01",
+              "dateModified": "2026-11-01",
+              "author": { "@id": "https://smarttablepay.com/#organization" }
+            }
+          ]
+        },
+        {
+          "@type": "Organization",
+          "@id": "https://smarttablepay.com/#organization",
+          "name": "Smart Table",
+          "url": "https://smarttablepay.com/",
+          "logo": "https://smarttablepay.com/icon-512.png",
+          "email": "info@smarttablepay.com",
+          "description": "Smart Table is a QR code table payment system for restaurants. Guests scan a table QR code, split and pay the bill from their phone browser — no app download, no account — while staff watch every table's state live.",
+          "address": { "@type": "PostalAddress", "addressLocality": "Vancouver", "addressRegion": "BC", "addressCountry": "CA" },
+          "areaServed": { "@type": "AdministrativeArea", "name": "Metro Vancouver" }
+        }
+      ]
+    }
+    </script>
+    <link rel="dns-prefetch" href="https://static.cloudflareinsights.com">
+    <link href="/fonts/fonts.css" rel="stylesheet">
+    <style>
+        :root {
+            --navy: #0E1B2C;
+            --navy-dark: #08101C;
+            --paper: #FAF8F4;
+            --card-bg: #FFFFFF;
+            --text-main: #1E293B;
+            --text-muted: #64748B;
+            --border: #E2E8F0;
+            --blue: #2F80ED;
+            --amber: #F59E0B;
+            --green: #16A34A;
+            --gold: #B45309;
+            --gold-hover: #92400E;
+            --gold-soft: #FEF3C7;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, system-ui, -apple-system, sans-serif; }
+        body { background: var(--paper); color: var(--text-main); line-height: 1.6; font-size: 1rem; }
+
+        :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+        .skip-link { position: absolute; left: -9999px; top: 0; background: var(--navy); color: #fff; padding: 10px 16px; z-index: 200; border-radius: 0 0 8px 0; }
+        .skip-link:focus { left: 0; }
+
+        /* Navigation */
+        header { background: var(--navy); color: white; padding: 18px 40px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(255,255,255,0.08); }
+        .brand { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.025em; display: flex; align-items: center; gap: 6px; text-decoration: none; color: white; }
+        .brand span { color: var(--amber); }
+        .nav-links { display: flex; align-items: center; gap: 30px; }
+        .nav-links a { color: #94A3B8; text-decoration: none; font-size: 0.95rem; font-weight: 500; transition: color 0.2s; }
+        .nav-links a:hover { color: white; }
+        .nav-links a[aria-current="page"] { color: white; }
+        .nav-cta { background: var(--gold); color: white; padding: 10px 20px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 0.95rem; transition: background 0.2s; white-space: nowrap; }
+        .nav-cta:hover { background: var(--gold-hover); }
+        .nav-login { color: #94A3B8; text-decoration: none; font-size: 0.95rem; font-weight: 500; white-space: nowrap; }
+        .nav-login:hover { color: white; }
+
+        @media(max-width: 900px) {
+            .nav-links { display: none; }
+            header .nav-cta { display: none; }
+            header { padding: 16px 20px; }
+        }
+
+        /* Mobile hamburger menu (pure CSS; no JS) */
+        .nav-toggle-input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+        .nav-toggle { display: none; cursor: pointer; padding: 8px 4px; }
+        .nav-toggle span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px; margin: 5px 0; }
+        .mobile-menu { display: none; }
+
+        @media(max-width: 900px) {
+            .nav-toggle { display: block; }
+            .nav-toggle-input:checked ~ .mobile-menu {
+                display: flex;
+                position: absolute;
+                top: 100%; left: 0; right: 0;
+                background: var(--navy);
+                flex-direction: column;
+                padding: 8px 20px 20px;
+                border-bottom: 1px solid rgba(255,255,255,0.08);
+                box-shadow: 0 12px 24px rgba(0,0,0,0.25);
+                z-index: 99;
+            }
+            .nav-toggle-input:checked ~ .mobile-menu a { color: #94A3B8; text-decoration: none; font-size: 1rem; font-weight: 500; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+            .nav-toggle-input:checked ~ .mobile-menu a:hover { color: #fff; }
+            .nav-toggle-input:checked ~ .mobile-menu .nav-cta { display: block; text-align: center; margin-top: 12px; padding: 12px 20px; border-bottom: none; }
+        }
+
+        /* Blog */
+        section { padding: 90px 20px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        .blog-hero { background: var(--navy); color: white; padding: 64px 20px 54px; text-align: center; }
+        .blog-hero h1 { font-size: clamp(2rem, 6vw, 2.8rem); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 12px; }
+        .blog-hero p { color: #94A3B8; max-width: 640px; margin: 0 auto; }
+        .post-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 30px; }
+        .post-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; padding: 36px 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); display: flex; flex-direction: column; }
+        .post-meta { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+        .post-meta span { color: var(--gold-hover); }
+        .post-card h2 { font-size: 1.45rem; font-weight: 800; color: var(--navy); letter-spacing: -0.01em; line-height: 1.3; margin-bottom: 12px; }
+        .post-card h2 a { color: var(--navy); text-decoration: none; }
+        .post-card h2 a:hover { color: var(--gold-hover); }
+        .post-card p { color: var(--text-muted); font-size: 0.98rem; margin-bottom: 20px; flex: 1; }
+        .post-link { color: var(--gold-hover); font-weight: 700; text-decoration: none; }
+        .post-link:hover { text-decoration: underline; }
+        .upcoming { max-width: 800px; margin: 70px auto 0; }
+        .upcoming h2 { font-size: 1.4rem; font-weight: 800; color: var(--navy); margin-bottom: 8px; text-align: center; }
+        .upcoming > p { color: var(--text-muted); text-align: center; margin-bottom: 24px; }
+        .upcoming ul { list-style: none; }
+        .upcoming li { background: white; border: 1px solid var(--border); border-radius: 12px; padding: 16px 22px; margin-bottom: 12px; color: var(--text-muted); }
+        .upcoming li strong { color: var(--navy); }
+        .blog-cta { background: var(--navy); color: white; border-radius: 24px; padding: 50px 40px; max-width: 850px; margin: 70px auto 0; text-align: center; }
+        .blog-cta h2 { font-size: 1.8rem; font-weight: 800; margin-bottom: 12px; }
+        .blog-cta p { color: #94A3B8; margin-bottom: 26px; }
+        .btn-primary { background: var(--gold); color: white; padding: 14px 28px; border-radius: 10px; font-size: 1.05rem; font-weight: 700; text-decoration: none; display: inline-block; box-shadow: 0 4px 14px rgba(180, 83, 9, 0.3); transition: background 0.2s; }
+        .btn-primary:hover { background: var(--gold-hover); }
+        .btn-secondary { background: rgba(255,255,255,0.08); color: white; border: 1px solid rgba(255,255,255,0.2); padding: 14px 28px; border-radius: 10px; font-size: 1.05rem; font-weight: 600; text-decoration: none; display: inline-block; transition: background 0.2s; }
+        .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+        .blog-cta .btn-secondary { margin-left: 12px; }
+
+        /* Footer */
+        footer { background: var(--navy-dark); color: #94A3B8; padding: 50px 20px; text-align: center; font-size: 0.9rem; border-top: 1px solid rgba(255,255,255,0.08); }
+        .footer-content { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; align-items: center; }
+        .footer-contact-block { font-weight: 500; color: white; }
+        .footer-contact-block a { color: var(--amber); text-decoration: none; }
+
+        @media(max-width: 600px) {
+            header { padding: 14px 16px; }
+            section { padding: 56px 16px; }
+            .blog-cta { padding: 30px 22px; }
+            .blog-cta .btn-secondary { margin-left: 0; margin-top: 12px; }
+        }
+
+        @media (prefers-reduced-motion: no-preference) {
+            html { scroll-behavior: smooth; }
+        }
+    </style>
+<!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "50093eb2d5dc4982bad58e9e46723827"}'></script><!-- End Cloudflare Web Analytics -->
+</head>
+<body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <!-- Sticky Navigation -->
+    <header>
+        <a href="/" class="brand">Smart Table<span>.</span></a>
+        <nav class="nav-links" aria-label="Main">
+            <a href="/#product">Product</a>
+            <a href="/#device">Device</a>
+            <a href="/demo">Live demo</a>
+            <a href="/owner-demo">Owner demo</a>
+            <a href="/#roi">Savings</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#partner">Founding program</a>
+            <a href="/#faq">FAQ</a>
+            <a href="/blog/" aria-current="page">Blog</a>
+        </nav>
+        <input type="checkbox" id="nav-toggle" class="nav-toggle-input">
+        <label for="nav-toggle" class="nav-toggle" aria-label="Menu"><span></span><span></span><span></span></label>
+        <nav class="mobile-menu" aria-label="Mobile">
+            <a href="/#product">Product</a>
+            <a href="/#device">Device</a>
+            <a href="/demo">Live demo</a>
+            <a href="/owner-demo">Owner demo</a>
+            <a href="/#roi">Savings</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#partner">Founding program</a>
+            <a href="/#faq">FAQ</a>
+            <a href="/blog/">Blog</a>
+            <a href="/#partner" class="nav-cta">Join the founding program</a>
+        </nav>
+        <a href="/#partner" class="nav-cta">Join the founding program</a>
+        <a href="https://portal.smarttablepay.com/portal" class="nav-login">Restaurant login</a>
+    </header>
+
+    <main id="main">
+    <div class="blog-hero">
+        <h1>The Smart Table Blog</h1>
+        <p>Straight answers for BC restaurant owners — how QR code payment works, what it costs, and how to run a faster floor. New guides every two weeks.</p>
+    </div>
+
+    <section>
+        <div class="container">
+            <div class="post-grid">
+                <article class="post-card">
+                    <div class="post-meta"><span>Guide</span> &nbsp;·&nbsp; <time datetime="2026-11-01">November 1, 2026</time> &nbsp;·&nbsp; 11 min read</div>
+                    <h2><a href="/blog/qr-code-payment-restaurants-guide.html">QR Code Payment for Restaurants: The Complete 2026 Guide for BC Restaurant Owners</a></h2>
+                    <p>How pay-at-table actually works, how it differs from order-and-pay, what it really costs, how it connects to your Square account, what it does to split bills and tips — and the security questions to ask any vendor before you sign.</p>
+                    <a class="post-link" href="/blog/qr-code-payment-restaurants-guide.html">Read the guide →</a>
+                </article>
+            </div>
+
+            <div class="upcoming">
+                <h2>Coming up on the blog</h2>
+                <p>One new guide every two weeks. Next in the queue:</p>
+                <ul>
+                    <li><strong>Slow bill payment:</strong> why guests wait to pay — and what that wait costs your restaurant every month</li>
+                    <li><strong>Split bills:</strong> how group pay ends the cheque-splitting argument at the table</li>
+                    <li><strong>Square for Restaurants:</strong> features Vancouver owners already pay for but rarely use</li>
+                </ul>
+            </div>
+
+            <div class="blog-cta">
+                <h2>See it from both sides of the table</h2>
+                <p>Try the guest experience on your phone, then look at the owner dashboard your team would run.</p>
+                <a href="/demo" class="btn-primary">▶ Try the live demo</a>
+                <a href="/owner-demo" class="btn-secondary">See the owner demo</a>
+            </div>
+        </div>
+    </section>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-content">
+            <div class="footer-contact-block">
+                QR code table payments for restaurants &nbsp;·&nbsp; Metro Vancouver, BC &nbsp;·&nbsp; <a href="mailto:info@smarttablepay.com">info@smarttablepay.com</a>
+            </div>
+            <p><a href="/privacy.html" style="color: #94A3B8; text-decoration: none;">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms.html" style="color: #94A3B8; text-decoration: none;">Terms of Service</a> &nbsp;·&nbsp; <a href="/blog/" style="color: #94A3B8; text-decoration: none;">Blog</a></p>
+            <p>&copy; 2026 smarttablepay · Metro Vancouver, BC</p>
+        </div>
+    </footer>
+
+</body>
+</html>

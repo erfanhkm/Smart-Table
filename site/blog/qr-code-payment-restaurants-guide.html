@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Code Payment for Restaurants: 2026 Guide for BC Owners | Smart Table</title>
+    <meta name="description" content="How QR code payment works for BC restaurants: pay-at-table vs order-and-pay, what it costs, Square integration, split bills, tipping and PCI security — a practical 2026 guide for Vancouver owners.">
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+    <meta name="author" content="Smart Table">
+    <meta name="geo.region" content="CA-BC">
+    <meta name="geo.placename" content="Vancouver">
+    <link rel="canonical" href="https://smarttablepay.com/blog/qr-code-payment-restaurants-guide.html">
+    <meta name="theme-color" content="#0E1B2C">
+    <!-- Open Graph -->
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Smart Table">
+    <meta property="og:title" content="QR Code Payment for Restaurants: The Complete 2026 Guide for BC Restaurant Owners">
+    <meta property="og:description" content="Pay-at-table vs order-and-pay, real costs, Square integration, split bills, tipping and PCI security — the vendor-neutral guide for BC restaurant owners.">
+    <meta property="og:url" content="https://smarttablepay.com/blog/qr-code-payment-restaurants-guide.html">
+    <meta property="og:locale" content="en_CA">
+    <meta property="og:image" content="https://smarttablepay.com/og-image.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Smart Table — QR code table payments for restaurants. The bill, without the wait.">
+    <meta property="article:published_time" content="2026-11-01T00:00:00-07:00">
+    <meta property="article:modified_time" content="2026-11-01T00:00:00-07:00">
+    <meta property="article:author" content="Smart Table">
+    <meta property="article:section" content="Guides">
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="QR Code Payment for Restaurants: The Complete 2026 Guide for BC Restaurant Owners">
+    <meta name="twitter:description" content="Pay-at-table vs order-and-pay, real costs, Square integration, split bills, tipping and PCI security — the vendor-neutral guide for BC restaurant owners.">
+    <meta name="twitter:image" content="https://smarttablepay.com/og-image.jpg">
+    <meta name="twitter:image:alt" content="Smart Table — QR code table payments for restaurants. The bill, without the wait.">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230E1B2C'/%3E%3Ctext x='50' y='70' font-size='54' text-anchor='middle' fill='%23F59E0B' font-family='sans-serif' font-weight='bold'%3ES%3C/text%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Article",
+          "@id": "https://smarttablepay.com/blog/qr-code-payment-restaurants-guide.html#article",
+          "headline": "QR Code Payment for Restaurants: The Complete 2026 Guide for BC Restaurant Owners",
+          "description": "How QR code payment works for BC restaurants: pay-at-table vs order-and-pay, what it costs, Square integration, split bills, tipping and PCI security — a practical 2026 guide for Vancouver owners.",
+          "url": "https://smarttablepay.com/blog/qr-code-payment-restaurants-guide.html",
+          "mainEntityOfPage": "https://smarttablepay.com/blog/qr-code-payment-restaurants-guide.html",
+          "image": "https://smarttablepay.com/og-image.jpg",
+          "datePublished": "2026-11-01",
+          "dateModified": "2026-11-01",
+          "author": { "@id": "https://smarttablepay.com/#organization" },
+          "publisher": { "@id": "https://smarttablepay.com/#organization" },
+          "inLanguage": "en-CA",
+          "articleSection": "Guides",
+          "keywords": "QR code payment for restaurants, pay at table, QR ordering, split bill, group pay, Square POS, restaurant payment, Vancouver, BC"
+        },
+        {
+          "@type": "Organization",
+          "@id": "https://smarttablepay.com/#organization",
+          "name": "Smart Table",
+          "url": "https://smarttablepay.com/",
+          "logo": "https://smarttablepay.com/icon-512.png",
+          "email": "info@smarttablepay.com",
+          "description": "Smart Table is a QR code table payment system for restaurants. Guests scan a table QR code, split and pay the bill from their phone browser — no app download, no account — while staff watch every table's state live.",
+          "address": { "@type": "PostalAddress", "addressLocality": "Vancouver", "addressRegion": "BC", "addressCountry": "CA" },
+          "areaServed": { "@type": "AdministrativeArea", "name": "Metro Vancouver" }
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            { "@type": "Question", "name": "Do guests need to download an app to pay by QR code?", "acceptedAnswer": { "@type": "Answer", "text": "No. With a properly built system, the QR code opens a web page in the guest's phone browser. They see the bill, tip, split and pay — no download, no account, no sign-up. If a vendor's QR code sends your guests to an app store, that friction will cost you adoption; check this before anything else." } },
+            { "@type": "Question", "name": "Does QR code payment replace my POS?", "acceptedAnswer": { "@type": "Answer", "text": "No — it sits on top of your POS. The platform reads the open check for the table from your POS and records the guest's payment back into it, so your reports, payouts and refunds stay in one system. Smart Table works with Square today; whatever system you choose, this read-and-write-back connection to your POS is the feature that matters most." } },
+            { "@type": "Question", "name": "What does QR code payment cost a restaurant?", "acceptedAnswer": { "@type": "Answer", "text": "Two parts. Your card processing fees stay with your own POS provider's account, at the rates you already pay. On top of that, the QR platform charges either a flat monthly fee per location or a small commission per payment. Smart Table's Starter plan is $49.99/month per location or 1% per payment in CAD, with printed table QR codes and no hardware to buy. Compare models against your own card volume: subscription wins as volume grows, commission wins when volume is low or seasonal." } },
+            { "@type": "Question", "name": "Is QR code payment secure — for my restaurant and my guests?", "acceptedAnswer": { "@type": "Answer", "text": "Yes, when it's built correctly. The guest enters card details on their own phone, the payment is processed by your POS provider, and the money settles into your own merchant account. Your restaurant never sees, handles or stores card numbers, which keeps your PCI DSS obligations light. Two checks: the payment should run on your merchant account (not the vendor's), and you should only ever connect your POS through the provider's own sign-in screen — never by sharing your password." } },
+            { "@type": "Question", "name": "What if a guest doesn't have a smartphone, or wants to pay cash?", "acceptedAnswer": { "@type": "Answer", "text": "Nothing changes for them. QR payment runs alongside your normal process, not instead of it: a server can still bring the terminal, take cash and close the check the usual way. The restaurants that get the most from QR payment treat it as an option guests can choose, not a door they have to walk through." } }
+          ]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://smarttablepay.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Blog", "item": "https://smarttablepay.com/blog/" },
+            { "@type": "ListItem", "position": 3, "name": "QR Code Payment for Restaurants: The Complete 2026 Guide", "item": "https://smarttablepay.com/blog/qr-code-payment-restaurants-guide.html" }
+          ]
+        }
+      ]
+    }
+    </script>
+    <link rel="dns-prefetch" href="https://static.cloudflareinsights.com">
+    <link href="/fonts/fonts.css" rel="stylesheet">
+    <style>
+        :root {
+            --navy: #0E1B2C;
+            --navy-dark: #08101C;
+            --paper: #FAF8F4;
+            --card-bg: #FFFFFF;
+            --text-main: #1E293B;
+            --text-muted: #64748B;
+            --border: #E2E8F0;
+            --blue: #2F80ED;
+            --amber: #F59E0B;
+            --green: #16A34A;
+            --gold: #B45309;
+            --gold-hover: #92400E;
+            --gold-soft: #FEF3C7;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, system-ui, -apple-system, sans-serif; }
+        body { background: var(--paper); color: var(--text-main); line-height: 1.6; font-size: 1rem; }
+
+        :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+        .skip-link { position: absolute; left: -9999px; top: 0; background: var(--navy); color: #fff; padding: 10px 16px; z-index: 200; border-radius: 0 0 8px 0; }
+        .skip-link:focus { left: 0; }
+
+        /* Navigation */
+        header { background: var(--navy); color: white; padding: 18px 40px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(255,255,255,0.08); }
+        .brand { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.025em; display: flex; align-items: center; gap: 6px; text-decoration: none; color: white; }
+        .brand span { color: var(--amber); }
+        .nav-links { display: flex; align-items: center; gap: 30px; }
+        .nav-links a { color: #94A3B8; text-decoration: none; font-size: 0.95rem; font-weight: 500; transition: color 0.2s; }
+        .nav-links a:hover { color: white; }
+        .nav-links a[aria-current="page"] { color: white; }
+        .nav-cta { background: var(--gold); color: white; padding: 10px 20px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 0.95rem; transition: background 0.2s; white-space: nowrap; }
+        .nav-cta:hover { background: var(--gold-hover); }
+        .nav-login { color: #94A3B8; text-decoration: none; font-size: 0.95rem; font-weight: 500; white-space: nowrap; }
+        .nav-login:hover { color: white; }
+
+        @media(max-width: 900px) {
+            .nav-links { display: none; }
+            header .nav-cta { display: none; }
+            header { padding: 16px 20px; }
+        }
+
+        /* Mobile hamburger menu (pure CSS; no JS) */
+        .nav-toggle-input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+        .nav-toggle { display: none; cursor: pointer; padding: 8px 4px; }
+        .nav-toggle span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px; margin: 5px 0; }
+        .mobile-menu { display: none; }
+
+        @media(max-width: 900px) {
+            .nav-toggle { display: block; }
+            .nav-toggle-input:checked ~ .mobile-menu {
+                display: flex;
+                position: absolute;
+                top: 100%; left: 0; right: 0;
+                background: var(--navy);
+                flex-direction: column;
+                padding: 8px 20px 20px;
+                border-bottom: 1px solid rgba(255,255,255,0.08);
+                box-shadow: 0 12px 24px rgba(0,0,0,0.25);
+                z-index: 99;
+            }
+            .nav-toggle-input:checked ~ .mobile-menu a { color: #94A3B8; text-decoration: none; font-size: 1rem; font-weight: 500; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+            .nav-toggle-input:checked ~ .mobile-menu a:hover { color: #fff; }
+            .nav-toggle-input:checked ~ .mobile-menu .nav-cta { display: block; text-align: center; margin-top: 12px; padding: 12px 20px; border-bottom: none; }
+        }
+
+        /* Article */
+        section { padding: 90px 20px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        .article-hero { background: var(--navy); color: white; padding: 64px 20px 54px; text-align: center; }
+        .article-hero .crumbs { font-size: 0.85rem; color: #94A3B8; margin-bottom: 18px; }
+        .article-hero .crumbs a { color: #94A3B8; text-decoration: none; }
+        .article-hero .crumbs a:hover { color: white; }
+        .article-hero h1 { font-size: clamp(1.9rem, 5.5vw, 2.7rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; max-width: 820px; margin: 0 auto 16px; }
+        .article-hero .standfirst { color: #CBD5E1; max-width: 700px; margin: 0 auto 18px; font-size: 1.08rem; }
+        .article-hero .hero-meta { font-size: 0.88rem; color: #94A3B8; }
+        .article-hero .hero-meta span { color: var(--amber); font-weight: 600; }
+        .article-card { background: white; border: 1px solid var(--border); border-radius: 20px; padding: 48px; max-width: 820px; margin: 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.02); }
+        .article-body p { margin-bottom: 16px; font-size: 1.02rem; }
+        .article-body h2 { font-size: 1.55rem; font-weight: 800; color: var(--navy); letter-spacing: -0.01em; line-height: 1.3; margin: 42px 0 14px; }
+        .article-body h2:first-of-type { margin-top: 6px; }
+        .article-body h3 { font-size: 1.15rem; font-weight: 700; color: var(--navy); margin: 26px 0 10px; }
+        .article-body ul, .article-body ol { margin: 0 0 16px 22px; }
+        .article-body li { margin-bottom: 8px; }
+        .article-body a { color: var(--blue); }
+        .article-body strong { color: var(--navy); }
+        .callout { background: var(--gold-soft); border: 1px solid #FDE68A; border-radius: 14px; padding: 24px 26px; margin: 30px 0; }
+        .callout h2, .callout h3 { margin-top: 0; }
+        .callout p:last-child { margin-bottom: 0; }
+        .faq-list { display: flex; flex-direction: column; gap: 16px; margin-top: 20px; }
+        .faq-item { background: var(--paper); border: 1px solid var(--border); border-radius: 14px; padding: 24px; }
+        .faq-item h3 { font-size: 1.05rem; font-weight: 700; color: var(--navy); margin: 0 0 8px; }
+        .faq-item p { color: var(--text-muted); font-size: 0.97rem; margin-bottom: 0; }
+        .article-author { border-top: 1px solid var(--border); margin-top: 44px; padding-top: 22px; color: var(--text-muted); font-size: 0.92rem; }
+        .article-author strong { color: var(--navy); }
+
+        /* Footer */
+        footer { background: var(--navy-dark); color: #94A3B8; padding: 50px 20px; text-align: center; font-size: 0.9rem; border-top: 1px solid rgba(255,255,255,0.08); }
+        .footer-content { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; align-items: center; }
+        .footer-contact-block { font-weight: 500; color: white; }
+        .footer-contact-block a { color: var(--amber); text-decoration: none; }
+
+        @media(max-width: 600px) {
+            header { padding: 14px 16px; }
+            section { padding: 56px 16px; }
+            .article-card { padding: 28px 20px; }
+        }
+
+        @media (prefers-reduced-motion: no-preference) {
+            html { scroll-behavior: smooth; }
+        }
+    </style>
+<!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "50093eb2d5dc4982bad58e9e46723827"}'></script><!-- End Cloudflare Web Analytics -->
+</head>
+<body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <!-- Sticky Navigation -->
+    <header>
+        <a href="/" class="brand">Smart Table<span>.</span></a>
+        <nav class="nav-links" aria-label="Main">
+            <a href="/#product">Product</a>
+            <a href="/#device">Device</a>
+            <a href="/demo">Live demo</a>
+            <a href="/owner-demo">Owner demo</a>
+            <a href="/#roi">Savings</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#partner">Founding program</a>
+            <a href="/#faq">FAQ</a>
+            <a href="/blog/" aria-current="page">Blog</a>
+        </nav>
+        <input type="checkbox" id="nav-toggle" class="nav-toggle-input">
+        <label for="nav-toggle" class="nav-toggle" aria-label="Menu"><span></span><span></span><span></span></label>
+        <nav class="mobile-menu" aria-label="Mobile">
+            <a href="/#product">Product</a>
+            <a href="/#device">Device</a>
+            <a href="/demo">Live demo</a>
+            <a href="/owner-demo">Owner demo</a>
+            <a href="/#roi">Savings</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#partner">Founding program</a>
+            <a href="/#faq">FAQ</a>
+            <a href="/blog/">Blog</a>
+            <a href="/#partner" class="nav-cta">Join the founding program</a>
+        </nav>
+        <a href="/#partner" class="nav-cta">Join the founding program</a>
+        <a href="https://portal.smarttablepay.com/portal" class="nav-login">Restaurant login</a>
+    </header>
+
+    <main id="main">
+    <div class="article-hero">
+        <div class="crumbs"><a href="/">Home</a> &nbsp;›&nbsp; <a href="/blog/">Blog</a> &nbsp;›&nbsp; Guides</div>
+        <h1>QR Code Payment for Restaurants: The Complete 2026 Guide for BC Restaurant Owners</h1>
+        <p class="standfirst">How pay-at-table works, what it really costs, how it connects to the POS you already have, and the questions that separate a good system from an expensive mistake.</p>
+        <div class="hero-meta">By the <span>Smart Table team</span> · <time datetime="2026-11-01">November 1, 2026</time> · 11 min read</div>
+    </div>
+
+    <section>
+        <div class="container">
+            <article class="article-card article-body">
+                <p>If you run a restaurant in British Columbia, you know the scene: a table that finished eating a while ago is still occupied — not by dessert, but by the bill. Someone is trying to catch a server's eye. The card terminal is at another table. QR code payment exists to delete that scene. This guide explains how QR pay-at-table works, what it costs, how it connects to your POS, what it does to split bills and tips, how the security works, and how to choose one without locking yourself into the wrong system. Full disclosure: we build one of these systems — <a href="/">Smart Table</a>, in Metro Vancouver — and we'll tell you exactly where we fit. The rest is vendor-neutral.</p>
+
+                <h2>What is QR code payment for restaurants?</h2>
+                <p>A unique QR code sits on each table. A guest points their phone camera at it and lands on a web page — no app download, no account — showing that table's actual bill from your POS. The guest reviews the itemized cheque, adds a tip, splits it with the table if they want, and pays by card or phone wallet. Your POS records the payment; staff see the table marked paid.</p>
+                <p>Two design details matter more than everything else. First, the code must be <strong>unique per table</strong>, so the guest sees their own cheque — not a generic menu or an open-amount payment form. Second, the payment must flow into <strong>your existing POS and merchant account</strong>, so the money lands in the same account as your counter payments and end-of-night reconciliation stays one report.</p>
+
+                <h2>How QR pay-at-table works, step by step</h2>
+                <ol>
+                    <li><strong>The cheque is opened as usual.</strong> Your server rings items into the POS exactly as today. Nothing about ordering changes.</li>
+                    <li><strong>The guest scans the table's QR code.</strong> Their phone opens the live bill for that table — the same items, taxes and total your POS shows.</li>
+                    <li><strong>The guest reviews the itemized bill.</strong> Questions about a charge get settled on the screen instead of in a rushed exchange at the table.</li>
+                    <li><strong>The guest chooses how to pay.</strong> Full amount, equal split, split by items, or a custom amount — then a tip — then payment by card, Apple Pay or Google Pay, right in the browser.</li>
+                    <li><strong>The POS closes the loop.</strong> The payment is recorded against the cheque in your POS, staff see the table marked paid, and the guest gets an emailed or printed receipt.</li>
+                </ol>
+                <p>The point: the steps that used to take a server several trips — deliver the bill, wait, return with a terminal, process, return again — happen in parallel, on the guest's own device.</p>
+
+                <h2>The two models: pay-at-table vs. order-and-pay</h2>
+                <p>"QR code" gets used for two quite different products, and confusing them is the most common buying mistake in this category.</p>
+                <h3>Pay-at-table (settle the bill)</h3>
+                <p>The QR code is used at the end of the meal. A server still takes the order and runs the service; the guest settles up from their phone when they're ready. This model fits full-service restaurants, where ordering is part of the experience and the bottleneck is the cheque, not the menu. It changes the least about how your floor runs.</p>
+                <h3>Order-and-pay (QR ordering)</h3>
+                <p>Guests browse your POS menu on their phone, order, and pay up front; the order fires to the kitchen. This model shines where the line is the bottleneck — cafés, counter-service spots, breweries, food halls and busy patios.</p>
+                <h3>The hybrid</h3>
+                <p>Many rooms land in between: QR ordering for drinks or the patio, traditional service with pay-at-table in the dining room. Match the tool to where your guests actually wait — a full-service room that goes all-in on order-and-pay often finds guests miss the server interaction that justifies its prices, while a café that only adds pay-at-table leaves its lunch-rush line untouched.</p>
+
+                <h2>What QR code payment actually costs</h2>
+                <p>There are three layers to the cost. Insist on seeing all three.</p>
+                <h3>1. Card processing — you already pay this</h3>
+                <p>When payment runs through your own POS account, you keep paying your existing provider's processing fees (for example, your Square rates). A QR platform should never insert itself as a second processor or re-route your payouts. If a quote bundles "processing included," ask whose merchant account the money settles into — the answer should be yours.</p>
+                <h3>2. The platform fee — subscription or commission</h3>
+                <p>Platforms charge either a flat monthly fee per location or a small commission per QR payment — which is better depends on your volume. Purely as an illustration: on $40,000 of monthly card sales through QR codes, a 1% commission is $400, while a flat $49.99 subscription is $49.99. Run it with your own numbers — subscription tends to win as QR volume grows, commission is the lower-risk start for seasonal rooms, and good vendors let you switch between the two.</p>
+                <h3>3. Hardware — from nearly nothing to a device per table</h3>
+                <p>Printed QR cards or table tents cost almost nothing. Dedicated tabletop devices cost real money per table, but add presence: the code on a screen, a status light staff can read across the room, receipt printing and a waiter-call button. Decide on your service style, not on which demo looks more impressive.</p>
+                <p>Budget an hour of staff training and a quick POS audit, too: QR payment shows guests your cheque data exactly as it lives in your POS, so duplicate items and wrong tax settings stop being back-office problems.</p>
+
+                <h2>How it connects to your POS: the Square example</h2>
+                <p>The platform reads open cheques from your POS and writes payments back, so there is one source of truth. With Square — the POS Smart Table works with today — it looks like this: you connect your own Square account through Square's sign-in screen (you never hand your password to the QR vendor), the system reads the open order attached to the guest's table, and when the guest pays, the payment is created in Square under your location. Payouts, refunds and reports then behave exactly like a payment taken at your counter.</p>
+                <p>Two checks before you sign. First, refunds must run back through the same merchant account to the guest's card — automatic when the payment was yours to begin with. Second, partial payments: when one guest pays only their share, that payment must settle against the same cheque and reduce its balance, not spawn a separate closed order to untangle later.</p>
+
+                <h2>Split bills and group pay: ending the end-of-meal negotiation</h2>
+                <p>The slowest negotiation in any restaurant starts with "I only had a salad." A good QR system offers three split modes. <strong>Equal split</strong> divides the total evenly. <strong>Split by items</strong> lets each guest claim the dishes they actually had, with shared plates divided between the people who shared them. <strong>Custom amounts</strong> let a guest pay a set dollar figure — say, one person covering the birthday guest.</p>
+                <p>Group pay takes this further: every guest at the table pays from their own phone against the same cheque. The system tracks who has paid and what remains, shows each payer what's already covered so nothing is paid twice, and closes the cheque when the balance reaches zero. For staff, the test is simple: a server should never reconcile six partial payments by hand at the terminal afterwards.</p>
+
+                <h2>What happens to tipping?</h2>
+                <p>Guests tip on their phone screen instead of on a terminal handed across the table, and the details move under your control: whether prompts show percentages, dollar amounts, or both; whether percentages are calculated on the pre-tax or post-tax total; and whether a custom amount and a no-tip option are as visible as the suggested ones. Prompts that are clear and honest protect your team's tips and your guests' goodwill; prompts designed to trick guests into larger tips cost you both.</p>
+                <p>There's an operational upside: platform tips are recorded in your POS against the cheque, making tip-outs and pooling far easier to track than cash in envelopes. Whatever system you choose, make sure tip reporting is exportable by cheque and by server — your bookkeeper will ask for it at year-end.</p>
+
+                <h2>Security and PCI: follow the money</h2>
+                <p>Owners rightly ask two questions here: where does the card data go, and where does the money go? The guest enters card details on their own phone, on a page processed by your POS provider. The card number never touches your restaurant's network, your staff never handle the card, and your business never stores card data — which keeps your PCI DSS obligations at the lightest level for accepting cards, because the processor handles the sensitive data. The money settles into <strong>your own merchant account</strong>, on your normal payout schedule, alongside your counter sales.</p>
+                <p>Two questions separate serious vendors from risky ones. "Does the payment run on my merchant account, or yours?" — the right answer is yours; a vendor settling your guests' payments through its own accounts is a red flag for your cash flow and liability. And "are you asking for my POS password?" — connect only through the POS provider's own authorization screen, never by sharing credentials.</p>
+
+                <h2>Common mistakes restaurants make with QR payment</h2>
+                <ul>
+                    <li><strong>Generic QR codes.</strong> One code for the whole restaurant that opens a PDF menu or a generic payment page. Without a per-table code tied to a live cheque, you've bought a sticker, not a system.</li>
+                    <li><strong>Forcing order-and-pay on a full-service room.</strong> Match the model to your service style, not the feature list.</li>
+                    <li><strong>Removing the traditional option.</strong> Guests without a smartphone, with a dead battery, or who simply prefer the terminal must always be able to pay the usual way. QR is an option, never a toll booth.</li>
+                    <li><strong>Skipping the POS cleanup.</strong> Your guests are about to see your cheque data exactly as it exists. Fix duplicate items and tax settings before launch, not after the first confused review.</li>
+                    <li><strong>Judging the pilot on week one.</strong> Judge any trial across a full month of weekends — and watch whether servers actually offer it. Adoption is a training outcome, not a technology one.</li>
+                </ul>
+
+                <h2>How to choose a QR payment system: a short checklist</h2>
+                <ul>
+                    <li>Payments run on <strong>your own</strong> POS and merchant account, settling to your own bank account</li>
+                    <li>A unique QR code per table, tied to that table's live cheque</li>
+                    <li>Split bills built in: equal, by item, and custom — plus group pay across several phones</li>
+                    <li>Tip prompts you control, with honest custom and no-tip options</li>
+                    <li>Refunds processed back through your POS to the guest's card</li>
+                    <li>Pricing in the open: a subscription option <em>and</em> a commission option, in CAD</li>
+                    <li>Month-to-month terms, and a clear answer to "what happens to my data if I leave?"</li>
+                    <li>Support that works in your time zone, from people who understand BC restaurants</li>
+                </ul>
+
+                <div class="callout">
+                    <h2>Where Smart Table fits</h2>
+                    <p>Smart Table is our implementation of everything above, built in Metro Vancouver for independent restaurants. It works with Square today: guests scan a printed per-table QR code, see their live bill, split it (equal, by item, or custom — including group pay, where everyone pays their share from their own phone), add a tip, and pay into your own Square account, while your team watches every table's state from one dashboard. Try the guest side in our <a href="/demo">live demo</a>; the <a href="/owner-demo">owner demo</a> shows what your staff get.</p>
+                    <p>Pricing is deliberately simple, and it's all in CAD: <a href="/#pricing">Starter is $49.99/month per location or 1% per payment</a> with printed QR codes per table — no device, no receipt printing, no waiter-call button. The Base plan adds the planned tabletop device. Right now we're onboarding a small group of <strong>Founding Pilot</strong> restaurants across Metro Vancouver: <strong>Starter free for 30 days, no card required</strong>, in exchange for honest feedback and a short testimonial. If you run a Square-based room in BC, we'd rather you judge the pilot than our marketing — <a href="/#partner">apply here</a>.</p>
+                </div>
+
+                <h2>Frequently asked questions</h2>
+                <div class="faq-list">
+                    <div class="faq-item">
+                        <h3>Do guests need to download an app to pay by QR code?</h3>
+                        <p>No. With a properly built system, the QR code opens a web page in the guest's phone browser. They see the bill, tip, split and pay — no download, no account, no sign-up. If a vendor's QR code sends your guests to an app store, that friction will cost you adoption; check this before anything else.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>Does QR code payment replace my POS?</h3>
+                        <p>No — it sits on top of your POS. The platform reads the open check for the table from your POS and records the guest's payment back into it, so your reports, payouts and refunds stay in one system. Smart Table works with Square today; whatever system you choose, this read-and-write-back connection to your POS is the feature that matters most.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>What does QR code payment cost a restaurant?</h3>
+                        <p>Two parts. Your card processing fees stay with your own POS provider's account, at the rates you already pay. On top of that, the QR platform charges either a flat monthly fee per location or a small commission per payment. Smart Table's Starter plan is $49.99/month per location or 1% per payment in CAD, with printed table QR codes and no hardware to buy. Compare models against your own card volume: subscription wins as volume grows, commission wins when volume is low or seasonal.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>Is QR code payment secure — for my restaurant and my guests?</h3>
+                        <p>Yes, when it's built correctly. The guest enters card details on their own phone, the payment is processed by your POS provider, and the money settles into your own merchant account. Your restaurant never sees, handles or stores card numbers, which keeps your PCI DSS obligations light. Two checks: the payment should run on your merchant account (not the vendor's), and you should only ever connect your POS through the provider's own sign-in screen — never by sharing your password.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>What if a guest doesn't have a smartphone, or wants to pay cash?</h3>
+                        <p>Nothing changes for them. QR payment runs alongside your normal process, not instead of it: a server can still bring the terminal, take cash and close the check the usual way. The restaurants that get the most from QR payment treat it as an option guests can choose, not a door they have to walk through.</p>
+                    </div>
+                </div>
+
+                <div class="article-author">
+                    <p><strong>About the authors.</strong> The Smart Table team builds QR table payment for independent restaurants in Metro Vancouver, BC. Questions or corrections: <a href="mailto:info@smarttablepay.com">info@smarttablepay.com</a>. More guides on the <a href="/blog/">Smart Table blog</a>.</p>
+                </div>
+            </article>
+        </div>
+    </section>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-content">
+            <div class="footer-contact-block">
+                QR code table payments for restaurants &nbsp;·&nbsp; Metro Vancouver, BC &nbsp;·&nbsp; <a href="mailto:info@smarttablepay.com">info@smarttablepay.com</a>
+            </div>
+            <p><a href="/privacy.html" style="color: #94A3B8; text-decoration: none;">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms.html" style="color: #94A3B8; text-decoration: none;">Terms of Service</a> &nbsp;·&nbsp; <a href="/blog/" style="color: #94A3B8; text-decoration: none;">Blog</a></p>
+            <p>&copy; 2026 smarttablepay · Metro Vancouver, BC</p>
+        </div>
+    </footer>
+
+</body>
+</html>
