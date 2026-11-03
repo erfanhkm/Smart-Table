@@ -66,7 +66,11 @@ function installFetch() {
       orderPaid = true;
       return json({ payment: { id: 'sqpay-f4', status: 'COMPLETED', amount_money: { amount: 1200, currency: 'CAD' }, tip_money: { amount: 150, currency: 'CAD' } } });
     }
-    const payOrder = /\/v2\/orders\/([\w-]+)\/pay-order$/.exec(url);
+    // v0.10.2: this mock used to match "/pay-order" — a path the real
+    // client never calls (payOrder posts to /v2/orders/:id/pay). The
+    // wrong path 404'd, and the C3-3-1 swallow in chargeCard hid it by
+    // reporting the charge as fully paid anyway. Match the real path.
+    const payOrder = /\/v2\/orders\/([\w-]+)\/pay$/.exec(url);
     if (payOrder && method === 'POST') return json({ order: orderObj(payOrder[1]) });
     const m = /\/v2\/orders\/([\w-]+)$/.exec(url);
     if (m && method === 'GET') {

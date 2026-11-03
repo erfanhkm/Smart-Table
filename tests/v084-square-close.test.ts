@@ -133,7 +133,11 @@ describe('v0.8.4 Square close-out', () => {
     paymentsMode = 'ok'; payOrderMode = 'fail'; payOrderBodies.length = 0;
     const res = await squareAdapter.chargeCard!({ ...baseArgs, checkId: 'ORD-CLOSE-1', idempotencyKey: 'k-close-2' });
     assert.equal(res.paymentId, 'SQPAY1');
-    assert.equal(res.remainingCents, 0);
+    // v0.10.2 (C3-3-1): still resolves (v0.8.4: never throw after a
+    // charge landed) but the remaining is now UNKNOWN (null), not 0 —
+    // the order never closed in Square, so reporting "fully paid"
+    // completed the check while the restaurant was never paid.
+    assert.equal(res.remainingCents, null);
   });
 
   it('chargeCard returns remainingCents null when the post-charge read fails', async () => {

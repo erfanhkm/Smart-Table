@@ -8,6 +8,10 @@ import { PosAdapter, PosMenuItem, PosType } from './types.js';
 
 const MENU_TTL_MS = 45_000;
 const menuCache = new Map<string, { items: PosMenuItem[]; expiresAt: number }>();
+// v0.10.2 (C3-3 Low): single-flight — concurrent misses for the same
+// location used to each fire their own full catalog fetch (up to 10
+// Square pages each). All waiters now share one in-flight fetch.
+const menuInflight = new Map<string, Promise<PosMenuItem[]>>();
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of menuCache) if (v.expiresAt <= now) menuCache.delete(k);
@@ -24,9 +28,19 @@ export async function getMenuCached(
   const key = `${posType}:${locationRef}`;
   const hit = menuCache.get(key);
   if (hit && hit.expiresAt > Date.now()) return hit.items;
-  const items = await adapter.getMenu(locationRef, token);
-  menuCache.set(key, { items, expiresAt: Date.now() + MENU_TTL_MS });
-  return items;
+  const inflight = menuInflight.get(key);
+  if (inflight) return inflight;
+  const run = (async () => {
+    const items = await adapter.getMenu!(locationRef, token);
+    menuCache.set(key, { items, expiresAt: Date.now() + MENU_TTL_MS });
+    return items;
+  })();
+  menuInflight.set(key, run);
+  try {
+    return await run;
+  } finally {
+    if (menuInflight.get(key) === run) menuInflight.delete(key);
+  }
 }
 
 /** Invalidate the cached menu for a location (call after catalog changes). */

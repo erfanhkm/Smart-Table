@@ -34,8 +34,8 @@ import {
   SquareError,
 } from '../../square.js';
 import { verifySquareWebhook } from '../../crypto.js';
+import { getMenuCached } from './menu-cache.js';
 import { badRequest } from '../../http.js';
-import { randomUUID } from 'node:crypto';
 import { config } from '../../config.js';
 import {
   CardCredentials,
@@ -142,9 +142,20 @@ export const squareAdapter: PosAdapter = {
 
   async listOpenChecks(locationRef: string, token?: string): Promise<PosOpenCheckSummary[]> {
     const { orders } = await searchOpenOrders(assertSquareId(locationRef, 'location_id'), token);
-    return (orders ?? []).map((o: AnyOrder) => {
-      const d = mapDetail(o);
-      return {
+    const out: PosOpenCheckSummary[] = [];
+    for (const o of (orders ?? []) as AnyOrder[]) {
+      // v0.10.2 (C3-3 Low): one malformed order (no total_money and no
+      // net_amount_due) makes mapDetail throw via orderTenderRemaining's
+      // fail-closed rule (C3-1-7) — that must not fail the WHOLE list.
+      // Skip the bad order, keep the rest.
+      let d: PosCheckDetail;
+      try {
+        d = mapDetail(o);
+      } catch (e) {
+        console.error(`[square] listOpenChecks: skipping malformed order ${String(o?.id ?? '?')}:`, e);
+        continue;
+      }
+      out.push({
         id: d.id,
         // Square orders carry no table name; the portal joins our own
         // table mapping on top of this id.
@@ -153,8 +164,9 @@ export const squareAdapter: PosAdapter = {
         remainingCents: d.remainingCents,
         currency: d.currency,
         openedAt: o?.created_at ?? null,
-      };
-    });
+      });
+    }
+    return out;
   },
 
   async getCheckDetail(checkId: string, token?: string): Promise<PosCheckDetail> {
@@ -197,7 +209,7 @@ export const squareAdapter: PosAdapter = {
       freshCurrency = mapDetail(fresh).currency;
     } catch { /* fall back to just our payment */ }
     try {
-      const { order } = await payOrder(checkId, payIds, randomUUID(), token);
+      const { order } = await payOrder(checkId, payIds, `${idempotencyKey}:payorder`, token);
       const d = mapDetail(order);
       return { paymentId: payment.id, remainingCents: d.remainingCents, currency: d.currency, replayed: false };
     } catch (e) {
@@ -319,12 +331,23 @@ export const squareAdapter: PosAdapter = {
     // comes from the order itself, not from our prior-payment bookkeeping.
     const payIds = tenderPaymentIds(order, [...args.priorPaymentIds, payment.id]);
     try {
-      await payOrder(args.checkId, payIds, randomUUID(), args.token);
+      await payOrder(args.checkId, payIds, `${args.idempotencyKey}:payorder`, args.token);
     } catch (e) {
+      // v0.10.2 (C3-3-1): a failed PayOrder must NOT be reported as
+      // "fully paid". The authorization landed but nothing was captured
+      // and the Square order is still open — returning 0 here completed
+      // the check and flipped the table to PAID while the restaurant
+      // was never paid (the authorization would lapse days later).
+      // Report UNKNOWN remaining (null), exactly like
+      // recordExternalPayment does for the identical situation, so the
+      // check stays open for reconcile / a close-out retry. The
+      // deterministic key (payment key + :payorder, the C3-1 pattern)
+      // makes that retry safe: Square dedupes a same-key PayOrder.
       console.error(
         `[square] PayOrder close failed AFTER a successful charge (order ${args.checkId}, payment ${payment.id}); the charge stands — the order close needs reconcile:`,
         e,
       );
+      return { paymentId: payment.id, remainingCents: null, currency: d.currency, replayed: false, feeCollected };
     }
     return { paymentId: payment.id, remainingCents: 0, currency: d.currency, replayed: false, feeCollected };
   },
@@ -364,6 +387,18 @@ export const squareAdapter: PosAdapter = {
       // them, and the Refunds API will not touch them until they settle —
       // which takes seconds. Refuse with a clear "try again shortly".
       if (payment.order_id) {
+        // v0.10.2 (C3-3-3): "still settling" is true for seconds, not
+        // for an authorization whose PayOrder close-out never ran
+        // (C3-3-1). An APPROVED order-attached payment older than 10
+        // minutes is STUCK, not settling — say so, so staff stop
+        // retrying a refund that can never open and escalate the
+        // close-out instead.
+        const createdMs = Date.parse(String(payment.created_at ?? ''));
+        if (Number.isFinite(createdMs) && Date.now() - createdMs > 10 * 60_000) {
+          throw badRequest(
+            'this payment is stuck: it was authorized over 10 minutes ago but its order close-out never completed in Square, so it cannot be refunded yet — finish the order close-out in Square (or contact Smart Table support) and then refund',
+          );
+        }
         throw badRequest(
           'this payment is still settling with Square (usually under a minute) — refunds open as soon as it settles; try again shortly',
         );
@@ -434,7 +469,11 @@ export const squareAdapter: PosAdapter = {
     // Simpler: read it from the first menu item the caller validated. The
     // route layer validates items against getMenu() first, so prices here
     // come from the POS, never the client.
-    const menu = await this.getMenu!(args.locationRef, args.token);
+    // v0.10.2 (C3-3 Low / D-10 residual): validate against the SHARED
+    // menu cache, like the Clover and Shopify adapters already do — a
+    // direct getMenu() here bypassed the cache that protects the
+    // merchant's Square API quota on every guest order.
+    const menu = await getMenuCached(this, 'square', args.locationRef, args.token);
     const byId = new Map(menu.map((m) => [m.id, m]));
     const currency = menu[0]?.currency ?? 'CAD';
     const lineItems = args.items.map((i) => {

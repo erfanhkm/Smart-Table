@@ -197,11 +197,24 @@ export async function webhookRoutes(app: FastifyInstance) {
         const p = evt.data?.object?.payment as any;
         const mapped = p?.id ? mapSquarePaymentStatus(p.status) : null;
         if (p?.id && mapped) {
-          const cur = await query(`SELECT status FROM payments WHERE square_payment_id=$1`, [p.id]);
-          const row = cur.rows[0] as { status: string } | undefined;
-          // Forward-only: never regress a terminal/further-along status.
-          if (row && paymentStatusRank(mapped) > paymentStatusRank(row.status)) {
-            await query(`UPDATE payments SET status=$1 WHERE square_payment_id=$2`, [mapped, p.id]);
+          // v0.10.2 (C3-3-4): the status guard lives IN the UPDATE now
+          // (compare-and-set). The previous read-compare-write could
+          // regress a row a concurrent payCheck had just advanced:
+          // the webhook read AUTHORIZED, payCheck wrote COMPLETED,
+          // then the webhook's unconditional UPDATE wrote a stale
+          // lower-rank status over it. Only PENDING can move to
+          // AUTHORIZED, and only PENDING/AUTHORIZED to COMPLETED —
+          // forward-only, enforced atomically by the WHERE clause.
+          if (mapped === 'COMPLETED') {
+            await query(
+              `UPDATE payments SET status='COMPLETED' WHERE square_payment_id=$1 AND status IN ('PENDING','AUTHORIZED')`,
+              [p.id],
+            );
+          } else {
+            await query(
+              `UPDATE payments SET status='AUTHORIZED' WHERE square_payment_id=$1 AND status='PENDING'`,
+              [p.id],
+            );
           }
         }
       }
