@@ -92,6 +92,12 @@ export interface DemoAccessData {
 }
 
 export async function sendDemoAccessEmail(to: string, d: DemoAccessData): Promise<{ sent: boolean; skipped?: string }> {
+  // v0.10.4 (C3-5-7): the notify address is configuration now (no source
+  // default). Unset = skip cleanly; the request row is stored either way.
+  if (!to) {
+    console.log(`[email] DEMO_ACCESS_NOTIFY_EMAIL not set — skipping demo-access notification for ${d.restaurantName}`);
+    return { sent: false, skipped: 'demo access notify email not configured' };
+  }
   const apiKey = config.resendApiKey;
   const from = config.receiptFromEmail;
   if (!apiKey || !from) {

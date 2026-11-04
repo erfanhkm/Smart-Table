@@ -67,7 +67,9 @@ export async function demoAccessRoutes(app: FastifyInstance) {
     return reply.status(204).send();
   });
 
-  app.post('/api/demo-access-requests', { preHandler: limiter }, async (req, reply) => {
+  // v0.10.4 (C3-5-4): route-level bodyLimit (chunked bodies included) —
+  // the public form's payload is a handful of short fields.
+  app.post('/api/demo-access-requests', { preHandler: limiter, bodyLimit: 65_536 }, async (req, reply) => {
     const origin = corsOrigin(req);
     if (origin) reply.header('Access-Control-Allow-Origin', origin);
 

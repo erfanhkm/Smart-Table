@@ -22,24 +22,36 @@ interface Bucket {
   resetAt: number;
 }
 
-const buckets = new Map<string, Bucket>();
+// v0.10.4 (C3-5-3): buckets used to live in ONE map shared by every limiter
+// (namespaced only by the key prefix). Guest limiters key on unvalidated
+// client-supplied token strings, so a junk-token flood could fill the
+// shared map and evict the login/pay buckets — resetting brute-force
+// counters on the routes that matter most. Each limiter now owns its map
+// (created in rateLimit() below and registered here for pruning); a flood
+// against one limiter can only evict that limiter's own buckets.
+const limiterBucketMaps = new Set<Map<string, Bucket>>();
 
-// Prune stale buckets every minute so the map doesn't grow forever
+// Prune stale buckets every minute so the maps don't grow forever
 // (spoofed keys from H2-style attacks age out quickly).
 setInterval(() => {
   const now = Date.now();
-  for (const [k, b] of buckets) if (b.resetAt <= now) buckets.delete(k);
+  for (const map of limiterBucketMaps) {
+    for (const [k, b] of map) if (b.resetAt <= now) map.delete(k);
+  }
 }, 60_000).unref();
 
 // F5-5: hard cap between prunes. A high-rate sender minting fresh keys
 // (rotating IPv6 addresses) could otherwise grow the map by hundreds of
-// megabytes inside one prune interval. Evict oldest-inserted first.
-const MAX_BUCKETS = 20_000;
-function capBuckets(): void {
-  while (buckets.size > MAX_BUCKETS) {
-    const oldest = buckets.keys().next().value as string | undefined;
+// megabytes inside one prune interval.
+// v0.10.4 (C3-5-3): the cap is PER LIMITER now (see above), and eviction is
+// LRU — a hit refreshes the bucket's recency, so a busy legitimate bucket
+// is never the eviction candidate while idle attacker buckets exist.
+const MAX_BUCKETS = 10_000;
+function capBuckets(map: Map<string, Bucket>): void {
+  while (map.size > MAX_BUCKETS) {
+    const oldest = map.keys().next().value as string | undefined;
     if (oldest === undefined) break;
-    buckets.delete(oldest);
+    map.delete(oldest);
   }
 }
 
@@ -77,6 +89,11 @@ export function rateLimit(opts: {
   // key functions (per-token guest limiters) already key on a scarce
   // resource, so their output is used as-is.
   const keyFn = opts.key ?? ((req) => normalizeIp(req.ip));
+  // v0.10.4 (C3-5-3): this limiter's private bucket map (see the note at
+  // the top of the file). Keys are still namespaced by limiter name inside
+  // the map — harmless, and it keeps log/debug output unambiguous.
+  const buckets = new Map<string, Bucket>();
+  limiterBucketMaps.add(buckets);
   return async (req: AnyRequest, reply: FastifyReply) => {
     // Namespace the bucket by limiter name so different limiters never share a counter.
     const key = `${name}:${keyFn(req)}`;
@@ -85,7 +102,12 @@ export function rateLimit(opts: {
     if (!b || b.resetAt <= now) {
       b = { count: 0, resetAt: now + windowMs };
       buckets.set(key, b);
-      capBuckets();
+      capBuckets(buckets);
+    } else {
+      // LRU: a hit makes this bucket the most recently used, so the cap
+      // evicts idle buckets before busy ones (v0.10.4, C3-5-3).
+      buckets.delete(key);
+      buckets.set(key, b);
     }
     b.count++;
     reply.header('X-RateLimit-Limit', max);

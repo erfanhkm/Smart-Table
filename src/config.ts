@@ -81,8 +81,12 @@ export const config = {
   resendApiKey: opt('RESEND_API_KEY'),
   /** Verified sender, e.g. receipts@smarttablepay.com. */
   receiptFromEmail: opt('RECEIPT_FROM_EMAIL'),
-  /** v0.8.4: where owner-demo access requests are emailed. */
-  demoAccessNotifyEmail: opt('DEMO_ACCESS_NOTIFY_EMAIL', 'erfanbillion@gmail.com'),
+  /** v0.8.4: where owner-demo access requests are emailed. Empty = the
+   * notification is skipped (the request row is still stored). v0.10.4
+   * (C3-5-7): the address used to be a hard-coded personal-email default
+   * in source — a deploy that forgot the variable emailed a personal
+   * inbox; it is configuration now, never a source literal. */
+  demoAccessNotifyEmail: opt('DEMO_ACCESS_NOTIFY_EMAIL'),
   /** True when running on Render (the platform sets RENDER=true). */
   isRender: !!process.env.RENDER,
 };
@@ -106,6 +110,9 @@ export type SafetyConfig = Pick<
   | 'squareEnvSet'
   | 'squareAccessToken'
   | 'squareLocationId'
+  | 'squareAppId'
+  | 'squareAppSecret'
+  | 'adminUsername'
   | 'cloverEnv'
   | 'resendApiKey'
   | 'helcimApiToken'
@@ -141,6 +148,14 @@ export type SafetyConfig = Pick<
  * legitimately present while a location is explicitly flagged demo
  * (v0.6.5 demo flag), so refusing to boot would kill the live demo; and a
  * missing ADMIN_PASSWORD_HASH only disables the founder panel.
+ * v0.10.4 (C3-5-7) adds two more deliberate warnings: SQUARE_APP_ID /
+ * SQUARE_APP_SECRET (OAuth connect, token refresh and hosted card forms
+ * need them — D-7 — but their presence in the production env was never
+ * verified end-to-end, so a boot refusal could take payments down on a
+ * guess; warn loudly instead), and ADMIN_USERNAME missing while
+ * ADMIN_PASSWORD_HASH is set (the admin route already fails closed with a
+ * 503 in that state — never a password-only login — so this is an
+ * operability warning, not a hole).
  * In non-production the same problems only warn.
  */
 export function assertSafeConfig(c: SafetyConfig = config, warn: (msg: string) => void = console.warn): void {
@@ -166,6 +181,17 @@ export function assertSafeConfig(c: SafetyConfig = config, warn: (msg: string) =
     }
     if (!c.adminPasswordHash) {
       warnings.push('ADMIN_PASSWORD_HASH is not set — the founder admin panel will reject every login.');
+    }
+    // v0.10.4 (C3-5-7): warning-only, see the doc comment above.
+    if (c.adminPasswordHash && !c.adminUsername) {
+      warnings.push(
+        'ADMIN_USERNAME is not set while ADMIN_PASSWORD_HASH is — the founder admin login will answer 503 until both are set.',
+      );
+    }
+    if (!c.squareAppId || !c.squareAppSecret) {
+      warnings.push(
+        'SQUARE_APP_ID / SQUARE_APP_SECRET are not both set — Square OAuth connect, token refresh and hosted card forms need them (D-7).',
+      );
     }
     if (!c.appUrl.startsWith('https://') || /localhost|127\.0\.0\.1/.test(c.appUrl)) {
       problems.push('APP_URL must be an https URL (not localhost) when NODE_ENV=production');

@@ -26,6 +26,9 @@ process.env.STAFF_API_TOKEN = TEST_TOKEN;
 process.env.SQUARE_ACCESS_TOKEN = ['sq', 'token'].join('-');
 process.env.RESEND_API_KEY = ['resend', 'test', 'key'].join('-');
 process.env.RECEIPT_FROM_EMAIL = 'receipts@smarttablepay.com';
+// v0.10.4 (C3-5-7): the notify address has no source default anymore —
+// tests that exercise the notification must configure it explicitly.
+process.env.DEMO_ACCESS_NOTIFY_EMAIL = 'owner@example.com';
 if (!process.env.ENCRYPTION_KEY) process.env.ENCRYPTION_KEY = '0'.repeat(64);
 
 const { migrate } = await import('../src/migrate.js');

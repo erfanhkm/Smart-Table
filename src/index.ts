@@ -96,9 +96,19 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     // F5-3: a Postgres lock_timeout (55P03) is a transient contention state,
     // not a server fault — answer a retryable 409 so simultaneous payers on
     // one check see "payment in progress" instead of a generic 500.
-    if (e.code === '55P03') {
-      req.log.warn({ path: req.url.split('?')[0] }, 'lock timeout — answered 409');
-      return reply.code(409).send({ error: 'another operation is in progress — please retry', code: 'lock_timeout' });
+    // v0.10.4 (C3-5-6): deadlock detected (40P01) and serialization failure
+    // (40001) are the same class of transient contention — they join 55P03
+    // on the retryable-409 path instead of surfacing as generic 500s.
+    const retryablePg: Record<string, string> = {
+      '55P03': 'lock_timeout',
+      '40P01': 'deadlock_detected',
+      '40001': 'serialization_failure',
+    };
+    if (e.code && retryablePg[e.code]) {
+      req.log.warn({ path: req.url.split('?')[0], pgCode: e.code }, 'transient DB contention — answered 409');
+      return reply
+        .code(409)
+        .send({ error: 'another operation is in progress — please retry', code: retryablePg[e.code] });
     }
     const status = typeof e.statusCode === 'number' && e.statusCode >= 400 ? e.statusCode : 500;
     if (status >= 500) {
@@ -229,8 +239,20 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // F5-16: guest payloads are tiny (an order, a payment token, a rating).
   // The framework's 1 MB default body limit on these public routes only
   // serves memory pressure — cap declared bodies at 64 KB up front.
+  // v0.10.4 (C3-5-4): the cap used to cover only /api/t/. The other public
+  // write surfaces (/api/checks/* pay + record-external, the device API,
+  // the owner-demo form) carry equally tiny payloads and now share it.
+  // This hook reads the DECLARED Content-Length; the two unauthenticated
+  // routes additionally carry a route-level bodyLimit, which Fastify
+  // enforces during parsing (chunked bodies included).
   app.addHook('onRequest', async (req, reply) => {
-    if (req.url.split('?')[0].startsWith('/api/t/')) {
+    const pathname = req.url.split('?')[0];
+    if (
+      pathname.startsWith('/api/t/') ||
+      pathname.startsWith('/api/checks/') ||
+      pathname.startsWith('/api/device/') ||
+      pathname === '/api/demo-access-requests'
+    ) {
       const len = Number(req.headers['content-length'] ?? 0);
       if (Number.isFinite(len) && len > 65_536) {
         return reply.code(413).send({ error: 'payload too large' });
@@ -359,6 +381,16 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // processor itself decides what is due: >= $50 accrued, or oldest fee
   // >= 25 days old). Skipped under pg-mem (tests) where no real Square
   // account exists.
+  // v0.10.4 (C3-5-2): the timer handles are kept and cleared on app close —
+  // during a SIGTERM drain the billing/token sweeps used to keep firing
+  // (and starting new POS work) while the process was trying to exit.
+  const backgroundTimers: NodeJS.Timeout[] = [];
+  app.addHook('onClose', async () => {
+    for (const t of backgroundTimers) {
+      clearTimeout(t);
+      clearInterval(t);
+    }
+  });
   if (!config.usePgMem) {
     const runBilling = () =>
       // F2-1: refresh every stored subscription from Square FIRST — plan
@@ -389,8 +421,8 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
           }
         })
         .catch((e) => app.log.error(e, '[billing] stuck fee-charge resolver failed'));
-    setTimeout(runBilling, 60_000).unref();
-    setInterval(runBilling, 6 * 60 * 60 * 1000).unref();
+    backgroundTimers.push(setTimeout(runBilling, 60_000).unref());
+    backgroundTimers.push(setInterval(runBilling, 6 * 60 * 60 * 1000).unref());
     // D-7 backstop: refresh Square OAuth tokens before they expire (the
     // on-demand refresh in getLocationPos is the primary path; this sweep
     // catches idle restaurants and logs unrefreshable credentials).
@@ -402,8 +434,8 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
           }
         })
         .catch((e) => app.log.error(e, '[token-refresh] sweep failed'));
-    setTimeout(runTokenRefresh, 90_000).unref();
-    setInterval(runTokenRefresh, 6 * 60 * 60 * 1000).unref();
+    backgroundTimers.push(setTimeout(runTokenRefresh, 90_000).unref());
+    backgroundTimers.push(setInterval(runTokenRefresh, 6 * 60 * 60 * 1000).unref());
   }
   return app;
 }
@@ -429,7 +461,14 @@ if (isMain) {
       if (closing) return;
       closing = true;
       console.log(`[smart-table] ${signal} — draining in-flight requests…`);
-      setTimeout(() => process.exit(1), 10_000).unref();
+      // v0.10.4 (C3-5-2): the hard-exit deadline moves 10s -> 25s. A
+      // payment legitimately runs longer than 10s (the F1-2 window: POS
+      // calls with 10s timeouts in sequence), and the old deadline could
+      // hard-exit mid-charge during a deploy drain. app.close() normally
+      // finishes in well under a second — this deadline only fires on a
+      // genuinely stuck drain, and 25s still lands inside the platform
+      // kill window.
+      setTimeout(() => process.exit(1), 25_000).unref();
       app
         .close()
         .then(() => closePool())

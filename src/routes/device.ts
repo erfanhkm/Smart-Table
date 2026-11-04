@@ -141,7 +141,12 @@ export async function deviceRoutes(app: FastifyInstance) {
   // predicate), so a racing second claim finds nothing; revoke + insert
   // then run in a single transaction with the partial unique index as the
   // race arbiter.
-  app.post('/api/device/claim', { preHandler: claimLimiter }, async (req) => {
+  // v0.10.4 (C3-5-4): bodyLimit on the route itself — unlike the
+  // Content-Length hook in index.ts, Fastify enforces this during body
+  // parsing, so chunked bodies are capped too. This is the one
+  // unauthenticated write route on the device surface; its real payload
+  // is a single 8-digit code.
+  app.post('/api/device/claim', { preHandler: claimLimiter, bodyLimit: 65_536 }, async (req) => {
     const { code } = (req.body ?? {}) as { code?: unknown };
     if (typeof code !== 'string' || !/^\d{8}$/.test(code)) {
       throw badRequest('claim code is required (8 digits)');

@@ -66,11 +66,36 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  return (await verifyPasswordForm(password, stored)) !== null;
+}
+
+/**
+ * Which input form matched the stored hash (v0.10.4, C3-5-5b):
+ *  - 'nfc': the current form — hashPassword (F5-21+) hashes the
+ *    NFC-normalized password.
+ *  - 'raw': a PRE-F5-21 hash, computed over the raw password bytes. Such a
+ *    hash stops verifying through the NFC path alone when the password was
+ *    typed in NFD form (macOS decomposes accented characters), locking the
+ *    user out of their own account. Callers that can persist a new hash
+ *    (the portal login) rehash on a 'raw' match so the account upgrades to
+ *    the NFC form on its next successful login.
+ *  - null: no match / malformed stored hash.
+ */
+export async function verifyPasswordForm(
+  password: string,
+  stored: string,
+): Promise<'nfc' | 'raw' | null> {
   const parts = stored.split('$');
-  if (parts.length !== 3 || parts[0] !== 'scrypt') return false;
+  if (parts.length !== 3 || parts[0] !== 'scrypt') return null;
   const salt = Buffer.from(parts[1], 'hex');
   const expected = Buffer.from(parts[2], 'hex');
-  if (salt.length !== 16 || expected.length !== 64) return false;
-  const actual = (await scryptAsync(password.normalize('NFC'), salt, 64)) as Buffer;
-  return timingSafeEqual(actual, expected);
+  if (salt.length !== 16 || expected.length !== 64) return null;
+  const nfc = password.normalize('NFC');
+  const nfcHash = (await scryptAsync(nfc, salt, 64)) as Buffer;
+  if (timingSafeEqual(nfcHash, expected)) return 'nfc';
+  if (nfc !== password) {
+    const rawHash = (await scryptAsync(password, salt, 64)) as Buffer;
+    if (timingSafeEqual(rawHash, expected)) return 'raw';
+  }
+  return null;
 }

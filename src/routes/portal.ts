@@ -4,7 +4,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { query } from '../db.js';
-import { verifyPassword } from '../crypto.js';
+import { hashPassword, verifyPasswordForm } from '../crypto.js';
 import { badRequest, unauthorized } from '../http.js';
 
 const TOKEN_TTL_DAYS = 7;
@@ -84,8 +84,18 @@ export async function portalRoutes(app: FastifyInstance): Promise<void> {
     const user = u.rows[0];
     // Always run scrypt — against the dummy hash when the email is unknown —
     // so timing does not reveal which emails exist (v0.6.4).
-    const ok = await verifyPassword(password, user ? user.password_hash : DUMMY_PASSWORD_HASH);
-    if (!ok || !user) throw unauthorized('invalid email or password');
+    const form = await verifyPasswordForm(password, user ? user.password_hash : DUMMY_PASSWORD_HASH);
+    if (form === null || !user) throw unauthorized('invalid email or password');
+    // v0.10.4 (C3-5-5b): a 'raw' match means the stored hash predates the
+    // F5-21 NFC normalization — upgrade it in place so this account verifies
+    // through the fast NFC path from now on. Best-effort: a failed rehash
+    // must never fail a valid login (the raw fallback will match again).
+    if (form === 'raw') {
+      await query(`UPDATE portal_users SET password_hash = $1 WHERE id = $2`, [
+        await hashPassword(password),
+        user.id,
+      ]).catch((e) => req.log.warn({ err: e }, 'password rehash on login failed'));
+    }
 
     const token = randomBytes(32).toString('hex');
     await query(
