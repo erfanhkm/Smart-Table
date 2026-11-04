@@ -32,11 +32,38 @@ export async function claimItem(
   // quirk: on conflict it returns the pre-existing row, where real Postgres
   // returns no rows — comparing ids is correct on both.)
   if (r.rows.length > 0 && r.rows[0].id === id) return true;
-  const existing = await query(
-    `SELECT device_id FROM item_claims WHERE check_id = $1 AND item_index = $2`,
+  const existing = await query<{ device_id: string; item_fingerprint: string }>(
+    `SELECT device_id, item_fingerprint FROM item_claims WHERE check_id = $1 AND item_index = $2`,
     [checkId, itemIndex],
   );
-  return existing.rows[0]?.device_id === deviceId;
+  const holder = existing.rows[0];
+  if (!holder) return false;
+  // v0.10.3 (C3-4-3): the caller validated `fingerprint` against the LIVE
+  // bill item at this index. A stored claim naming a DIFFERENT fingerprint
+  // is stale — the bill changed under it (an item was added/removed at the
+  // POS and indexes shifted), so it must not block this slot until expiry.
+  // Replace it with the fresh claim.
+  if (holder.item_fingerprint !== fingerprint) {
+    await query(
+      `DELETE FROM item_claims WHERE check_id = $1 AND item_index = $2 AND item_fingerprint = $3`,
+      [checkId, itemIndex, holder.item_fingerprint],
+    );
+    const retryId = randomUUID();
+    const retry = await query(
+      `INSERT INTO item_claims(id, check_id, item_index, item_fingerprint, device_id)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (check_id, item_index) DO NOTHING
+       RETURNING id`,
+      [retryId, checkId, itemIndex, fingerprint, deviceId],
+    );
+    if (retry.rows.length > 0 && retry.rows[0].id === retryId) return true;
+    const now = await query<{ device_id: string }>(
+      `SELECT device_id FROM item_claims WHERE check_id = $1 AND item_index = $2`,
+      [checkId, itemIndex],
+    );
+    return now.rows[0]?.device_id === deviceId;
+  }
+  return holder.device_id === deviceId;
 }
 
 /** Release one item, only if this device holds it. */

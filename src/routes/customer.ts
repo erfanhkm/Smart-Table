@@ -66,15 +66,36 @@ async function loadCheckRow(ref: string, scope?: { tableId?: string; locationId?
 // tenants; a posType:ref key could serve one restaurant's bill to
 // another's guest), size-capped, and invalidated when a payment lands.
 const detailCache = new Map<string, { at: number; detail: PosCheckDetail }>();
+// v0.10.3 (C3-4-4): single-flight — the 3s cache alone let every guest who
+// polled on the same miss fire their own POS call. Concurrent loads of one
+// check now share one in-flight promise.
+const detailInFlight = new Map<string, Promise<PosCheckDetail>>();
 async function cachedCheckDetail(ctx: Awaited<ReturnType<typeof getCheckPos>>, checkDbId: string): Promise<PosCheckDetail> {
   const hit = detailCache.get(checkDbId);
   if (hit && Date.now() - hit.at < 3_000) return hit.detail;
-  const detail = await ctx.adapter.getCheckDetail(ctx.checkRef, ctx.token);
-  if (detailCache.size > 1000) detailCache.clear();
-  detailCache.set(checkDbId, { at: Date.now(), detail });
-  return detail;
+  const pending = detailInFlight.get(checkDbId);
+  if (pending) return pending;
+  const p = (async () => {
+    const detail = await ctx.adapter.getCheckDetail(ctx.checkRef, ctx.token);
+    // Evict the OLDEST entry when full — the old clear() dropped every
+    // warm entry at once and stampeded the POS on the next poll wave.
+    if (detailCache.size > 1000) {
+      const oldest = detailCache.keys().next().value;
+      if (oldest !== undefined) detailCache.delete(oldest);
+    }
+    detailCache.set(checkDbId, { at: Date.now(), detail });
+    return detail;
+  })();
+  detailInFlight.set(checkDbId, p);
+  try {
+    return await p;
+  } finally {
+    detailInFlight.delete(checkDbId);
+  }
 }
-function invalidateCheckDetail(checkDbId: string): void {
+// v0.10.3 (C3-4-4): exported so the STAFF cash-recording route can drop the
+// cached snapshot too — a guest poll must never serve the pre-cash bill.
+export function invalidateCheckDetail(checkDbId: string): void {
   detailCache.delete(checkDbId);
 }
 
@@ -121,18 +142,24 @@ export async function customerRoutes(app: FastifyInstance) {
     max: 30,
     key: tokenKey,
   });
-  // v0.8.5 (F4-13): claims get their own bucket per token+device — a
-  // table of guests tapping items must not starve the write bucket above,
-  // and one device must not flood claims either.
+  // v0.8.5 (F4-13): claims get their own bucket — a table of guests tapping
+  // items must not starve the write bucket above, and one device must not
+  // flood claims either. v0.10.3 (C3-4-3): the bucket keys on token + IP,
+  // NOT the body's device_id — that field is unvalidated when the limiter
+  // runs, so rotating device ids minted a fresh bucket per request.
   const claimsLimiter = rateLimit({
     name: 'guest-claims',
     windowMs: 60_000,
     max: 60,
-    key: (req) => {
-      const body = (req as unknown as { body?: { device_id?: unknown } }).body;
-      const dev = typeof body?.device_id === 'string' ? body.device_id.slice(0, 64) : '';
-      return `${tokenKey(req)}:d:${dev}`;
-    },
+    key: (req) => `${tokenKey(req)}:${req.ip}`,
+  });
+  // v0.10.3 (C3-4-1): menu + order get a per-token bucket too (the order
+  // route previously had NO route limiter — only the per-table DB count).
+  const menuLimiter = rateLimit({
+    name: 'guest-menu',
+    windowMs: 60_000,
+    max: 60,
+    key: tokenKey,
   });
   // v0.8.5 (F4-10): feedback is capped per table per hour on top of the
   // per-minute write limiter.
@@ -170,10 +197,27 @@ export async function customerRoutes(app: FastifyInstance) {
     const myDevice = String((req.query as { device_id?: unknown }).device_id ?? '').slice(0, 64) || undefined;
     const checks = [];
     let posFailures = 0;
+    // v0.10.3 (C3-4-4): soft time budget — a table with many open checks on
+    // a slow POS must not hold the poll open indefinitely; checks past the
+    // budget count as failures (the page shows the unavailable state when
+    // nothing at all could be loaded).
+    const pollStartedAt = Date.now();
     for (const row of c.rows) {
+      if (Date.now() - pollStartedAt > 10_000) {
+        posFailures++;
+        continue;
+      }
       try {
         const ctx = await getCheckPos(row.id);
         const detail = await cachedCheckDetail(ctx, row.id);
+        // v0.10.3 (C3-4-5): self-heal a check linked with total 0 by a
+        // failed post-order read-back — the stored total feeds tender-blind
+        // POS capping and reports, so replace it with the first real total
+        // the POS reports.
+        if (Number(row.total_cents ?? 0) === 0 && detail.totalCents > 0) {
+          query(`UPDATE checks SET total_cents = $2 WHERE id = $1 AND total_cents = 0`, [row.id, detail.totalCents])
+            .catch(() => undefined);
+        }
         const view = billView(detail, row) as ReturnType<typeof billView> & { item_claims: unknown[] };
         // Group Pay (idea 2): live item claims ride along with the bill poll.
         view.item_claims = await listClaims(row.id, myDevice);
@@ -270,6 +314,10 @@ export async function customerRoutes(app: FastifyInstance) {
     const tableToken = String((req.query as { table_token?: unknown }).table_token ?? '');
     if (!tableToken) throw badRequest('table_token is required');
     const row = await assertTableToken(ref, tableToken);
+    // v0.10.3 (C3-4-3): claims live on OPEN checks only — a claim against a
+    // settled/closed check is a junk row that can only confuse the next
+    // party at the table. (Unclaim stays ungated: it is pure cleanup.)
+    if (row.state !== 'OPEN') throw badRequest('check is not open');
     const { itemIndex, deviceId, fingerprint } = parseClaimBody(req);
     if (typeof fingerprint !== 'string' || !fingerprint || fingerprint.length > 300) throw badRequest('fingerprint is required');
     // v0.8.5 (F4-13): the claim must name an item that exists on the LIVE
@@ -283,6 +331,14 @@ export async function customerRoutes(app: FastifyInstance) {
     if (!item) throw badRequest('item_index is out of range for this bill');
     const expectedFp = `${item.name}|${item.quantity}|${item.amountCents}`;
     if (fingerprint !== expectedFp) throw badRequest('fingerprint does not match the bill item');
+    // v0.10.3 (C3-4-3): per-device claim cap — one phone must not hold every
+    // item on the bill hostage for the 3h claim lifetime. 20 covers a guest
+    // paying for a whole family; beyond it, pay the full bill instead.
+    const MAX_CLAIMS_PER_DEVICE = 20;
+    const heldIndexes = await listDeviceClaimIndexes(row.id, deviceId);
+    if (!heldIndexes.includes(itemIndex) && heldIndexes.length >= MAX_CLAIMS_PER_DEVICE) {
+      throw conflict('you have claimed the maximum number of items — pay for those first, or pay the full bill', 'too_many_claims');
+    }
     const mine = await claimItem(row.id, itemIndex, fingerprint, deviceId);
     if (!mine) throw conflict('that item was just claimed by someone else at your table', 'item_claimed');
     return { ok: true };
@@ -339,11 +395,34 @@ export async function customerRoutes(app: FastifyInstance) {
       // action) must not block paying a check that is still OPEN — the
       // check itself is the authority (payCheck re-reads its live
       // remaining). Only a FREE (unseated) table blocks new charges.
-      if (!tbl.rows[0] || !['SEATED', 'PAYING', 'PAID'].includes(tbl.rows[0].state)) {
+      // v0.10.3 (C3-4-6): that authority now applies to FREE too — a table
+      // flipped FREE while its check is still OPEN (staff error, early
+      // clear) left the bill unpayable and visible to the next party. An
+      // OPEN check is payable regardless of the table's floor state; the
+      // table-state gate only applies when the check itself is not open.
+      const checkOpen = row.state === 'OPEN';
+      if (!checkOpen && (!tbl.rows[0] || !['SEATED', 'PAYING', 'PAID'].includes(tbl.rows[0].state))) {
         throw badRequest('table is not seated');
       }
+      // v0.10.3 (C3-4-6): failed-attempt ceiling per check. The per-token
+      // limiter alone allowed 30 charge attempts/min/token — enough to
+      // card-test against one bill. Ten definitive failures in 15 minutes
+      // locks further NEW attempts (replays of an existing key still
+      // resolve below); staff can still record payment at the counter.
+      const failedAttempts = await query<{ n: number }>(
+        `SELECT COUNT(*)::int AS n FROM payments
+          WHERE check_id = $1 AND status = 'FAILED'
+            AND created_at > now() - interval '15 minutes'`,
+        [row.id],
+      );
+      if (failedAttempts.rows[0].n >= 10) {
+        throw httpError(429, 'too many failed payment attempts on this bill — please ask staff for help');
+      }
     }
-    const posType = (await getCheckPos(row.id)).posType;
+    // v0.10.3 (C3-4-6): the check row already carries its pos_type — the
+    // route no longer loads the full POS context just to validate the
+    // nonce format (payCheck loads it once for the charge itself).
+    const posType = (row as { pos_type?: string }).pos_type ?? 'square';
     const ok =
       posType === 'square' ? CARD_NONCE_RE.test(nonce) :
       posType === 'clover' ? /^clv_[A-Za-z0-9_-]{1,200}$/i.test(nonce) :
@@ -458,8 +537,9 @@ export async function customerRoutes(app: FastifyInstance) {
   // not refunded, and countable by exactly ONE phone number
   // (loyalty_payment_claims, migration 027). Before this, the route
   // counted the table's latest settled payment for ANY phone number any
-  // token holder typed. Without payment_id the route is now a pure
-  // progress lookup: it creates no row and counts nothing.
+  // token holder typed. v0.10.3 (C3-4-2): payment_id is now REQUIRED for
+  // any response at all — the no-id progress lookup was a membership
+  // oracle for arbitrary phone numbers.
   app.post('/api/t/:token/loyalty', { preHandler: tokenWriteLimiter }, async (req) => {
     const { token } = req.params as { token: string };
     const t = await query(
@@ -471,7 +551,15 @@ export async function customerRoutes(app: FastifyInstance) {
     const loc = t.rows[0];
     if (!loc.loyalty_enabled) throw badRequest('loyalty is not enabled here');
     const body = (req.body ?? {}) as { phone?: unknown; payment_id?: unknown };
-    const digits = typeof body.phone === 'string' ? body.phone.replace(/\D/g, '') : '';
+    // v0.10.3 (C3-4-2 Low): Persian/Arabic-Indic digits are converted to
+    // ASCII first — the old \D strip deleted them outright, so a number
+    // typed on a Farsi keyboard could never validate.
+    const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
+    const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩';
+    const toAsciiDigits = (s: string) =>
+      s.replace(/[۰-۹]/g, (d) => String(FA_DIGITS.indexOf(d)))
+        .replace(/[٠-٩]/g, (d) => String(AR_DIGITS.indexOf(d)));
+    const digits = typeof body.phone === 'string' ? toAsciiDigits(body.phone).replace(/\D/g, '') : '';
     if (digits.length < 7 || digits.length > 15) throw badRequest('enter a valid phone number');
     // C-7: the phone hash is an HMAC keyed with the server secret — a bare
     // sha256 of location+digits was reversible by dictionary attack over
@@ -485,8 +573,14 @@ export async function customerRoutes(app: FastifyInstance) {
     const required = Math.max(2, Math.min(50, Number(loc.loyalty_visits_required) || 5));
 
     const paymentId = typeof body.payment_id === 'string' && body.payment_id ? body.payment_id : null;
+    // v0.10.3 (C3-4-2): payment_id is REQUIRED. Without it this route was a
+    // membership oracle — anyone holding a photo of the table QR could read
+    // the visit/reward progress of ANY phone number they typed. Progress is
+    // now only ever returned against a real payment reference from the
+    // caller's own pay response (the guest page always sends it).
+    if (!paymentId) throw badRequest('payment_id is required');
     let payRow: { id: string; check_id: string } | null = null;
-    if (paymentId) {
+    {
       const p = await query<{ id: string; check_id: string }>(
         `SELECT p.id, p.check_id FROM payments p JOIN checks c ON c.id = p.check_id
           WHERE (p.external_payment_ref = $2 OR p.square_payment_id = $2) AND c.table_id = $1
@@ -496,11 +590,13 @@ export async function customerRoutes(app: FastifyInstance) {
         [loc.id, paymentId],
       );
       if (p.rowCount === 0) throw badRequest('that payment cannot count a loyalty visit');
-      // A refunded payment counts nothing. (Separate query on purpose: a
-      // correlated NOT EXISTS here is valid Postgres but unplannable in
-      // pg-mem, and this codebase keeps its SQL portable across both.)
+      // A refunded payment counts nothing — and v0.10.3 (C3-4-2): a PENDING
+      // refund blocks too, so a visit is never banked on money that is on
+      // its way back. (Separate query on purpose: a correlated NOT EXISTS
+      // here is valid Postgres but unplannable in pg-mem, and this codebase
+      // keeps its SQL portable across both.)
       const refunded = await query(
-        `SELECT 1 FROM refunds WHERE payment_row_id = $1 AND status = 'COMPLETED' LIMIT 1`,
+        `SELECT 1 FROM refunds WHERE payment_row_id = $1 AND status IN ('COMPLETED','PENDING') LIMIT 1`,
         [p.rows[0].id],
       );
       if (refunded.rowCount > 0) throw badRequest('that payment cannot count a loyalty visit');
@@ -516,6 +612,12 @@ export async function customerRoutes(app: FastifyInstance) {
       let row = existing.rows[0] ?? null;
       let counted = false;
       let rewardEarned = false;
+      // v0.10.3 (C3-4-2): when the presented payment was already claimed by
+      // a DIFFERENT phone number, the caller learns nothing about the
+      // number they typed — the answer is the same zeroed progress as a
+      // brand-new member. (Their own progress stays visible whenever they
+      // present their own payment.)
+      let foreignClaim = false;
       if (payRow) {
         // The payment counts for ONE phone number — claimed atomically.
         // (Verified by SELECT afterwards: pg-mem's ON CONFLICT RETURNING
@@ -530,14 +632,23 @@ export async function customerRoutes(app: FastifyInstance) {
           [payRow.id],
         );
         const ours = prior.rows[0]?.phone_hash === phoneHash;
+        if (!ours) foreignClaim = true;
         if (ours) {
           if (!row) {
+            // v0.10.3 (C3-4-2): ON CONFLICT DO NOTHING + re-read — two
+            // simultaneous first submissions for one phone used to race
+            // this bare INSERT and 500 the loser on the UNIQUE constraint.
             await client.query(
               `INSERT INTO loyalty_visits(id, location_id, phone_hash, visit_count)
-               VALUES ($1,$2,$3,0)`,
+               VALUES ($1,$2,$3,0) ON CONFLICT (location_id, phone_hash) DO NOTHING`,
               [randomUUID(), loc.location_id, phoneHash],
             );
-            row = { visit_count: 0, rewards_earned: 0, last_counted_check_id: null };
+            const fresh = await client.query(
+              `SELECT visit_count, rewards_earned, last_counted_check_id FROM loyalty_visits
+               WHERE location_id = $1 AND phone_hash = $2`,
+              [loc.location_id, phoneHash],
+            );
+            row = fresh.rows[0] ?? { visit_count: 0, rewards_earned: 0, last_counted_check_id: null };
           }
           if (row.last_counted_check_id !== payRow.check_id) {
             // F4-1: the once-per-check guard lives IN the UPDATE's WHERE —
@@ -561,6 +672,9 @@ export async function customerRoutes(app: FastifyInstance) {
             }
           }
         }
+      }
+      if (foreignClaim) {
+        return { visits: 0, earned: 0, counted: false, rewardEarned: false };
       }
       const after = row || counted
         ? await client.query(
@@ -647,14 +761,26 @@ export async function customerRoutes(app: FastifyInstance) {
       const detail = await ctx.adapter.getCheckDetail(ctx.checkRef, ctx.token);
       items = detail.items.map((i) => ({ name: i.name, quantity: i.quantity, amountCents: i.amountCents }));
     } catch { /* receipt still sends with totals */ }
-    const result = await sendReceiptEmail(email, {
-      restaurantName: t.rows[0].location_name || 'Smart Table',
-      tableName: t.rows[0].table_name,
-      items,
-      totalCents: pay.amount_cents + pay.tip_cents,
-      currency: pay.currency || 'CAD',
-      paidAt: new Date(pay.created_at).toLocaleString(),
-    });
+    // v0.10.3 (C3-4 Low): a THROWN send (provider 5xx, network) must release
+    // the slot too — previously only a {sent:false} result did, so one
+    // provider hiccup burned the guest's only receipt email for good.
+    let result: { sent: boolean; skipped?: string };
+    try {
+      result = await sendReceiptEmail(email, {
+        restaurantName: t.rows[0].location_name || 'Smart Table',
+        tableName: t.rows[0].table_name,
+        items,
+        totalCents: pay.amount_cents + pay.tip_cents,
+        currency: pay.currency || 'CAD',
+        // v0.10.3 (C3-4 Low): pin the locale — the server's default locale
+        // decided the date format guests saw.
+        paidAt: new Date(pay.created_at).toLocaleString('en-CA'),
+      });
+    } catch (e) {
+      await query(`UPDATE payments SET receipt_emailed_at = NULL WHERE id = $1`, [pay.id]).catch(() => undefined);
+      console.error(`[receipt-email] send failed for payment ${pay.id} — slot released:`, e);
+      throw httpError(502, 'receipt email could not be sent — please try again');
+    }
     if (!result.sent) {
       // Release the claim so the guest can retry (e.g. provider hiccup).
       await query(`UPDATE payments SET receipt_emailed_at = NULL WHERE id = $1`, [pay.id]).catch(() => undefined);
@@ -743,7 +869,8 @@ export async function customerRoutes(app: FastifyInstance) {
       amountCents: pay.amount_cents,
       tipCents: pay.tip_cents,
       currency: pay.currency || 'CAD',
-      paidAt: new Date(pay.created_at).toLocaleString(),
+      // v0.10.3 (C3-4 Low): pinned locale, same as the email receipt.
+      paidAt: new Date(pay.created_at).toLocaleString('en-CA'),
     });
     const jobId = randomUUID();
     try {
@@ -780,7 +907,7 @@ export async function customerRoutes(app: FastifyInstance) {
     return table;
   }
 
-  app.get('/api/t/:token/menu', async (req) => {
+  app.get('/api/t/:token/menu', { preHandler: menuLimiter }, async (req) => {
     const { token } = req.params as { token: string };
     const table = await loadOrderingTable(token);
     const ctx = await getLocationPos(table.location_id);
@@ -788,7 +915,7 @@ export async function customerRoutes(app: FastifyInstance) {
     return { enabled: true, currency: table.currency, items };
   });
 
-  app.post('/api/t/:token/order', async (req) => {
+  app.post('/api/t/:token/order', { preHandler: tokenWriteLimiter }, async (req) => {
     const { token } = req.params as { token: string };
     const table = await loadOrderingTable(token);
     const body = (req.body ?? {}) as { items?: unknown; idempotency_key?: unknown };
@@ -817,6 +944,15 @@ export async function customerRoutes(app: FastifyInstance) {
     const totalUnits = normalized.reduce((s, i) => s + i.quantity, 0);
     if (totalUnits > 40) throw badRequest('too many items in one order (max 40 units)');
 
+    // v0.10.3 (C3-4-5): hash the cart onto the reservation (migration 033).
+    // A retry that CHANGES the cart under a kept key used to get the
+    // original order back (duplicate:true) while the new items silently
+    // vanished — now a differing cart under an existing key is a clean 400
+    // and the guest starts a fresh order.
+    const cartHash = createHash('sha256')
+      .update(JSON.stringify(normalized.map((i) => [i.menuItemId, i.quantity])))
+      .digest('hex');
+
     // H4 fix: only a seated table can order. A photo of the QR code alone
     // isn't enough — staff must have seated the table.
     if (table.state !== 'SEATED') {
@@ -841,10 +977,10 @@ export async function customerRoutes(app: FastifyInstance) {
     // returns the existing row on CONFLICT DO NOTHING instead of zero rows).
     const myNonce = randomUUID();
     await query(
-      `INSERT INTO order_requests(idempotency_key, table_id, location_id, pos_type, status, nonce)
-       VALUES ($1,$2,$3,$4,'PENDING',$5)
+      `INSERT INTO order_requests(idempotency_key, table_id, location_id, pos_type, status, nonce, cart_hash)
+       VALUES ($1,$2,$3,$4,'PENDING',$5,$6)
        ON CONFLICT (idempotency_key) DO NOTHING`,
-      [key, table.id, table.location_id, ctx.posType, myNonce],
+      [key, table.id, table.location_id, ctx.posType, myNonce, cartHash],
     );
     const prev = await query(`SELECT * FROM order_requests WHERE idempotency_key = $1`, [key]);
     let row = prev.rows[0];
@@ -852,9 +988,22 @@ export async function customerRoutes(app: FastifyInstance) {
     if (row.table_id !== table.id) {
       throw badRequest('idempotency key belongs to another table');
     }
+    // v0.10.3 (C3-4-5): the key is bound to ONE cart. Legacy rows (created
+    // before migration 033) carry no hash and stay replayable as before.
+    if (row.cart_hash && row.cart_hash !== cartHash) {
+      throw badRequest('this order was already placed with a different cart — please start a new order');
+    }
     if (row.status === 'COMPLETED' && row.external_check_ref) {
       // Replay of a finished order: return the original check, don't charge again.
-      const detail = await ctx.adapter.getCheckDetail(row.external_check_ref, ctx.token);
+      // v0.10.3 (C3-4-5): a failed read-back here answers pending_detail
+      // instead of a 500 — the order exists; the bill poll will show it.
+      let detail: PosCheckDetail;
+      try {
+        detail = await ctx.adapter.getCheckDetail(row.external_check_ref, ctx.token);
+      } catch (readErr) {
+        console.error(`[order] replay read-back failed for ${row.external_check_ref} — answering pending_detail:`, readErr);
+        return { ok: true, duplicate: true, check: null, pending_detail: true };
+      }
       const chk = await query(`SELECT id FROM checks WHERE location_id = $1 AND pos_type = $2 AND external_check_ref = $3`, [
         table.location_id,
         ctx.posType,
@@ -927,10 +1076,12 @@ export async function customerRoutes(app: FastifyInstance) {
       // orphan the created order; link with a minimal detail instead and
       // let the bill poll refresh it.
       let detail: PosCheckDetail;
+      let detailPending = false;
       try {
         detail = await ctx.adapter.getCheckDetail(checkId, ctx.token);
       } catch (readErr) {
         console.error(`[order] post-create read failed for ${checkId} — linking with a minimal detail:`, readErr);
+        detailPending = true;
         detail = {
           id: checkId, items: [], tenders: [], totalCents: 0, remainingCents: 0,
           currency: (table as { currency?: string }).currency ?? 'CAD', state: 'OPEN',
@@ -968,6 +1119,12 @@ export async function customerRoutes(app: FastifyInstance) {
         [table.location_id, ctx.posType, checkId],
       );
       const linkedId = linked.rows[0]?.id ?? checkDbId;
+      // v0.10.3 (C3-4-5): when the read-back failed, the minimal detail has
+      // remainingCents 0 — and the guest page reads remaining <= 0 as
+      // "Payment Successful!". Never hand that bill to the client: answer
+      // check:null + pending_detail and let the bill poll (which self-heals
+      // the stored total) present the real bill a few seconds later.
+      if (detailPending) return { ok: true, check: null, pending_detail: true };
       return { ok: true, check: billView(detail, { id: linkedId, external_check_ref: checkId, square_order_id: ctx.posType === 'square' ? checkId : null, pos_type: ctx.posType, state: 'OPEN' }) };
     } catch (e) {
       // C-9: FAILED only on a definitive error. An unknown outcome
@@ -995,6 +1152,10 @@ export async function customerRoutes(app: FastifyInstance) {
     const tableToken = String((req.query as { table_token?: unknown }).table_token ?? '');
     if (!tableToken) throw badRequest('table_token is required');
     const row = await assertTableToken(ref, tableToken);
+    // v0.10.3 (C3-4-6): card-config is only meaningful for an OPEN check —
+    // for providers like Helcim every call opens a paid provider session,
+    // so a closed check must not mint sessions at 30/min/token.
+    if (row.state !== 'OPEN') throw badRequest('check is not open');
     const ctx = await getCheckPos(row.id);
     if (!ctx.adapter.getCardConfig || !ctx.adapter.chargeCard) {
       throw badRequest(`card payments are not supported for ${ctx.posType} locations`);

@@ -186,12 +186,10 @@ describe('v0.8.5 F4 guest hardening', () => {
     return app.inject({ method: 'POST', url: path, payload: body as Record<string, unknown> });
   }
 
-  it('loyalty lookup without payment_id counts nothing and creates no row', async () => {
+  it('loyalty without payment_id is refused (v0.10.3 C3-4-2: the lookup was a membership oracle)', async () => {
     const res = await post(`/api/t/${tableToken}/loyalty`, { phone: '6045550101' });
-    assert.equal(res.statusCode, 200, res.body);
-    const data = res.json();
-    assert.equal(data.counted, false);
-    assert.equal(data.visits, 0);
+    assert.equal(res.statusCode, 400, res.body);
+    assert.match(res.body, /payment_id is required/);
     const rows = await query(`SELECT COUNT(*)::int AS n FROM loyalty_visits WHERE location_id = $1`, [locationId]);
     assert.equal(rows.rows[0].n, 0);
   });
@@ -281,20 +279,24 @@ describe('v0.8.5 F4 guest hardening', () => {
     assert.equal(nowFree.statusCode, 200, nowFree.body);
   });
 
-  it('pay gate: FREE table blocks a new charge, a PAID-flipped table does not (F4-11)', async () => {
+  it('pay gate: the OPEN check is the authority — FREE and PAID-flipped tables can both pay it (F4-11 as amended by C3-4-6)', async () => {
     const body = {
       mode: 'full', amount_cents: 1200, tip_cents: 150,
       card_nonce: 'cnon:card-nonce-ok', payment_method: 'card',
       idempotency_key: randomUUID(),
     };
+    // v0.10.3 (C3-4-6): F4-11 originally blocked FREE tables outright —
+    // but a table flipped FREE while its check is still OPEN (staff error,
+    // early clear) left that bill unpayable and visible to the next party.
+    // The check's own OPEN state is now the gate; the table state only
+    // blocks when the check itself is not open.
     await query(`UPDATE tables SET state = 'FREE' WHERE id = $1`, [tableId]);
-    const blocked = await post(`/api/checks/ord-f4/pay?table_token=${tableToken}`, body);
-    assert.equal(blocked.statusCode, 400, blocked.body);
-    assert.match(blocked.body, /not seated/);
-    await query(`UPDATE tables SET state = 'PAID' WHERE id = $1`, [tableId]);
-    const ok = await post(`/api/checks/ord-f4/pay?table_token=${tableToken}`, body);
-    assert.equal(ok.statusCode, 200, ok.body);
+    const freePays = await post(`/api/checks/ord-f4/pay?table_token=${tableToken}`, body);
+    assert.equal(freePays.statusCode, 200, freePays.body);
     const rows = await query(`SELECT status FROM payments WHERE check_id = $1 AND external_payment_ref = 'sqpay-f4'`, [checkId]);
     assert.equal(rows.rows[0]?.status, 'COMPLETED');
+    await query(`UPDATE tables SET state = 'PAID' WHERE id = $1`, [tableId]);
+    const replay = await post(`/api/checks/ord-f4/pay?table_token=${tableToken}`, body);
+    assert.equal(replay.statusCode, 200, replay.body);
   });
 });

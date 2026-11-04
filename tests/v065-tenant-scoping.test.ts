@@ -211,8 +211,17 @@ describe('v0.6.5 tenant scoping + credential safety', () => {
     assert.equal(res.statusCode, 404, 'wrong table_token -> 404');
     res = await app.inject({ method: 'GET', url: '/api/checks/SHARED1/card-config' });
     assert.equal(res.statusCode, 400, 'card-config without token -> 400');
+    // v0.10.3 (C3-4-6): card-config is gated on an OPEN check (each call can
+    // open a paid provider session). SHARED1 was closed by the C-1 external
+    // payment above, so the with-token case now runs against a fresh OPEN
+    // check on the same table — and SHARED1 itself proves the new gate.
     res = await app.inject({ method: 'GET', url: '/api/checks/SHARED1/card-config?table_token=tokA' });
-    assert.equal(res.statusCode, 200, 'card-config with the table token works');
+    assert.equal(res.statusCode, 400, 'card-config on a closed check -> 400');
+    assert.match(res.body, /not open/);
+    await query(`INSERT INTO checks(id, table_id, location_id, square_order_id, external_check_ref, pos_type, merchant_id, state, total_cents, currency)
+      VALUES ($1,$2,$3,'SHARED2','SHARED2','square',$4,'OPEN',10000,'CAD')`, [randomUUID(), TBL_A, LOC_A, M_A]);
+    res = await app.inject({ method: 'GET', url: '/api/checks/SHARED2/card-config?table_token=tokA' });
+    assert.equal(res.statusCode, 200, 'card-config with the table token works on an open check');
   });
 
   it('C-4: link-check cannot re-point a check; refs are unique per location', async () => {

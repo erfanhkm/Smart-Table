@@ -287,9 +287,10 @@ describe('v0.6.7 batch 3 — guest endpoints (HTTP)', () => {
         payload: { phone, ...(paymentId ? { payment_id: paymentId } : {}) },
       });
     const before1 = await post();
-    assert.equal(before1.statusCode, 200);
-    assert.equal(before1.json().counted, false);
-    assert.equal(before1.json().visits, 0);
+    // v0.10.3 (C3-4-2): payment_id is REQUIRED — the bare lookup returned
+    // any typed number's progress to any QR holder (membership oracle).
+    assert.equal(before1.statusCode, 400);
+    assert.match(before1.body, /payment_id is required/);
 
     await query(
       `INSERT INTO payments(id, check_id, amount_cents, tip_cents, status, idempotency_key, external_payment_ref, currency)

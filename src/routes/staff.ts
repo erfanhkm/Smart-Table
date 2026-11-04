@@ -11,6 +11,7 @@ import { getCheckPos, getLocationPos } from '../services/pos/context.js';
 import { getTables } from '../services/floor.js';
 import { assertSquareId, searchOpenOrders } from '../square.js';
 import { parsePaymentBody, payCheck } from '../services/payments.js';
+import { invalidateCheckDetail } from './customer.js';
 import { assertNotDemoLocation } from '../services/demo-guard.js';
 import { logAudit } from '../services/audit.js';
 import { requirePortalRole, scopedLocationId, staffOnly } from '../auth.js';
@@ -367,6 +368,9 @@ export async function staffRoutes(app: FastifyInstance) {
       // atomic with the payment and immutable on replay.
       recordedBy: actor,
     });
+    // v0.10.3 (C3-4-4): staff-recorded cash changes the bill — drop the
+    // guest bill poll's cached snapshot so the next poll reads it fresh.
+    invalidateCheckDetail(row.id);
     // Legacy fallback for rows reserved before v0.8.7: set the actor only
     // where it is still empty, never overwrite an existing one.
     await query(`UPDATE payments SET recorded_by = $1 WHERE idempotency_key = $2 AND recorded_by IS NULL`, [
