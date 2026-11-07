@@ -807,12 +807,22 @@ export async function payCheck(input: PayCheckInput): Promise<PayCheckResult> {
         await client.query(`UPDATE payments SET status='COMPLETED' WHERE check_id=$1 AND status='AUTHORIZED'`, [check.id]);
         await client.query(`UPDATE checks SET state='COMPLETED' WHERE id=$1`, [check.id]);
         if (check.table_id) {
-          await client.query(`UPDATE tables SET state='PAID' WHERE id=$1`, [check.table_id]);
-          await client.query(`INSERT INTO events(id, table_id, check_id, type) VALUES($1,$2,$3,'paid')`, [
-            randomUUID(),
-            check.table_id,
-            check.id,
-          ]);
+          // v0.10.5 (C3-6-2): conditional flip (F2-9 shape) — if the table
+          // has meanwhile been re-seated with another OPEN check, this
+          // settlement must not flip it to PAID under the new party. The
+          // 'paid' event is written only when the flip lands.
+          const tu = await client.query(
+            `UPDATE tables SET state='PAID' WHERE id=$1 AND state IN ('SEATED','PAYING')
+             AND NOT EXISTS (SELECT 1 FROM checks WHERE table_id = $1 AND state = 'OPEN')`,
+            [check.table_id],
+          );
+          if ((tu.rowCount ?? 0) > 0) {
+            await client.query(`INSERT INTO events(id, table_id, check_id, type) VALUES($1,$2,$3,'paid')`, [
+              randomUUID(),
+              check.table_id,
+              check.id,
+            ]);
+          }
         }
       } else if (check.table_id) {
         await client.query(`UPDATE tables SET state='PAYING' WHERE id=$1 AND state IN ('SEATED','PAYING')`, [check.table_id]);

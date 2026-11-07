@@ -154,7 +154,7 @@ function mapState(s: unknown): PosCheckState {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapTenders(order: AnyObj): { id: string; type: string; amountCents: number }[] {
+function mapTenders(order: AnyObj): { id: string; type: string; amountCents: number; tipCents: number }[] {
   const payments: AnyObj[] = order?.payments?.elements ?? order?.payments ?? [];
   return payments.map((p: AnyObj) => ({
     id: String(p?.id ?? ''),
@@ -163,6 +163,8 @@ function mapTenders(order: AnyObj): { id: string; type: string; amountCents: num
     // tip included. Clover reports the tip separately (tipAmount) —
     // without it, tipped Clover payments never amount-match in reconcile.
     amountCents: (p?.amount ?? 0) + (p?.tipAmount ?? 0),
+    // v0.10.5 (C3-6 Low): the tip slice, for bill-paid displays.
+    tipCents: p?.tipAmount ?? 0,
   }));
 }
 

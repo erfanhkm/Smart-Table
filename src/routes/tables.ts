@@ -69,6 +69,16 @@ export async function tableRoutes(app: FastifyInstance) {
       { runIfUnsupported: true },
     );
     if (!created) throw conflict('another table change is in progress; please retry', 'table_create_busy');
+    await logAudit({
+      actorType: req.portalUser ? 'portal_user' : 'staff_token',
+      actorId: req.portalUser?.id ?? null,
+      role: req.portalUser?.role ?? null,
+      ip: req.ip,
+      action: 'table_created',
+      locationId: scopedId,
+      target: created.id,
+      detail: `name=${name.trim()}`,
+    });
     return { id: created.id, name: name.trim(), qr_token: created.qrToken, qr_url: `${config.appUrl}/t/${created.qrToken}` };
   });
 
@@ -186,19 +196,48 @@ export async function tableRoutes(app: FastifyInstance) {
         throw conflict('check is already linked to another table', 'check_linked_elsewhere');
       }
       if (existing.state === 'COMPLETED') throw conflict('check is already completed', 'check_completed');
-      await query(`UPDATE checks SET total_cents = $1, currency = $2 WHERE id = $3`, [
-        detail.totalCents,
-        detail.currency,
-        existing.id,
-      ]);
+      if (existing.state === 'ABANDONED') {
+        // v0.10.5 (C3-6-2): a forced free abandoned this check. A staff
+        // member explicitly re-linking it is a deliberate resurrection —
+        // bring it back to OPEN with fresh POS totals instead of leaving
+        // a zombie row that is neither listed nor payable.
+        await query(`UPDATE checks SET state = 'OPEN', total_cents = $1, currency = $2 WHERE id = $3`, [
+          detail.totalCents,
+          detail.currency,
+          existing.id,
+        ]);
+      } else {
+        await query(`UPDATE checks SET total_cents = $1, currency = $2 WHERE id = $3`, [
+          detail.totalCents,
+          detail.currency,
+          existing.id,
+        ]);
+      }
       checkId = existing.id;
     }
-    await query(`UPDATE tables SET state = 'SEATED' WHERE id = $1`, [tableId]);
+    // v0.10.5 (C3-6-2): the seat flip is conditional on OUR check still
+    // being OPEN at write time — a close/free that landed in between must
+    // not be overwritten by a stale SEATED.
+    await query(
+      `UPDATE tables SET state = 'SEATED' WHERE id = $1
+       AND EXISTS (SELECT 1 FROM checks WHERE id = $2 AND state = 'OPEN')`,
+      [tableId, checkId],
+    );
     await query(`INSERT INTO events(id, table_id, check_id, type) VALUES ($1,$2,$3,'seated')`, [
       randomUUID(),
       tableId,
       checkId,
     ]);
+    await logAudit({
+      actorType: req.portalUser ? 'portal_user' : 'staff_token',
+      actorId: req.portalUser?.id ?? null,
+      role: req.portalUser?.role ?? null,
+      ip: req.ip,
+      action: 'check_linked',
+      locationId: table.location_id,
+      target: checkId,
+      detail: `table=${tableId} ref=${checkRef}`,
+    });
     return { ok: true };
   });
 
@@ -232,6 +271,15 @@ export async function tableRoutes(app: FastifyInstance) {
   // previous party's bill. Now: an OPEN check blocks the free with a 409
   // unless the caller explicitly forces it; a forced free drops the open
   // checks' item claims so a stale claim can never be paid against.
+  // v0.10.5 (C3-6-2): dropping the claims was not enough — the checks
+  // themselves stayed OPEN, so the next party's QR page still LISTED the
+  // previous bill and the pay path (which only requires an OPEN check)
+  // would take their money for it. A forced free now also marks the open
+  // checks ABANDONED (terminal: not listed, not payable; link-check can
+  // deliberately resurrect one). And the table flip itself is a single
+  // conditional UPDATE — if a check was linked between the read above
+  // and this write, the flip refuses instead of landing FREE over a live
+  // check (the read-then-write race).
   app.post('/api/tables/:id/free', staffOnly, async (req) => {
     const tableId = (req.params as { id: string }).id;
     requirePortalRole(req, 'owner', 'manager');
@@ -248,8 +296,16 @@ export async function tableRoutes(app: FastifyInstance) {
       const ids = open.rows.map((r) => r.id);
       const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
       await query(`DELETE FROM item_claims WHERE check_id IN (${placeholders})`, ids);
+      await query(`UPDATE checks SET state = 'ABANDONED' WHERE id IN (${placeholders})`, ids);
     }
-    await query(`UPDATE tables SET state = 'FREE' WHERE id = $1`, [tableId]);
+    const flip = await query(
+      `UPDATE tables SET state = 'FREE' WHERE id = $1
+       AND NOT EXISTS (SELECT 1 FROM checks WHERE table_id = $1 AND state = 'OPEN')`,
+      [tableId],
+    );
+    if ((flip.rowCount ?? 0) === 0) {
+      throw conflict('the table state changed while freeing; please retry', 'table_state_changed');
+    }
     await query(`INSERT INTO events(id, table_id, type) VALUES ($1,$2,'freed')`, [randomUUID(), tableId]);
     await logAudit({
       actorType: req.portalUser ? 'portal_user' : 'staff_token',
@@ -259,7 +315,7 @@ export async function tableRoutes(app: FastifyInstance) {
       action: 'table_freed',
       locationId: tbl.location_id,
       target: tableId,
-      detail: open.rowCount > 0 ? `forced with ${open.rowCount} open check(s); claims cleared` : null,
+      detail: open.rowCount > 0 ? `forced with ${open.rowCount} open check(s); claims cleared, checks abandoned` : null,
     });
     return { ok: true };
   });

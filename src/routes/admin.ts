@@ -31,18 +31,26 @@ const adminLoginLimiter = rateLimit({ name: 'admin-login', windowMs: 15 * 60 * 1
 // and this account is a single fixed target. A GLOBAL failure budget sits
 // behind it: 20 failures inside an hour lock ALL admin logins for 15
 // minutes and raise an audit record. A successful login clears the count.
+// v0.10.5 (C3-6-4): the global lock also locked out the FOUNDER — 20 bad
+// tries from anywhere DoSed the one legitimate user. A source that has
+// completed a successful admin login before is a KNOWN source: the lock
+// does not apply to it and its failures do not feed the global counter
+// (its strict per-IP limiter still applies). Unknown-source floods still
+// lock unknown sources out, exactly as F6-1 intended.
 const ADMIN_FAIL_WINDOW_MS = 60 * 60 * 1000;
 const ADMIN_FAIL_LIMIT = 20;
 const ADMIN_LOCKOUT_MS = 15 * 60 * 1000;
 let adminFailCount = 0;
 let adminFailWindowStart = 0;
 let adminLockedUntil = 0;
+const knownAdminIps = new Set<string>();
 
 function adminLoginLocked(): boolean {
   return Date.now() < adminLockedUntil;
 }
 
 async function noteAdminFailure(ip: string | undefined): Promise<void> {
+  if (ip && knownAdminIps.has(ip)) return;
   const now = Date.now();
   if (now - adminFailWindowStart > ADMIN_FAIL_WINDOW_MS) {
     adminFailWindowStart = now;
@@ -63,10 +71,11 @@ async function noteAdminFailure(ip: string | undefined): Promise<void> {
   }
 }
 
-function noteAdminSuccess(): void {
+function noteAdminSuccess(ip?: string): void {
   adminFailCount = 0;
   adminFailWindowStart = 0;
   adminLockedUntil = 0;
+  if (ip) knownAdminIps.add(ip);
 }
 
 // Short-lived admin sessions (in-memory, single instance). F6-11: capped
@@ -106,7 +115,11 @@ export async function adminRoutes(app: FastifyInstance) {
   // POST /api/admin/login { username, password } -> { token }
   app.post('/api/admin/login', { onRequest: adminLoginLimiter }, async (req) => {
     // F6-1: global lockout after repeated failures (any source IPs).
-    if (adminLoginLocked()) throw httpError(429, 'too many failed login attempts; try again later');
+    // v0.10.5 (C3-6-4): known sources (a prior successful login from this
+    // IP) are exempt — the lock exists to stop attackers, not the founder.
+    if (adminLoginLocked() && !knownAdminIps.has(req.ip)) {
+      throw httpError(429, 'too many failed login attempts; try again later');
+    }
     const body = (req.body ?? {}) as { username?: unknown; password?: unknown };
     const username = typeof body.username === 'string' ? body.username.trim() : '';
     const password = typeof body.password === 'string' ? body.password : '';
@@ -137,7 +150,7 @@ export async function adminRoutes(app: FastifyInstance) {
       req.log.warn({ ip: req.ip }, 'admin login failed');
       throw unauthorized('invalid credentials');
     }
-    noteAdminSuccess();
+    noteAdminSuccess(req.ip);
     req.log.info({ ip: req.ip }, 'admin login succeeded');
     const token = randomUUID().replace(/-/g, '');
     const now = Date.now();
@@ -334,7 +347,7 @@ export async function adminRoutes(app: FastifyInstance) {
           [locationId, plan, defaults.commission_bps, defaults.subscription_price_cents],
         );
         await client.query(
-          `INSERT INTO portal_users(id, email, password_hash, role, location_id) VALUES ($1,$2,$3,'owner',$4)`,
+          `INSERT INTO portal_users(id, email, password_hash, role, location_id, must_change_password) VALUES ($1,$2,$3,'owner',$4,true)`,
           [ownerId, ownerEmail, passwordHash, locationId],
         );
         for (let i = 1; i <= tableCount; i++) {
@@ -375,61 +388,66 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // ---- All locations with per-location stats ----
-  // Aggregates computed per location with plain parameterized queries
-  // (portable across Postgres/pg-mem — correlated scalar subqueries that
-  // reference the outer row are not portable to pg-mem).
+  // v0.10.5 (C3-6-6): the stats used to fan out as 5 queries PER location
+  // (up to 500 locations, sequential across them, on a page the panel
+  // polls) — a self-inflicted pool flood next to live payments. The stats
+  // are grouped aggregates now: a constant number of queries no matter
+  // how many locations exist, joined onto the page in JS.
   app.get('/api/admin/locations', { onRequest: founderOnly }, async (req) => {
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    // F6-11: bounded page size — the per-location fan-out below is 5
-    // queries per location, so an unbounded list grows linearly worse.
     const limit = Math.min(500, Math.max(1, Number((req.query as any).limit) || 100));
-    const locs = await query(
-      `SELECT l.id, l.name, l.pos_type, l.currency, l.qr_ordering_enabled,
-              l.loyalty_enabled, l.created_at,
-              b.plan AS billing_plan, b.subscription_status
-       FROM locations l
-       LEFT JOIN billing_accounts b ON b.location_id = l.id
-       ORDER BY l.created_at DESC LIMIT $1`,
-      [limit],
-    );
-    const out = [];
-    for (const l of locs.rows as any[]) {
-      const [feesMonth, feesAccrued, tbls, openChecks, revenue] = await Promise.all([
-        query(
-          `SELECT COALESCE(SUM(fee_cents), 0)::bigint AS total FROM fee_ledger
-           WHERE location_id = $1 AND status IN ('collected','charged') AND created_at >= $2`,
-          [l.id, monthStart.toISOString()],
-        ),
-        query(
-          `SELECT COALESCE(SUM(fee_cents), 0)::bigint AS total FROM fee_ledger
-           WHERE location_id = $1 AND status = 'accrued'`,
-          [l.id],
-        ),
-        query(`SELECT COUNT(*)::int AS n FROM tables WHERE location_id = $1`, [l.id]),
-        query(
-          `SELECT COUNT(*)::int AS n FROM checks c JOIN tables t ON t.id = c.table_id
-           WHERE t.location_id = $1 AND c.state = 'OPEN'`,
-          [l.id],
-        ),
-        query(
-          `SELECT COALESCE(SUM(p.amount_cents + p.tip_cents), 0)::bigint AS total FROM payments p
-           JOIN checks c ON c.id = p.check_id JOIN tables t ON t.id = c.table_id
-           WHERE t.location_id = $1 AND p.status IN ('AUTHORIZED','COMPLETED') AND p.created_at > $2`,
-          [l.id, dayAgo],
-        ),
-      ]);
-      out.push({
-        ...l,
-        fees_this_month_cents: Number(feesMonth.rows[0].total),
-        fees_accrued_cents: Number(feesAccrued.rows[0].total),
-        tables: tbls.rows[0].n,
-        open_checks: openChecks.rows[0].n,
-        revenue_24h_cents: Number(revenue.rows[0].total),
-      });
-    }
+    const [locs, feesMonth, feesAccrued, tbls, openChecks, revenue] = await Promise.all([
+      query(
+        `SELECT l.id, l.name, l.pos_type, l.currency, l.qr_ordering_enabled,
+                l.loyalty_enabled, l.created_at,
+                b.plan AS billing_plan, b.subscription_status
+         FROM locations l
+         LEFT JOIN billing_accounts b ON b.location_id = l.id
+         ORDER BY l.created_at DESC LIMIT $1`,
+        [limit],
+      ),
+      query(
+        `SELECT location_id, COALESCE(SUM(fee_cents), 0)::bigint AS total FROM fee_ledger
+         WHERE status IN ('collected','charged') AND created_at >= $1 GROUP BY location_id`,
+        [monthStart.toISOString()],
+      ),
+      query(
+        `SELECT location_id, COALESCE(SUM(fee_cents), 0)::bigint AS total FROM fee_ledger
+         WHERE status = 'accrued' GROUP BY location_id`,
+      ),
+      query(`SELECT location_id, COUNT(*)::int AS n FROM tables GROUP BY location_id`),
+      query(
+        `SELECT t.location_id, COUNT(*)::int AS n FROM checks c JOIN tables t ON t.id = c.table_id
+         WHERE c.state = 'OPEN' GROUP BY t.location_id`,
+      ),
+      query(
+        `SELECT t.location_id, COALESCE(SUM(p.amount_cents + p.tip_cents), 0)::bigint AS total FROM payments p
+         JOIN checks c ON c.id = p.check_id JOIN tables t ON t.id = c.table_id
+         WHERE p.status IN ('AUTHORIZED','COMPLETED') AND p.created_at > $1 GROUP BY t.location_id`,
+        [dayAgo],
+      ),
+    ]);
+    const byId = <T,>(rows: T[], key: (r: T) => string) => {
+      const m = new Map<string, T>();
+      for (const r of rows) m.set(key(r), r);
+      return m;
+    };
+    const feesMonthBy = byId(feesMonth.rows as any[], (r) => r.location_id);
+    const feesAccruedBy = byId(feesAccrued.rows as any[], (r) => r.location_id);
+    const tblsBy = byId(tbls.rows as any[], (r) => r.location_id);
+    const openBy = byId(openChecks.rows as any[], (r) => r.location_id);
+    const revBy = byId(revenue.rows as any[], (r) => r.location_id);
+    const out = (locs.rows as any[]).map((l) => ({
+      ...l,
+      fees_this_month_cents: Number(feesMonthBy.get(l.id)?.total ?? 0),
+      fees_accrued_cents: Number(feesAccruedBy.get(l.id)?.total ?? 0),
+      tables: tblsBy.get(l.id)?.n ?? 0,
+      open_checks: openBy.get(l.id)?.n ?? 0,
+      revenue_24h_cents: Number(revBy.get(l.id)?.total ?? 0),
+    }));
     return { locations: out };
   });
 

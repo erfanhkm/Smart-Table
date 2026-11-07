@@ -37,6 +37,12 @@ export interface PosTender {
    * tipAmount).
    */
   amountCents: number;
+  /**
+   * The tip portion of amountCents, when the adapter exposes it
+   * (v0.10.5, C3-6 Low): displays that show "paid toward the bill" must
+   * subtract it — a tender's total is not all bill money.
+   */
+  tipCents?: number;
 }
 
 export type PosCheckState = 'OPEN' | 'CLOSED' | 'CANCELLED';

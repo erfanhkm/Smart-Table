@@ -5,13 +5,22 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { query } from '../db.js';
 import { hashPassword, verifyPasswordForm } from '../crypto.js';
+import { normalizeIp } from '../rate-limit.js';
 import { badRequest, unauthorized } from '../http.js';
 
 const TOKEN_TTL_DAYS = 7;
 
-// Simple in-memory login rate limiter: 10 attempts per 5 minutes, tracked per
-// IP AND per email (v0.6.4: the per-IP counter alone let an attacker rotate
-// IPs against one account; the per-email counter closes that).
+// In-memory login rate limiter: 10 FAILED attempts per 5 minutes, tracked
+// per IP AND per email (v0.6.4: the per-IP counter alone let an attacker
+// rotate IPs against one account; the per-email counter closes that).
+// v0.10.5 (C3-6-3): the counters used to increment on EVERY attempt,
+// successes included, before the password was even checked — so an
+// attacker could lock a restaurant out of its own account with 10 bad
+// tries, and a busy shared owner login could lock itself out with 11
+// good ones. Now: limits are PEEKED without incrementing, only failures
+// bump them, a success clears the per-email counter, and the per-IP key
+// goes through the shared normalizeIp (/64 grouping, F5-5) so IPv6
+// rotation no longer hands out a fresh bucket per address.
 // (Single-process; a distributed limiter comes with production hardening.)
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 const loginAttemptsByEmail = new Map<string, { count: number; resetAt: number }>();
@@ -25,21 +34,20 @@ setInterval(() => {
   for (const [k, v] of loginAttemptsByEmail) if (now >= v.resetAt) loginAttemptsByEmail.delete(k);
 }, 60 * 1000).unref();
 
-function bumpAndAllowed(map: Map<string, { count: number; resetAt: number }>, key: string): boolean {
+function peekAllowed(map: Map<string, { count: number; resetAt: number }>, key: string): boolean {
+  const e = map.get(key);
+  if (!e || Date.now() >= e.resetAt) return true;
+  return e.count < LOGIN_LIMIT;
+}
+
+function bumpFailure(map: Map<string, { count: number; resetAt: number }>, key: string): void {
   const now = Date.now();
   const e = map.get(key);
   if (!e || now >= e.resetAt) {
     map.set(key, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
-    return true;
+    return;
   }
   e.count += 1;
-  return e.count <= LOGIN_LIMIT;
-}
-
-function loginAllowed(ip: string, email: string): boolean {
-  const ipOk = bumpAndAllowed(loginAttempts, ip);
-  const emailOk = bumpAndAllowed(loginAttemptsByEmail, email);
-  return ipOk && emailOk;
 }
 
 // Precomputed scrypt hash of a throwaway password. Unknown-email logins verify
@@ -57,6 +65,7 @@ export interface PortalIdentity {
 
 interface PortalUser extends PortalIdentity {
   password_hash: string;
+  must_change_password?: boolean;
 }
 
 export function hashToken(token: string): string {
@@ -70,22 +79,33 @@ export async function portalRoutes(app: FastifyInstance): Promise<void> {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
     const password = typeof body.password === 'string' ? body.password : '';
-    if (!loginAllowed(req.ip, email || '-')) {
-      return reply.code(429).send({ error: 'too many login attempts, try again in a few minutes' });
+    const ipKey = normalizeIp(req.ip);
+    const emailKey = email || '-';
+    // v0.10.5 (C3-6-3): peek first — a blocked caller is refused WITHOUT
+    // extending either counter, and only real failures bump them below.
+    if (!peekAllowed(loginAttempts, ipKey) || !peekAllowed(loginAttemptsByEmail, emailKey)) {
+      return reply.code(429).send({ error: 'too many failed login attempts, try again in a few minutes' });
     }
     if (!email || !password || email.length > 320 || password.length > 200) {
       throw badRequest('email and password are required');
     }
 
     const u = await query<PortalUser>(
-      `SELECT id, email, password_hash, role, location_id FROM portal_users WHERE email = $1`,
+      `SELECT id, email, password_hash, role, location_id, must_change_password FROM portal_users WHERE email = $1`,
       [email],
     );
     const user = u.rows[0];
     // Always run scrypt — against the dummy hash when the email is unknown —
     // so timing does not reveal which emails exist (v0.6.4).
     const form = await verifyPasswordForm(password, user ? user.password_hash : DUMMY_PASSWORD_HASH);
-    if (form === null || !user) throw unauthorized('invalid email or password');
+    if (form === null || !user) {
+      bumpFailure(loginAttempts, ipKey);
+      bumpFailure(loginAttemptsByEmail, emailKey);
+      throw unauthorized('invalid email or password');
+    }
+    // Success: past failures against this email stop counting (the owner
+    // typo'd a few times, then got in — no lingering lockout debt).
+    loginAttemptsByEmail.delete(emailKey);
     // v0.10.4 (C3-5-5b): a 'raw' match means the stored hash predates the
     // F5-21 NFC normalization — upgrade it in place so this account verifies
     // through the fast NFC path from now on. Best-effort: a failed rehash
@@ -108,8 +128,52 @@ export async function portalRoutes(app: FastifyInstance): Promise<void> {
 
     return {
       token,
-      user: { email: user.email, role: user.role, location_id: user.location_id },
+      user: {
+        email: user.email,
+        role: user.role,
+        location_id: user.location_id,
+        // v0.10.5 (C3-6-5): a provisioned owner still runs on the one-time
+        // temporary password until they change it — the portal UI forces
+        // the change screen on this flag.
+        must_change_password: user.must_change_password === true,
+      },
     };
+  });
+
+  // Authenticated: change the caller's password (v0.10.5, C3-6-5). The
+  // provisioned temp password must not become the permanent credential:
+  // this route verifies the current password, stores the new hash, clears
+  // must_change_password, and revokes the user's OTHER tokens (the calling
+  // token stays valid so the owner isn't logged out mid-flow).
+  app.post('/api/portal/change-password', async (req: FastifyRequest) => {
+    const m = /^Bearer[ \t]+(\S+)[ \t]*$/i.exec(req.headers.authorization ?? '');
+    const me = m ? await getPortalUser(m[1]) : null;
+    if (!me) throw unauthorized('invalid or expired session');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const current = typeof body.current_password === 'string' ? body.current_password : '';
+    const next = typeof body.new_password === 'string' ? body.new_password : '';
+    if (!current || current.length > 200) throw badRequest('current_password is required');
+    if (!next || next.length < 10 || next.length > 200) {
+      throw badRequest('new_password must be 10-200 characters');
+    }
+    if (next === current) throw badRequest('new_password must differ from the current password');
+    const u = await query<PortalUser>(
+      `SELECT id, email, password_hash, role, location_id FROM portal_users WHERE id = $1`,
+      [me.id],
+    );
+    const user = u.rows[0];
+    if (!user) throw unauthorized('invalid or expired session');
+    const form = await verifyPasswordForm(current, user.password_hash);
+    if (form === null) throw unauthorized('current password is incorrect');
+    await query(`UPDATE portal_users SET password_hash = $1, must_change_password = false WHERE id = $2`, [
+      await hashPassword(next),
+      user.id,
+    ]);
+    await query(`DELETE FROM portal_tokens WHERE user_id = $1 AND token_hash <> $2`, [
+      user.id,
+      hashToken(m![1]),
+    ]);
+    return { ok: true };
   });
 
   // Authenticated: invalidate the calling token (logout).

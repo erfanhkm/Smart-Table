@@ -260,7 +260,10 @@ export async function staffRoutes(app: FastifyInstance) {
             table_name: t.name,
             id: t.open_order_id,
             total: detail.totalCents,
-            paid: detail.tenders.reduce((s, x) => s + (x.amountCents || 0), 0),
+            // v0.10.5 (C3-6 Low): tenders are tip-INCLUSIVE (F2-13) — the
+            // old sum could show "paid" above the bill total on tipped
+            // checks. Paid-toward-the-bill nets the tips out.
+            paid: detail.tenders.reduce((s, x) => s + (x.amountCents || 0) - (x.tipCents || 0), 0),
             remaining: detail.remainingCents,
             currency: detail.currency || 'CAD',
             error: false,

@@ -46,6 +46,19 @@ async function upsertMerchant(posType: PosType, externalRef: string): Promise<st
   return r.rows[0].id;
 }
 
+// v0.10.5 (C3-6-7d): a failed token validation used to always read "the POS
+// rejected this token" — including when the POS was simply unreachable,
+// which sent owners debugging a good token. Distinguish the two shapes:
+// an HTTP 401/403 from the POS is a rejection; anything else (no status,
+// 5xx, network) is reachability.
+function posValidationError(e: unknown): Error {
+  const status = (e as { status?: unknown })?.status;
+  if (status === 401 || status === 403) {
+    return badRequest('the POS rejected this token; check it and try again');
+  }
+  return badRequest('could not reach the POS to validate this token; try again in a moment');
+}
+
 export async function oauthRoutes(app: FastifyInstance) {
   // Starts Square OAuth for the logged-in staff user. Returns the Square
   // authorize URL; the portal navigates there. (A plain redirect cannot carry
@@ -88,17 +101,32 @@ export async function oauthRoutes(app: FastifyInstance) {
     // rows regardless of who started it. If the starting location already
     // belongs to a DIFFERENT Square merchant, refuse before storing
     // anything: the authorizing account is not this restaurant's.
+    //
+    // v0.10.5 (C3-6-1, High): a location bound to a PENDING merchant (the
+    // founder-provisioned shape from POST /api/admin/locations) is the one
+    // exception — refusing it made every provisioned restaurant unable to
+    // connect Square at all. A pending binding is not a different
+    // restaurant; it is this restaurant waiting for its first connection,
+    // and the callback below binds it to the authorizing merchant.
+    let startingLocation: { id: string; merchant_id: string; name: string | null } | null = null;
+    let pendingMerchantId: string | null = null;
     if (st.locationId) {
-      const existing = await query<{ external_merchant_ref: string | null }>(
-        `SELECT m.external_merchant_ref FROM locations l
+      const existing = await query<{ id: string; merchant_id: string; name: string | null; external_merchant_ref: string | null }>(
+        `SELECT l.id, l.merchant_id, l.name, m.external_merchant_ref FROM locations l
          JOIN merchants m ON m.id = l.merchant_id WHERE l.id = $1`,
         [st.locationId],
       );
-      const boundRef = existing.rows[0]?.external_merchant_ref;
-      if (boundRef && boundRef !== merchantId) {
-        throw badRequest(
-          'this Square account belongs to a different restaurant than the one that started the connection',
-        );
+      const row = existing.rows[0];
+      if (row) {
+        startingLocation = { id: row.id, merchant_id: row.merchant_id, name: row.name };
+        const boundRef = row.external_merchant_ref;
+        if (boundRef && boundRef.startsWith('pending-')) {
+          pendingMerchantId = row.merchant_id;
+        } else if (boundRef && boundRef !== merchantId) {
+          throw badRequest(
+            'this Square account belongs to a different restaurant than the one that started the connection',
+          );
+        }
       }
     }
 
@@ -119,8 +147,66 @@ export async function oauthRoutes(app: FastifyInstance) {
     });
 
     const { locations } = await listLocations(accessToken);
+    const squareLocations = locations ?? [];
+
+    // v0.10.5 (C3-6-1): a location-started flow binds THAT location to the
+    // authorizing merchant instead of creating a fresh location row for
+    // every Square location of the merchant (the orphans of C3-6-7a).
+    if (startingLocation) {
+      if (squareLocations.length === 0) throw badRequest('the authorized Square account has no locations');
+      const chosen =
+        squareLocations.length === 1
+          ? squareLocations[0]
+          : (squareLocations.find(
+              (l) => l.name && startingLocation!.name && l.name.trim().toLowerCase() === startingLocation!.name.trim().toLowerCase(),
+            ) ?? squareLocations[0]);
+      // The Square location must not already be connected as a DIFFERENT
+      // location row (square_location_id is UNIQUE — a blind UPDATE would
+      // 500 on the constraint instead of explaining the state).
+      const clash = await query<{ id: string }>(
+        `SELECT id FROM locations WHERE square_location_id = $1 AND id <> $2`,
+        [chosen.id, startingLocation.id],
+      );
+      if (clash.rowCount > 0) {
+        throw conflict('this Square location is already connected to another restaurant record', 'square_location_bound_elsewhere');
+      }
+      await query(
+        `UPDATE locations SET merchant_id = $1, pos_location_ref = $2, square_location_id = $2, currency = $3
+         WHERE id = $4`,
+        [ourMerchantId, chosen.id, chosen.currency ?? 'CAD', startingLocation.id],
+      );
+      // Retire the pending placeholder merchant once nothing references it.
+      if (pendingMerchantId && pendingMerchantId !== ourMerchantId) {
+        await query(
+          `DELETE FROM merchants WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM locations WHERE merchant_id = $1)`,
+          [pendingMerchantId],
+        ).catch(() => undefined);
+      }
+      await logAudit({
+        actorType: 'portal_user',
+        actorId: st.userId ?? null,
+        role: null,
+        ip: req.ip,
+        action: 'pos_connected',
+        locationId: startingLocation.id,
+        target: ourMerchantId,
+        detail: `pos=square square_location=${chosen.id} pending_bound=${pendingMerchantId ? 'yes' : 'no'}`,
+      });
+      return {
+        ok: true,
+        merchant: merchant.business_name ?? merchantId,
+        locations_connected: 1,
+        bound_location_id: startingLocation.id,
+        bound_square_location_id: chosen.id,
+        bound_square_location_name: chosen.name ?? null,
+        square_locations_available: squareLocations.length,
+        dashboard: `${config.appUrl}/portal`,
+        started_by_location_id: st.locationId ?? null,
+      };
+    }
+
     let n = 0;
-    for (const loc of locations ?? []) {
+    for (const loc of squareLocations) {
       await query(
         `INSERT INTO locations(id, merchant_id, pos_type, pos_location_ref, square_location_id, name, currency)
          VALUES ($1,$2,'square',$3,$3,$4,$5)
@@ -134,7 +220,7 @@ export async function oauthRoutes(app: FastifyInstance) {
       ok: true,
       merchant: merchant.business_name ?? merchantId,
       locations_connected: n,
-      dashboard: `${config.appUrl}/dashboard`,
+      dashboard: `${config.appUrl}/portal`,
       started_by_location_id: st.locationId ?? null,
     };
   });
@@ -208,8 +294,8 @@ export async function oauthRoutes(app: FastifyInstance) {
         // authenticated read on the location's own refs.
         try {
           await getAdapter(posType).listOpenChecks(myRef, accessToken);
-        } catch {
-          throw badRequest('the POS rejected this token; check it and try again');
+        } catch (e) {
+          throw posValidationError(e);
         }
         await storePosCredential({
           merchantId: mine.merchant_id,
@@ -243,13 +329,40 @@ export async function oauthRoutes(app: FastifyInstance) {
         throw badRequest('location_name is required (1-128 characters)');
       }
       const currency = typeof b.currency === 'string' && /^[A-Z]{3}$/.test(b.currency) ? b.currency : 'CAD';
+      const merchantRefTrimmed = (merchantRef as string).trim();
+      const locationRefTrimmed = (locationRef as string).trim();
 
-      const ourMerchantId = await upsertMerchant(posType, (merchantRef as string).trim());
+      // v0.10.5 (C3-6-7c): the founder branch used to upsert the merchant
+      // BEFORE validating, so a bad token left a junk merchant row behind,
+      // and it could answer ok:true with the id of a location row that was
+      // never inserted (the ref already belonged to another merchant).
+      // Validate first, prove the ref is free (or already ours), and only
+      // then create rows.
+      try {
+        await getAdapter(posType).listOpenChecks(locationRefTrimmed, accessToken);
+      } catch (e) {
+        throw posValidationError(e);
+      }
+      const priorMerchant = await query<{ id: string }>(
+        `SELECT id FROM merchants WHERE pos_type = $1 AND external_merchant_ref = $2`,
+        [posType, merchantRefTrimmed],
+      );
+      const priorMerchantId = priorMerchant.rows[0]?.id ?? null;
+      const refOwner = await query<{ merchant_id: string }>(
+        `SELECT merchant_id FROM locations WHERE square_location_id = $1`,
+        [locationRefTrimmed],
+      );
+      if (refOwner.rowCount > 0 && refOwner.rows[0].merchant_id !== priorMerchantId) {
+        throw conflict('location_ref is already connected to a different merchant', 'location_ref_in_use');
+      }
+
+      const ourMerchantId = await upsertMerchant(posType, merchantRefTrimmed);
       // F6-5: the founder branch used to skip BOTH safeguards the portal
       // branch has — no POS validation and no replace guard, so a mistyped
       // (or malicious) token silently overwrote a working credential. Same
       // rules here now: an existing credential needs replace: true, and the
-      // token must answer a live read against the location's own ref first.
+      // token must answer a live read against the location's own ref first
+      // (the read now happens before any row is created — see above).
       const existingCred = await query(
         `SELECT 1 FROM pos_credentials WHERE merchant_id = $1 AND pos_type = $2`,
         [ourMerchantId, posType],
@@ -260,15 +373,10 @@ export async function oauthRoutes(app: FastifyInstance) {
           'credential_exists',
         );
       }
-      try {
-        await getAdapter(posType).listOpenChecks((locationRef as string).trim(), accessToken);
-      } catch {
-        throw badRequest('the POS rejected this token; check it and try again');
-      }
       await storePosCredential({
         merchantId: ourMerchantId,
         posType,
-        externalMerchantRef: (merchantRef as string).trim(),
+        externalMerchantRef: merchantRefTrimmed,
         accessToken,
       });
 
@@ -281,25 +389,25 @@ export async function oauthRoutes(app: FastifyInstance) {
         `INSERT INTO locations(id, merchant_id, pos_type, pos_location_ref, square_location_id, name, currency)
          VALUES ($1,$2,$3,$4,$4,$5,$6)
          ON CONFLICT DO NOTHING`,
-        [locId, ourMerchantId, posType, (locationRef as string).trim(), (locationName as string).trim(), currency],
+        [locId, ourMerchantId, posType, locationRefTrimmed, (locationName as string).trim(), currency],
       );
-      // If the location ref already exists (no unique constraint hit info from
-      // DO NOTHING), fetch the canonical id.
+      // Resolve the canonical row (ours — ownership was proven above).
       const existing = await query<{ id: string }>(
         `SELECT id FROM locations WHERE merchant_id=$1 AND pos_type=$2 AND pos_location_ref=$3`,
-        [ourMerchantId, posType, (locationRef as string).trim()],
+        [ourMerchantId, posType, locationRefTrimmed],
       );
+      const resolvedLocId = existing.rows[0]?.id ?? locId;
       await logAudit({
         actorType: 'staff_token',
         actorId: null,
         role: null,
         ip: req.ip,
         action: 'pos_credential_stored',
-        locationId: existing.rows[0]?.id ?? locId,
+        locationId: resolvedLocId,
         target: ourMerchantId,
         detail: `pos=${posType} replace=${existingCred.rowCount > 0} via=manual-token-founder`,
       });
-      return { ok: true, pos_type: posType, location_id: existing.rows[0]?.id ?? locId };
+      return { ok: true, pos_type: posType, location_id: resolvedLocId };
     },
   );
 

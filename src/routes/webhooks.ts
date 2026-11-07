@@ -102,14 +102,20 @@ async function applyCheckClosed(posType: PosType, checkRef: string): Promise<voi
  * Mark a table PAID + record the 'paid' event — but only when the table
  * has no OTHER open check: a stale closure must never flip a table that
  * has since been re-seated with a new party (F3-5).
+ * v0.10.5 (C3-6-2): the guard used to be a separate read followed by an
+ * unconditional UPDATE — a link-check landing between them still flipped
+ * the table under a live check. The flip is now a single conditional
+ * statement (the reconcile.ts F2-9 shape); the event is written only
+ * when the flip actually lands. By the time this runs, the closing check
+ * itself is COMPLETED, so NOT EXISTS (OPEN) covers "other" checks too.
  */
 async function flipTablePaid(tableId: string, checkId: string): Promise<void> {
-  const other = await query(`SELECT id FROM checks WHERE table_id=$1 AND state='OPEN' AND id <> $2 LIMIT 1`, [
-    tableId,
-    checkId,
-  ]);
-  if (other.rowCount > 0) return;
-  await query(`UPDATE tables SET state='PAID' WHERE id=$1`, [tableId]);
+  const tu = await query(
+    `UPDATE tables SET state='PAID' WHERE id=$1 AND state IN ('SEATED','PAYING')
+     AND NOT EXISTS (SELECT 1 FROM checks WHERE table_id = $1 AND state = 'OPEN')`,
+    [tableId],
+  );
+  if ((tu.rowCount ?? 0) === 0) return;
   await query(`INSERT INTO events(id, table_id, check_id, type) VALUES($1,$2,$3,'paid')`, [
     randomUUID(),
     tableId,

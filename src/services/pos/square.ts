@@ -64,11 +64,15 @@ function mapState(s: unknown): PosCheckState {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapTenders(order: AnyOrder): { id: string; type: string; amountCents: number }[] {
+function mapTenders(order: AnyOrder): { id: string; type: string; amountCents: number; tipCents: number }[] {
   return (order?.tenders ?? []).map((t: any) => ({
     id: String(t?.id ?? ''),
     type: String(t?.type ?? 'tender'),
     amountCents: t?.amount_money?.amount ?? 0,
+    // v0.10.5 (C3-6 Low): Square's tip_money is the tip slice of the
+    // (tip-inclusive) amount_money — surface it so bill-paid displays
+    // can net it out.
+    tipCents: t?.tip_money?.amount ?? 0,
   }));
 }
 
