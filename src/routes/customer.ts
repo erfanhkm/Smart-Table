@@ -33,7 +33,10 @@ function billView(detail: PosCheckDetail, row: any) {
     currency: detail.currency,
     remaining_cents: detail.remainingCents,
     items: detail.items.map((i) => ({ name: i.name, quantity: i.quantity, amount_cents: i.amountCents })),
-    tenders: detail.tenders.map((t) => ({ amount_cents: t.amountCents, type: t.type })),
+    // v0.10.6 (C3-7 Low): tip_cents rides along (additive) — tender amounts
+    // are tip-INCLUSIVE (F2-13) while the bill total is not, and the portal
+    // detail/drawer need the split to render "Paid" figures that add up.
+    tenders: detail.tenders.map((t) => ({ amount_cents: t.amountCents, type: t.type, tip_cents: t.tipCents ?? 0 })),
   };
 }
 

@@ -279,22 +279,27 @@ export async function staffRoutes(app: FastifyInstance) {
   app.get('/api/portal/open-checks-detail', staffOnly, async (req) => {
     const { location_id } = req.query as { location_id?: string };
     const scopedId = scopedLocationId(req, location_id);
+    // v0.10.6 (C3-7-2): every response carries fetched_at (server clock,
+    // ms epoch of the data itself) — the portal's "as of" label used to
+    // show the RENDER time, so minutes-old cached data read as current.
     const hit = openDetailCache.get(scopedId);
-    if (hit && Date.now() - hit.at < 4_000) return { orders: hit.orders };
+    if (hit && Date.now() - hit.at < 4_000) return { orders: hit.orders, fetched_at: hit.at };
     const inflight = openDetailInflight.get(scopedId);
     if (inflight) {
       // A refresh is already running: serve the last known result rather
       // than piling another fan-out onto the POS; only block when there is
       // nothing cached at all yet.
-      if (hit) return { orders: hit.orders, stale: true };
-      return { orders: await inflight };
+      if (hit) return { orders: hit.orders, stale: true, fetched_at: hit.at };
+      const orders = await inflight;
+      return { orders, fetched_at: Date.now() };
     }
     const p = fetchOpenDetail(scopedId);
     openDetailInflight.set(scopedId, p);
     try {
       const orders = await p;
-      openDetailCache.set(scopedId, { at: Date.now(), orders });
-      return { orders };
+      const at = Date.now();
+      openDetailCache.set(scopedId, { at, orders });
+      return { orders, fetched_at: at };
     } finally {
       openDetailInflight.delete(scopedId);
     }

@@ -1,4 +1,4 @@
-/* Smart Table — Restaurant Portal (v0.10.5)
+/* Smart Table — Restaurant Portal (v0.10.6)
  * Served from /portal/app.js with a strict Content-Security-Policy
  * (no inline script). The network layer below has no DOM *rendering*
  * dependencies; it uses sessionStorage only for the auth token. */
@@ -46,11 +46,26 @@ const fmtDur = (secs) => {
 };
 
 const timeAgo = (iso) => {
-  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  // v0.10.6 (C3-7 Low): an unparseable timestamp printed "NaNh ago".
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '—';
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
   if (s < 60) return s + 's ago';
   if (s < 3600) return Math.floor(s / 60) + 'm ago';
   return Math.floor(s / 3600) + 'h ago';
 };
+
+/* v0.10.6 (C3-7 Low): POS tender amounts INCLUDE the tip (F2-13), while
+   the bill total does not — rendering the raw amount made the panel read
+   "Paid −$115, Remaining $0" on a $100 check. Render the bill portion
+   and name the tip slice in the label. */
+function tenderLine(x, currency) {
+  const amt = num(x.amount_cents);
+  const tip = num(x.tip_cents);
+  const net = tip > 0 && tip < amt ? amt - tip : amt;
+  const tipNote = tip > 0 && tip < amt ? ` (incl. ${money(tip, currency)} tip)` : '';
+  return `<div class="bill-line"><span>Paid (${esc(x.type || 'tender')})${tipNote}</span><span class="neg">−${money(net, currency)}</span></div>`;
+}
 
 /* ------------------------------------------------------------------ */
 /* session (token + identity persist across reloads)                     */
@@ -60,24 +75,30 @@ let token = null;
 let portalUser = null; // { email, role, location_id }
 // v0.9.0: the location's service tier — 'starter' hides the Devices view
 // (printed QR codes only, no STT-101 hardware on that tier). Loaded from
-// the billing state on entering the app; 'base' until known.
-let portalTier = 'base';
+// the billing state on entering the app.
+// v0.10.6 (C3-7 Low): null until loaded, and the Devices nav fails
+// CLOSED while unknown — the old 'base' default meant a failed tier
+// fetch at login left Starter users looking at the Devices nav and its
+// server errors for the whole session.
+let portalTier = null;
 
 function applyTierNav() {
   const btn = document.querySelector('.nav-item[data-view="devices"]');
-  if (btn) btn.style.display = portalTier === 'starter' ? 'none' : '';
+  if (btn) btn.style.display = portalTier === 'base' ? '' : 'none';
 }
 
 async function loadPortalTier() {
   try {
     const res = await request('/api/portal/billing');
-    if (!res.ok) return;
+    if (!res.ok) return false;
     const data = await readJson(res);
     if (data && (data.tier === 'starter' || data.tier === 'base')) {
       portalTier = data.tier;
       applyTierNav();
+      return true;
     }
-  } catch { /* tier stays 'base'; the billing view itself shows the truth */ }
+  } catch { /* tier stays unknown; Devices stays hidden until it loads */ }
+  return false;
 }
 
 function saveSession() {
@@ -122,12 +143,18 @@ async function request(path, options = {}) {
   // render forever. Money POSTs deliberately keep NO timeout — an aborted
   // money request is an unknown outcome and the idempotency-key discipline
   // (not a client timeout) is what makes retries safe there.
-  let timer = null;
+  // v0.10.6 (C3-7-2): the deadline used to end when the response HEADERS
+  // arrived — a body that stalled after headers hung the render forever
+  // (and, renders being serialized, every later render too). The deadline
+  // now stays armed until the body is consumed: readJson() clears it, and
+  // callers that read the body another way (res.blob()) clear it via
+  // clearResponseDeadline(res).
+  let deadline = null;
   let signal;
   if (method === 'GET' && typeof AbortController !== 'undefined') {
     const ctl = new AbortController();
     signal = ctl.signal;
-    timer = setTimeout(() => ctl.abort(), 15000);
+    deadline = { ctl, timer: setTimeout(() => ctl.abort(), 15000) };
   }
   try {
     res = await fetch(CONFIG.API_BASE + path, {
@@ -137,10 +164,10 @@ async function request(path, options = {}) {
       signal,
     });
   } catch (e) {
+    if (deadline) clearTimeout(deadline.timer);
     throw new Error('Network error — is the server reachable?');
-  } finally {
-    if (timer) clearTimeout(timer);
   }
+  if (deadline) res.__stDeadline = deadline;
   if (res.status === 429) {
     const ra = parseInt(res.headers.get('retry-after') || '', 10);
     if (Number.isFinite(ra) && ra > 0) {
@@ -154,12 +181,24 @@ async function request(path, options = {}) {
   return res;
 }
 
-async function readJson(res) {
-  const ct = res.headers.get('content-type') || '';
-  if (ct.includes('application/json')) {
-    try { return await res.json(); } catch { return null; }
+function clearResponseDeadline(res) {
+  const d = res && res.__stDeadline;
+  if (d) {
+    clearTimeout(d.timer);
+    res.__stDeadline = null;
   }
-  return null;
+}
+
+async function readJson(res) {
+  try {
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      try { return await res.json(); } catch { return null; }
+    }
+    return null;
+  } finally {
+    clearResponseDeadline(res);
+  }
 }
 
 const PortalAPI = {
@@ -179,8 +218,16 @@ const PortalAPI = {
     const res = await request(
       `/api/dashboard/export.xlsx?location_id=${encodeURIComponent(CONFIG.locationId)}&days=${encodeURIComponent(days || 7)}`,
     );
-    if (!res.ok) throw new Error('Could not export the report.');
-    return res.blob();
+    if (!res.ok) {
+      clearResponseDeadline(res);
+      throw new Error('Could not export the report.');
+    }
+    // The GET deadline stays armed through the blob read (C3-7-2).
+    try {
+      return await res.blob();
+    } finally {
+      clearResponseDeadline(res);
+    }
   },
   async getTables() {
     const res = await request(`/api/tables?location_id=${encodeURIComponent(CONFIG.locationId)}`);
@@ -214,7 +261,13 @@ const PortalAPI = {
       throw err;
     }
     const data = await readJson(res);
-    return (data && data.orders) || [];
+    // v0.10.6 (C3-7-2): carry the server's fetch time + stale flag
+    // through — the "as of" label must describe the DATA, not the render.
+    return {
+      orders: (data && data.orders) || [],
+      fetchedAt: data && typeof data.fetched_at === 'number' ? data.fetched_at : null,
+      stale: !!(data && data.stale),
+    };
   },
   async getCheckPayments(checkRef) {
     const res = await request(`/api/portal/checks/${encodeURIComponent(checkRef)}/payments`);
@@ -274,10 +327,16 @@ const PortalAPI = {
     }
     return data;
   },
-  async linkCheck(tableId, squareOrderId) {
+  async linkCheck(tableId, externalCheckId) {
     const res = await request(`/api/tables/${encodeURIComponent(tableId)}/link-check`, {
       method: 'POST',
-      body: { square_order_id: squareOrderId },
+      // v0.10.6 (C3-7-3): the server requires external_check_id for
+      // non-Square POS (square_order_id is Square-only legacy) — sending
+      // only the legacy field made linking impossible for Clover /
+      // Shopify / Helcim locations, which could list open checks but
+      // never link one. external_check_id is accepted for every POS,
+      // Square included.
+      body: { external_check_id: externalCheckId },
     });
     const data = await readJson(res);
     if (!res.ok) throw new Error((data && data.error) || 'Could not link the check.');
@@ -286,10 +345,37 @@ const PortalAPI = {
   async getQrBlob(tableId) {
     const headers = {};
     if (token) headers['Authorization'] = 'Bearer ' + token;
-    const res = await fetch(CONFIG.API_BASE + `/api/tables/${encodeURIComponent(tableId)}/qr`, { headers });
-    if (res.status === 401) { handleSessionExpired(); throw new AuthExpired(); }
-    if (!res.ok) throw new Error('Could not load the QR code.');
-    return res.blob();
+    // v0.10.6 (C3-7-2): this fetch had NO timeout at all — a hung QR
+    // read left the print window spinning forever. Same 15s deadline as
+    // request(), held through the blob read.
+    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), 15000) : null;
+    let res;
+    try {
+      res = await fetch(CONFIG.API_BASE + `/api/tables/${encodeURIComponent(tableId)}/qr`, {
+        headers,
+        signal: ctl ? ctl.signal : undefined,
+      });
+    } catch {
+      if (timer) clearTimeout(timer);
+      throw new Error('Could not load the QR code.');
+    }
+    if (res.status === 401) {
+      if (timer) clearTimeout(timer);
+      handleSessionExpired();
+      throw new AuthExpired();
+    }
+    if (!res.ok) {
+      if (timer) clearTimeout(timer);
+      throw new Error('Could not load the QR code.');
+    }
+    try {
+      return await res.blob();
+    } catch {
+      throw new Error('Could not load the QR code.');
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   },
   async getLocations() {
     const res = await request('/api/locations');
@@ -393,7 +479,15 @@ async function doLogin(email, password) {
     return;
   }
   token = data.token;
-  portalUser = { email: data.user.email, role: data.user.role, location_id: data.user.location_id };
+  portalUser = {
+    email: data.user.email,
+    role: data.user.role,
+    location_id: data.user.location_id,
+    // v0.10.6 (C3-6-5 remainder): the backend has flagged provisioned
+    // owners on their one-time temporary password since v0.10.5 — the
+    // portal now gates on the flag (see enterApp).
+    must_change_password: !!data.user.must_change_password,
+  };
   // F7-L3: don't leave the typed password sitting in the (hidden) login
   // form for the whole session.
   const pwField = $('login-password');
@@ -423,7 +517,7 @@ function resetUi() {
   drawerTable = null;
   drawerCheckId = null;
   orderDetailCheckId = null;
-  portalTier = 'base';
+  portalTier = null;
   applyTierNav();
   clearCashAttempts();
   clearRefundAttempts();
@@ -440,6 +534,7 @@ function resetUi() {
   closeDrawer();
   closeModal('modal-table');
   closeModal('modal-invite');
+  closeModal('modal-password');
   const pw = $('login-password');
   if (pw) pw.value = '';
   setActiveNav('overview');
@@ -458,8 +553,61 @@ function enterApp() {
   clearLoginError();
   $('user-email').textContent = portalUser.email;
   showApp();
+  applyTierNav();
   loadPortalTier();
+  // v0.10.6 (C3-6-5 remainder): a provisioned owner still on the
+  // temporary password is gated into the change-password flow BEFORE any
+  // normal portal use — the modal has no dismiss path (Escape skips it,
+  // there is no close button); the only exits are a successful change or
+  // signing out. While it is open, anyOverlayOpen() also pauses polling.
+  if (portalUser.must_change_password) {
+    openModal('modal-password');
+    return;
+  }
   showView('overview');
+}
+
+/* Forced password change (C3-6-5 remainder): posts to the v0.10.5
+   /api/portal/change-password route, which verifies the current
+   password, enforces the 10+ character rule server-side too, clears the
+   flag and revokes the user's other tokens. */
+let pwChangeBusy = false;
+async function submitPasswordChange(e) {
+  e.preventDefault();
+  if (pwChangeBusy) return;
+  const err = $('pw-error');
+  const showErr = (m) => { err.textContent = m; err.style.display = 'block'; };
+  err.style.display = 'none';
+  const current = $('pw-current').value;
+  const next = $('pw-new').value;
+  if (!current) { showErr('Enter the temporary password you signed in with.'); return; }
+  if (!next || next.length < 10) { showErr('The new password must be at least 10 characters.'); return; }
+  if (next !== $('pw-confirm').value) { showErr('The new passwords do not match.'); return; }
+  if (next === current) { showErr('The new password must differ from the temporary one.'); return; }
+  pwChangeBusy = true;
+  const btn = $('pw-save');
+  btn.disabled = true;
+  try {
+    const res = await request('/api/portal/change-password', {
+      method: 'POST',
+      body: { current_password: current, new_password: next },
+    });
+    const data = await readJson(res);
+    if (!res.ok) throw new Error((data && data.error) || 'Could not change the password.');
+    portalUser.must_change_password = false;
+    saveSession();
+    $('pw-current').value = '';
+    $('pw-new').value = '';
+    $('pw-confirm').value = '';
+    closeModal('modal-password');
+    showView('overview');
+  } catch (e2) {
+    if (e2 instanceof AuthExpired) return;
+    showErr(e2.message || 'Could not change the password.');
+  } finally {
+    pwChangeBusy = false;
+    btn.disabled = false;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -571,7 +719,8 @@ document.addEventListener('keydown', (e) => {
     if ($('table-drawer').classList.contains('open')) closeDrawer();
     else {
       const m = document.querySelector('.modal.show');
-      if (m) closeModal(m.id);
+      // The forced password-change modal is NOT dismissible (C3-6-5).
+      if (m && m.id !== 'modal-password') closeModal(m.id);
     }
     return;
   }
@@ -648,8 +797,13 @@ async function renderOverview() {
   // result text and reset the table-count input while the owner typed.
   // Its own actions refresh it explicitly.
   if (!onboardingLoaded) {
-    onboardingLoaded = true;
-    loadOnboarding().catch(() => { /* wizard is best-effort; the overview must still render */ });
+    // v0.10.6 (C3-7 Low): the once-flag used to be set BEFORE the load,
+    // so one transient failure at login hid the wizard for the whole
+    // session. It is set only on a successful load now — a failure is
+    // retried on the next poll.
+    loadOnboarding()
+      .then((ok) => { if (ok) onboardingLoaded = true; })
+      .catch(() => { /* wizard is best-effort; retried on the next poll */ });
   }
   const oRes = await PortalAPI.getOverview();
   const tables = oRes.tables || [];
@@ -703,14 +857,14 @@ let onboardingLoaded = false;
 
 async function loadOnboarding() {
   const card = $('onboarding-card');
-  if (!card) return;
+  if (!card) return true;
   let s;
   try {
     const res = await request('/api/portal/onboarding');
     s = await readJson(res);
     if (!res.ok) throw new Error('bad status');
-  } catch { card.style.display = 'none'; return; }
-  if (!s || s.dismissed) { card.style.display = 'none'; return; }
+  } catch { card.style.display = 'none'; return false; }
+  if (!s || s.dismissed) { card.style.display = 'none'; return true; }
   card.style.display = '';
   const steps = s.steps || {};
   const pos = steps.pos_connected || {};
@@ -734,7 +888,8 @@ async function loadOnboarding() {
       <input id="ob-table-count" type="number" min="1" max="50" value="10" aria-label="Number of tables" style="width:70px;padding:6px;border:1px solid var(--line);border-radius:8px">
       <button class="btn btn-sm" id="ob-add-tables" ${onboardingBusy ? 'disabled' : ''}>Add tables</button>
       <button class="btn btn-sm" id="ob-goto-tables">Open Floor &amp; Tables</button>
-    </div>`;
+    </div>
+    <div id="ob-tables-result" style="font-size:.85rem;margin-top:6px"></div>`;
   $('onboarding-steps').innerHTML =
     row(pos.done, '1. Connect your POS',
       pos.done ? `Connected (${esc(pos.pos_type || 'POS')}) — Smart Table reads your checks and menu from it.`
@@ -797,11 +952,17 @@ async function loadOnboarding() {
       if (!res.ok) throw new Error((data && data.error) || 'Could not add tables.');
       await loadOnboarding();
       await renderOverview();
-    } catch { /* wizard stays as-is; the owner can retry */ }
+    } catch (e) {
+      // v0.10.6 (C3-7 Low): table-creation errors used to be swallowed —
+      // a rate limit or the table cap looked like "nothing happened".
+      const out = $('ob-tables-result');
+      if (out) out.textContent = e.message || 'Could not add tables.';
+    }
     finally { onboardingBusy = false; }
   };
   const gotoTables = $('ob-goto-tables');
   if (gotoTables) gotoTables.onclick = () => showView('tables');
+  return true;
 }
 
 function renderCalls(calls) {
@@ -880,8 +1041,8 @@ async function getLiveOrders() {
   // I-1: prefer the one-request aggregate; fall back to the per-table
   // fan-out only if the aggregate route itself fails.
   try {
-    const orders = await PortalAPI.getOpenChecksDetail();
-    return { orders, waiter_calls: oRes.waiter_calls || [] };
+    const agg = await PortalAPI.getOpenChecksDetail();
+    return { orders: agg.orders, waiter_calls: oRes.waiter_calls || [], fetchedAt: agg.fetchedAt, stale: agg.stale };
   } catch (e) {
     // F7-2: NEVER fan out on a throttle or transient server failure —
     // multiplying requests per table is exactly what turns a 429 into an
@@ -898,7 +1059,9 @@ async function getLiveOrders() {
         table_name: t.name,
         id: t.open_order_id,
         total: check.total_cents || 0,
-        paid: (check.tenders || []).reduce((s, x) => s + (x.amount_cents || 0), 0),
+        // Tenders are tip-inclusive (F2-13) — paid-toward-the-bill nets
+        // the tips out, same as the aggregate route (v0.10.5).
+        paid: (check.tenders || []).reduce((s, x) => s + (x.amount_cents || 0) - (x.tip_cents || 0), 0),
         remaining: check.remaining_cents || 0,
         currency: check.currency || 'CAD',
         error: false,
@@ -909,7 +1072,7 @@ async function getLiveOrders() {
       return { table_id: t.id, table_name: t.name, id: t.open_order_id, error: true };
     }
   });
-  return { orders, waiter_calls: oRes.waiter_calls || [] };
+  return { orders, waiter_calls: oRes.waiter_calls || [], fetchedAt: Date.now(), stale: false };
 }
 
 function renderLiveOrders() {
@@ -919,16 +1082,36 @@ function renderLiveOrders() {
 /* F7-3: the detail panel + its payments list are sequence-guarded — a
    slow load for table A must never land after the staff member has
    already clicked table B. */
+/* v0.10.6 (C3-7-1): list and detail use SEPARATE counters — they used to
+   share orderSeq, so every list render silently cancelled an in-flight
+   detail render (and a View click dropped the list update). */
 let orderSeq = 0;
+let detailSeq = 0;
 let orderDetailCheckId = null;
+
+/* v0.10.6 (C3-7-1): never auto-refresh the detail panel under the staff
+   member's cursor or keyboard focus — the refresh re-created the action
+   buttons every 5s and clicks landed on dead elements. */
+function detailPanelBusy() {
+  const box = $('order-detail');
+  if (!box) return false;
+  if (box.matches(':hover')) return true;
+  const ae = document.activeElement;
+  return !!(ae && box.contains(ae));
+}
 
 async function renderLiveOrdersInner() {
   const seq = ++orderSeq;
-  const { orders } = await getLiveOrders();
+  const { orders, fetchedAt, stale } = await getLiveOrders();
   if (seq !== orderSeq) return;
   const withCheck = orders.filter((o) => !o.error);
   const failed = orders.filter((o) => o.error);
-  $('orders-updated').textContent = 'as of ' + new Date().toLocaleTimeString();
+  // v0.10.6 (C3-7-2): the label shows when the server FETCHED the data
+  // (fetched_at), not when this render happened, and says so when the
+  // server flagged the payload stale.
+  $('orders-updated').textContent =
+    'as of ' + (fetchedAt ? new Date(fetchedAt) : new Date()).toLocaleTimeString() +
+    (stale ? ' · may be out of date — refreshing' : '');
 
   const html =
     (withCheck.length
@@ -960,15 +1143,16 @@ async function renderLiveOrdersInner() {
   }
   // F7-L9: keep an open detail panel fresh too — its remaining balance
   // and refund limits used to sit stale for minutes while the list
-  // updated around it. Skipped while a money action is in flight.
-  if (orderDetailCheckId && !refundBusy && !cashBusy) {
+  // updated around it. Skipped while a money action is in flight, and
+  // (C3-7-1) while the staff member is interacting with the panel.
+  if (orderDetailCheckId && !refundBusy && !cashBusy && !detailPanelBusy()) {
     const t = tablesCache.find((x) => x.checkId === orderDetailCheckId);
     if (t) renderOrderDetail(t.id);
   }
 }
 
 async function renderOrderDetail(tableId) {
-  const seq = ++orderSeq;
+  const seq = ++detailSeq;
   const box = $('order-detail');
   const t = tablesCache.find((x) => x.id === tableId);
   if (!t || !t.checkId) {
@@ -976,25 +1160,34 @@ async function renderOrderDetail(tableId) {
     box.innerHTML = '<p class="empty">No open check on this table.</p>';
     return;
   }
+  // v0.10.6 (C3-7-1): stale-while-revalidate — when the panel already
+  // shows THIS check, keep its content (and its buttons) on screen while
+  // the refresh is in flight; only a different check blanks to
+  // "Loading…". The old code blanked on EVERY refresh, so on a slow POS
+  // the detail never completed and the buttons vanished every 5s.
+  const sameCheck = orderDetailCheckId === t.checkId;
   orderDetailCheckId = t.checkId;
-  box.innerHTML = '<p class="empty">Loading…</p>';
+  if (!sameCheck) box.innerHTML = '<p class="empty">Loading…</p>';
   let check;
   try {
     check = await PortalAPI.getCheckDetail(t.checkId);
   } catch (e) {
     if (e instanceof AuthExpired) return;
-    if (seq !== orderSeq) return;
-    box.innerHTML = '<p class="empty">Could not load the check. <button class="btn btn-sm" data-order="' + esc(tableId) + '">Retry</button></p>';
+    if (seq !== detailSeq) return;
+    // A failed refresh of the SAME check keeps the last good panel.
+    if (!sameCheck) {
+      box.innerHTML = '<p class="empty">Could not load the check. <button class="btn btn-sm" data-order="' + esc(tableId) + '">Retry</button></p>';
+    }
     return;
   }
-  if (seq !== orderSeq) return;
+  if (seq !== detailSeq) return;
   const items = check.items || [];
   const tenders = check.tenders || [];
   box.innerHTML = `
     <div style="margin-bottom:10px"><strong>${esc(t.name)}</strong>
       <span class="chip ${esc((check.state || '').toLowerCase())}" style="margin-left:8px">${esc(check.state || '')}</span></div>
     ${items.map((i) => `<div class="bill-line"><span>${esc(i.quantity)}× ${esc(i.name)}</span><span>${money(i.amount_cents, check.currency)}</span></div>`).join('') || '<p class="empty">No items.</p>'}
-    ${tenders.map((x) => `<div class="bill-line"><span>Paid (${esc(x.type || 'tender')})</span><span class="neg">−${money(x.amount_cents, check.currency)}</span></div>`).join('')}
+    ${tenders.map((x) => tenderLine(x, check.currency)).join('')}
     <div class="bill-line total"><span>Remaining</span><span>${money(check.remaining_cents, check.currency)}</span></div>
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-sm btn-primary" data-cash="${esc(t.id)}">Record Cash</button>
@@ -1015,12 +1208,12 @@ async function loadOrderPayments(checkRef, seq, tableName) {
   try {
     data = await PortalAPI.getCheckPayments(checkRef);
   } catch {
-    if (seq === orderSeq) box.innerHTML = '';
+    if (seq === detailSeq) box.innerHTML = '';
     return;
   }
   // F7-3: a late payments response for a check the panel no longer shows
   // must not land under another table's header.
-  if (seq !== orderSeq) return;
+  if (seq !== detailSeq) return;
   const rows = (data.payments || []).filter((p) => p.status === 'AUTHORIZED' || p.status === 'COMPLETED');
   if (!rows.length) {
     box.innerHTML = '';
@@ -1252,8 +1445,14 @@ async function recordCashPayment() {
       await renderView(currentView);
       return;
     }
-    if (res.status === 400 || res.status === 402 ||
+    if (res.status === 400 || res.status === 402 || res.status === 403 || res.status === 404 || res.status === 429 ||
         (res.status === 409 && (res.code === 'payment_failed' || res.code === 'payment_cancelled'))) {
+      // v0.10.6 (C3-7 Low): 403/404/429 join the confirmed-rejection set —
+      // role refusals, unknown checks and rate-limit rejections all mean
+      // the request was refused BEFORE processing (the refund flow
+      // already classified them this way). The old code kept the attempt
+      // key for 24h and told staff the cash "cannot be recorded twice"
+      // about a payment that was never recorded.
       delete attempts[sig]; // confirmed: nothing was recorded
       saveCashAttempts(attempts);
       alert(res.error || 'Payment rejected.');
@@ -1318,17 +1517,23 @@ async function openTableDrawer(tableId) {
   } else {
     const items = detail.items || [];
     const tenders = detail.tenders || [];
+    // v0.10.6 (C3-7 Low): tender-blind POS (Shopify/Helcim) settle the
+    // ENTIRE check on any recorded payment and the server rejects
+    // partials — prefill the amount with the remaining balance and lock
+    // it, instead of letting staff type a partial the server refuses.
+    const tenderBlind = detail.pos_type === 'shopify' || detail.pos_type === 'helcim';
     $('drawer-body').innerHTML = `
       <div class="bill-line total" style="border:0;margin:0;padding-top:0"><span>Check total</span><span>${money(detail.total_cents, detail.currency)}</span></div>
       ${items.map((i) => `<div class="bill-line"><span>${esc(i.quantity)}× ${esc(i.name)}</span><span>${money(i.amount_cents, detail.currency)}</span></div>`).join('')}
-      ${tenders.map((x) => `<div class="bill-line"><span>Paid (${esc(x.type || 'tender')})</span><span class="neg">−${money(x.amount_cents, detail.currency)}</span></div>`).join('')}
+      ${tenders.map((x) => tenderLine(x, detail.currency)).join('')}
       <div class="bill-line total"><span>Remaining</span><span>${money(detail.remaining_cents, detail.currency)}</span></div>
       <div class="cash-box">
         <label for="cash-amount">Record cash payment</label>
         <div class="cash-row">
-          <input id="cash-amount" inputmode="decimal" placeholder="0.00" autocomplete="off">
+          <input id="cash-amount" inputmode="decimal" placeholder="0.00" autocomplete="off"${tenderBlind ? ` value="${(num(detail.remaining_cents) / 100).toFixed(2)}" readonly` : ''}>
           <button class="btn btn-primary" id="btn-record-cash">Record</button>
         </div>
+        ${tenderBlind ? `<p class="hint">On ${detail.pos_type === 'shopify' ? 'Shopify' : 'Helcim'}, recording a payment settles the whole check in the POS — the amount is locked to the remaining balance.</p>` : ''}
       </div>
       <div style="margin-top:12px"><button class="btn btn-sm" id="drawer-link">Link a different check</button></div>`;
     $('btn-record-cash').addEventListener('click', recordCashPayment);
@@ -1350,6 +1555,7 @@ function wireDrawerFooter(table) {
 
 let linkBusy = false;
 async function showLinkCheck(table) {
+  const seqAtEntry = drawerSeq;
   let orders;
   try {
     orders = await PortalAPI.getOpenOrders();
@@ -1357,6 +1563,10 @@ async function showLinkCheck(table) {
     if (!(e instanceof AuthExpired)) alert(e.message);
     return;
   }
+  // v0.10.6 (C3-7-3): the drawer may have moved to another table while
+  // the open-checks fetch was in flight (up to 15s) — never overwrite a
+  // different table's drawer with this table's link form.
+  if (seqAtEntry !== drawerSeq || drawerTable !== table) return;
   if (!orders.length) { alert('No open orders in your POS right now.'); return; }
   $('drawer-body').innerHTML = `
     <h4 style="margin-bottom:10px">Link a check to ${esc(table.name)}</h4>
@@ -1402,7 +1612,12 @@ async function confirmFreeTable(table) {
     if (e.code !== 'open_check_exists') { alert(e.message); return; }
     if (!confirm(
       `${table.name} still has an open check.\n\n` +
-      'Freeing the table anyway clears that check\'s group-pay claims; the check itself stays open and must still be settled.\n\n' +
+      // v0.10.6 (C3-7 Low): copy corrected to the v0.10.5 server
+      // behaviour — a forced free ABANDONS the open check (C3-6-2): it
+      // leaves the table and can no longer be paid from the guest QR
+      // page. The old text claimed the check "stays open and must still
+      // be settled", which has not been true since v0.10.5.
+      'Freeing the table anyway abandons that check: it disappears from this table and can no longer be paid from the guest QR page. Only free the table if the party has settled another way, or the check was opened by mistake — staff can deliberately re-link an abandoned check later.\n\n' +
       'Free the table anyway?',
     )) return;
     try {
@@ -1491,7 +1706,10 @@ async function renderReports() {
 
   // Revenue by table (idea 5): floor heatmap + ranking. Intensity scales to
   // the best table of the range; zero-revenue tables stay pale.
-  const tbl = Array.isArray(met.tables) ? met.tables : [];
+  // v0.10.6 (C3-7 Low): revenue_cents can arrive as a STRING (SQL SUM) —
+  // the old strict `x.revenue_cents === maxRev` comparison against a
+  // number then never matched and the top-table star never showed.
+  const tbl = (Array.isArray(met.tables) ? met.tables : []).map((x) => ({ ...x, revenue_cents: num(x.revenue_cents) }));
   const maxRev = Math.max(0, ...tbl.map((x) => x.revenue_cents));
   $('report-table-heat').innerHTML = tbl.length
     ? tbl.map((x) => {
@@ -1525,11 +1743,15 @@ function renderStaff() {
     <td><span class="chip ${s.status === 'Active' ? 'seated' : 'paid'}">${esc(s.status)}</span></td>
     <td></td></tr>`).join('');
 
+  // Verified against the backend (C3-7 Low): dashboard reads are
+  // staffOnly (any portal role, waiter included); table free + cash
+  // recording are owner/manager (requirePortalRole). "View reports" used
+  // to deny waiters here while the API lets them read — corrected.
   const matrix = [
     ['View tables', true, true, true],
     ['Free tables', true, true, false],
     ['Record cash', true, true, false],
-    ['View reports', true, true, false],
+    ['View reports', true, true, true],
     ['Manage staff', true, false, false],
   ];
   const mark = (v) => (v ? '<span class="status-ok">✓ Yes</span>' : '<span class="status-bad">✗ No</span>');
@@ -1546,6 +1768,19 @@ function renderStaff() {
    as online when it was seen within the last 90 seconds. */
 async function renderDevices() {
   const grid = $('devices-grid');
+  // v0.10.6 (C3-7 Low): tier unknown (its fetch failed) — retry it here
+  // instead of rendering the Base device UI for a possible Starter.
+  if (portalTier === null) {
+    grid.innerHTML = '<div class="card"><p>Loading devices…</p></div>';
+    await loadPortalTier();
+    if (portalTier === null) {
+      grid.innerHTML = '<div class="card"><p class="status-bad">Could not load your plan information.</p><p><button class="btn" id="devices-retry" type="button">Retry</button></p></div>';
+      const rb = $('devices-retry');
+      if (rb) rb.addEventListener('click', () => renderDevices());
+      return;
+    }
+    return renderDevices();
+  }
   // v0.9.0: Starter is printed QR codes only — no devices exist to manage.
   if (portalTier === 'starter') {
     grid.innerHTML = '<div class="card"><h4>Devices</h4><p>The Starter plan uses printed QR codes on each table — there is no table device to pair or manage. Switch to the Base plan in Billing to add STT-101 devices (receipt printing + waiter-call button).</p></div>';
@@ -1566,6 +1801,10 @@ async function renderDevices() {
     // misleading "every table already has a paired device" message).
     const devData = await readJson(devRes);
     const tabData = await readJson(tabRes);
+    // v0.10.6 (C3-7 Low): "online" is judged against the SERVER's clock
+    // (devData.now) — comparing server timestamps to the shared tablet's
+    // clock flipped healthy devices to "Offline" under clock skew.
+    const serverNow = devData && devData.now ? new Date(devData.now).getTime() : Date.now();
     const devices = (devData && devData.devices) || [];
     const tables = (tabData && (Array.isArray(tabData) ? tabData : tabData.tables)) || [];
     const paired = new Set(devices.map((d) => d.table_id));
@@ -1581,7 +1820,7 @@ async function renderDevices() {
     </div>`;
     html += devices.map((d) => {
       const seen = d.last_seen_at ? new Date(d.last_seen_at) : null;
-      const online = seen && Date.now() - seen.getTime() < 90_000;
+      const online = seen && serverNow - seen.getTime() < 90_000;
       return `<div class="card">
       <h4>${esc(d.table_name)}</h4>
       <div class="kv"><span class="k">Status</span><span class="${online ? 'status-ok' : 'status-bad'}">${online ? 'Online' : 'Offline'}</span></div>
@@ -1606,6 +1845,18 @@ async function renderDevices() {
           const data = await readJson(res);
           if (!res.ok) throw new Error((data && data.error) || 'Could not generate a code.');
           $('pair-result').innerHTML = `<p>Pairing code: <strong style="font-size:1.35em;letter-spacing:.18em">${esc(data.code)}</strong><br>Enter it on the device before ${esc(new Date(data.expires_at).toLocaleTimeString())}.</p>`;
+          // v0.10.6 (C3-7 Low): don't leave a live pairing code on a
+          // shared tablet screen for its full 10-minute life — hide the
+          // display after 60s (the code itself stays valid until expiry
+          // or first use). Guarded by the shown code so a newer code's
+          // display is never wiped by an older timer.
+          const pr = $('pair-result');
+          const shownCode = String(data.code);
+          setTimeout(() => {
+            if (pr && pr.isConnected && pr.textContent.includes(shownCode)) {
+              pr.innerHTML = '<p class="hint">Pairing code hidden — generate a new one if the device has not paired yet.</p>';
+            }
+          }, 60000);
         } catch (e) {
           $('pair-result').innerHTML = `<p class="status-bad">${esc(e.message || e)}</p>`;
         } finally {
@@ -1648,15 +1899,40 @@ async function renderDevices() {
 let billingCardInstance = null;
 let billingBusy = false;
 
+/* v0.10.6 (C3-7 Low): the old loader resolved when the script TAG
+   existed, not when it had LOADED — a quick second call raced ahead of
+   the Square SDK download and failed on window.Square. Loads are now
+   promise-cached per src and resolve only on the load event. */
+const scriptLoads = new Map();
 function loadScriptOnce(src) {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) return resolve();
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = resolve;
-    s.onerror = () => reject(new Error('Could not load the card form.'));
-    document.head.appendChild(s);
+  if (scriptLoads.has(src)) return scriptLoads.get(src);
+  const p = new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing && existing.dataset.stLoaded === '1') return resolve();
+    const s = existing || document.createElement('script');
+    if (!existing) {
+      s.src = src;
+      document.head.appendChild(s);
+    }
+    s.onload = () => { s.dataset.stLoaded = '1'; resolve(); };
+    s.onerror = () => {
+      scriptLoads.delete(src);
+      reject(new Error('Could not load the card form.'));
+    };
   });
+  scriptLoads.set(src, p);
+  return p;
+}
+
+/* v0.10.6 (C3-7-4): subscription_paid_through is a DATE — render it as a
+   plain local date, never a raw timestamp string. */
+function fmtPaidThrough(v) {
+  if (!v) return '';
+  const s = String(v);
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  const d = new Date(m ? m[1] + 'T12:00:00' : s);
+  if (Number.isNaN(d.getTime())) return s;
+  return d.toLocaleDateString('en-CA', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 async function renderBilling() {
@@ -1706,10 +1982,10 @@ async function renderBilling() {
   const isCommission = st.effective_plan === 'commission';
   const price = money(st.subscription_price_cents, cur);
   const pendingNote = st.pending_plan === 'commission' && st.subscription_paid_through
-    ? `<p class="stat-label" style="margin-top:8px">Switching to Commission after ${esc(st.subscription_paid_through)} — your subscription is paid through then, so you never pay twice for the same days.</p>`
+    ? `<p class="stat-label" style="margin-top:8px">Switching to Commission after ${esc(fmtPaidThrough(st.subscription_paid_through))} — your subscription is paid through then, so you never pay twice for the same days.</p>`
     : '';
   const subStatus = st.plan === 'subscription'
-    ? `<div class="stat-label">Status: ${esc(st.subscription_status || '—')}${st.subscription_paid_through ? ` · paid through ${esc(st.subscription_paid_through)}` : ''}</div>`
+    ? `<div class="stat-label">Status: ${esc(st.subscription_status || '—')}${st.subscription_paid_through ? ` · paid through ${esc(fmtPaidThrough(st.subscription_paid_through))}` : ''}</div>`
     : '';
 
   box.innerHTML = `
@@ -1721,6 +1997,7 @@ async function renderBilling() {
       <div style="margin-top:12px">
         <button class="btn" id="billing-tier-switch">Switch to ${otherTierName}</button>
       </div>
+      ${st.plan === 'subscription' ? '<p class="stat-label" style="margin-top:8px">Your current Square subscription keeps its existing price until it ends or you switch plans — a tier switch sets the price of your NEXT subscription, not this one.</p>' : ''}
     </div>
     <div class="grid grid-2" style="margin-bottom:16px">
       <div class="card" style="${isCommission ? 'outline:2px solid var(--accent)' : ''}">
@@ -1823,9 +2100,21 @@ async function switchBillingPlan(plan, st) {
 async function switchBillingTier(tier, st) {
   if (billingBusy) return;
   const name = tier === 'starter' ? 'Starter' : 'Base';
-  const msg = tier === 'starter'
-    ? 'Switch to the Starter plan? Your tables keep working with printed QR codes, but device pairing and receipt printing turn off, and your pricing becomes $49.99/month or 1% commission.'
-    : 'Switch to the Base plan? Your pricing becomes $99/month or 2% commission, and STT-101 devices (receipt printing + waiter-call button) become available for your tables.';
+  // v0.10.6 (C3-7-4): prices come from the server's tier table (st.tiers,
+  // from TIER_DEFAULTS) — the old confirm hard-coded "$49.99/month or 1%"
+  // and "$99/month or 2%". And when a live Square subscription exists it
+  // KEEPS its current price; say so instead of implying the new price
+  // applies to it immediately.
+  const td = (st.tiers && st.tiers[tier]) || null;
+  const priceTxt = td
+    ? `${money(td.subscription_price_cents, st.currency)}/month or ${td.commission_bps / 100}% commission`
+    : 'that tier\u2019s standard pricing';
+  const keepBit = st.plan === 'subscription'
+    ? '\n\nNote: your current subscription keeps its existing price until it ends or you switch plans.'
+    : '';
+  const msg = (tier === 'starter'
+    ? `Switch to the Starter plan? Your tables keep working with printed QR codes, but device pairing and receipt printing turn off, and your pricing becomes ${priceTxt}.`
+    : `Switch to the Base plan? Your pricing becomes ${priceTxt}, and STT-101 devices (receipt printing + waiter-call button) become available for your tables.`) + keepBit;
   if (!confirm(msg)) return;
   billingBusy = true;
   try {
@@ -1856,7 +2145,19 @@ async function initBillingCardForm() {
     const res = await request('/api/portal/billing/card-config');
     const cfg = await readJson(res);
     if (!res.ok || !cfg) throw new Error('Could not load the card form.');
-    const env = cfg.extra.environment === 'sandbox' ? 'sandbox.' : '';
+    // v0.10.6 (C3-7 Low): a missing `extra` used to surface a raw
+    // TypeError, and a missing environment silently selected the
+    // PRODUCTION SDK (missing env -> '' prefix). Fail closed like the
+    // guest page: no environment, no card form.
+    if (!cfg.extra || !cfg.extra.environment || !cfg.extra.locationId) {
+      throw new Error('Card payments are not available right now.');
+    }
+    const env = cfg.extra.environment === 'sandbox'
+      ? 'sandbox.'
+      : cfg.extra.environment === 'production'
+        ? ''
+        : null;
+    if (env === null) throw new Error('Card payments are not available right now.');
     await loadScriptOnce(`https://${env}web.squarecdn.com/v1/square.js`);
     if (!window.Square) throw new Error('Could not load the secure card form — check your connection and try again.');
     const payments = window.Square.payments(cfg.publishableKey, cfg.extra.locationId);
@@ -2182,6 +2483,9 @@ $('export-excel').addEventListener('click', async () => {
   }
   btn.disabled = false;
 });
+
+$('password-form').addEventListener('submit', submitPasswordChange);
+$('pw-logout').addEventListener('click', doLogout);
 
 $('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();

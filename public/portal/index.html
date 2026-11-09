@@ -262,7 +262,7 @@ select.form-control { width: auto; margin-bottom: 0; }
       <button type="submit" id="login-btn">Sign In</button>
     </form>
     <noscript><p class="login-hint">JavaScript is required to sign in — please enable it and reload this page.</p></noscript>
-    <p class="login-hint">Use your owner credentials. v0.10.5</p>
+    <p class="login-hint">Use your owner credentials. v0.10.6</p>
   </div>
 </div>
 
@@ -278,7 +278,7 @@ select.form-control { width: auto; margin-bottom: 0; }
     <button class="nav-item" data-view="devices" aria-label="Devices" title="Devices"><span class="nav-emoji" aria-hidden="true">📟</span><span class="nav-label">Devices</span></button>
     <button class="nav-item" data-view="billing" aria-label="Billing" title="Billing"><span class="nav-emoji" aria-hidden="true">💳</span><span class="nav-label">Billing</span></button>
     <button class="nav-item" data-view="settings" aria-label="Settings" title="Settings"><span class="nav-emoji" aria-hidden="true">⚙️</span><span class="nav-label">Settings</span></button>
-    <div class="sidebar-footer">Smart Table · v0.10.5<br>Hardware: STT-101 · device API live</div>
+    <div class="sidebar-footer">Smart Table · v0.10.6<br>Hardware: STT-101 · device API live</div>
   </nav>
 
   <div class="main">
@@ -444,6 +444,28 @@ select.form-control { width: auto; margin-bottom: 0; }
   </div>
 </div>
 
+<!-- Forced password change (C3-6-5): shown with no dismiss path when the
+     login flags must_change_password; app.js wires #password-form. -->
+<div class="modal" id="modal-password" role="dialog" aria-modal="true" aria-labelledby="modal-password-title" inert>
+  <div class="modal-card">
+    <h3 id="modal-password-title">Set a new password</h3>
+    <p class="hint">Your account was created with a temporary password. Choose your own password to continue — this is required before you can use the portal.</p>
+    <form id="password-form">
+      <label class="f-label" for="pw-current">Temporary (current) password</label>
+      <input class="form-control" id="pw-current" type="password" autocomplete="current-password">
+      <label class="f-label" for="pw-new">New password (at least 10 characters)</label>
+      <input class="form-control" id="pw-new" type="password" autocomplete="new-password">
+      <label class="f-label" for="pw-confirm">Repeat new password</label>
+      <input class="form-control" id="pw-confirm" type="password" autocomplete="new-password">
+      <p class="hint" id="pw-error" style="color:var(--red);display:none"></p>
+      <div class="modal-actions">
+        <button class="btn" id="pw-logout" type="button">Sign out</button>
+        <button class="btn btn-primary" id="pw-save" type="submit">Save password</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="modal" id="modal-invite" role="dialog" aria-modal="true" aria-labelledby="modal-invite-title" inert>
   <div class="modal-card">
     <h3 id="modal-invite-title">Invite Staff</h3>
@@ -458,6 +480,6 @@ select.form-control { width: auto; margin-bottom: 0; }
   </div>
 </div>
 
-<script src="/portal/app.js?v=0.10.5"></script>
+<script src="/portal/app.js?v=0.10.6"></script>
 </body>
 </html>

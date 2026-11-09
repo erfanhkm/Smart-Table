@@ -14,6 +14,7 @@ import {
   saveCard,
   setLocationTier,
   switchPlan,
+  TIER_DEFAULTS,
   type BillingPlan,
 } from '../services/billing.js';
 import { logAudit } from '../services/audit.js';
@@ -47,6 +48,20 @@ function present(state: Awaited<ReturnType<typeof getBillingState>>) {
     subscription_paid_through: a.subscription_paid_through,
     accrued_cents: state.accrued_cents,
     collected_this_month_cents: state.collected_this_month_cents,
+    // v0.10.6 (C3-7-4): the standard price/commission pair for BOTH tiers,
+    // straight from TIER_DEFAULTS — the portal's tier-switch copy used to
+    // hard-code "$49.99/month or 1%" / "$99/month or 2%" and drifted from
+    // whatever the server would actually apply.
+    tiers: {
+      starter: {
+        subscription_price_cents: TIER_DEFAULTS.starter.subscription_price_cents,
+        commission_bps: TIER_DEFAULTS.starter.commission_bps,
+      },
+      base: {
+        subscription_price_cents: TIER_DEFAULTS.base.subscription_price_cents,
+        commission_bps: TIER_DEFAULTS.base.commission_bps,
+      },
+    },
   };
 }
 

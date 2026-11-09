@@ -469,7 +469,11 @@ export async function deviceRoutes(app: FastifyInstance) {
        WHERE d.location_id = $1 AND d.revoked_at IS NULL ORDER BY t.name`,
       [scopedId],
     );
-    return { devices: r.rows };
+    // v0.10.6 (C3-7 Low): the server's clock rides along — the portal
+    // judges "online" (last seen < 90s ago) against THIS timestamp, not
+    // the shared tablet's clock, whose skew flipped healthy devices to
+    // "Offline" (and dead ones to "Online").
+    return { devices: r.rows, now: new Date().toISOString() };
   });
 
   app.post('/api/portal/devices/:id/revoke', staffOnly, async (req) => {
