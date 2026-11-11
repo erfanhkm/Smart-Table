@@ -148,7 +148,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     // revalidates so deploys take effect immediately, JS/CSS keep the
     // plugin's 1h, fonts/images cache for 30 days.
     const urlPath = _req.url.split('?')[0];
-    if (urlPath === '/portal/app.js' || urlPath === '/t/app.js' || urlPath === '/admin/app.js') {
+    if (urlPath === '/portal/app.js' || urlPath === '/t/app.js' || urlPath === '/admin/app.js' || urlPath === '/dashboard/app.js') {
       // v0.7.4: the app scripts must revalidate on every load. Setting
       // no-cache in the route handler (v0.7.2) did NOT survive — the
       // static plugin's send path applies its own Cache-Control and the
@@ -321,15 +321,16 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
       .type('text/javascript')
       .sendFile('t/app.js'),
   );
-  // F-11: /dashboard previously shipped with no CSP at all. Its script is
-  // inline today, so script-src keeps 'unsafe-inline' (same posture as the
-  // guest page until its script is externalized); everything else is
+  // F-11: /dashboard previously shipped with no CSP at all.
+  // v0.10.7 (C3-8 M21): the dashboard script is external now
+  // (/dashboard/app.js, version-pinned like every other app script), so
+  // script-src no longer needs 'unsafe-inline'; everything else stays
   // self-only and unframable.
   app.get('/dashboard', async (_req, reply) =>
     reply
       .header(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
       )
       .sendFile('dashboard/index.html'),
   );

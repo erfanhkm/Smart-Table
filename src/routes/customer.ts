@@ -562,8 +562,14 @@ export async function customerRoutes(app: FastifyInstance) {
     const toAsciiDigits = (s: string) =>
       s.replace(/[۰-۹]/g, (d) => String(FA_DIGITS.indexOf(d)))
         .replace(/[٠-٩]/g, (d) => String(AR_DIGITS.indexOf(d)));
-    const digits = typeof body.phone === 'string' ? toAsciiDigits(body.phone).replace(/\D/g, '') : '';
-    if (digits.length < 7 || digits.length > 15) throw badRequest('enter a valid phone number');
+    const rawDigits = typeof body.phone === 'string' ? toAsciiDigits(body.phone).replace(/\D/g, '') : '';
+    if (rawDigits.length < 7 || rawDigits.length > 15) throw badRequest('enter a valid phone number');
+    // v0.10.7 (C3-8 L14): NANP normalization before hashing — the same
+    // guest typing "+1 604…" and "604…" used to hash to two different
+    // loyalty members. An 11-digit number starting with 1 loses the
+    // country code. (Hash inputs change for 11-digit numbers only;
+    // pre-launch, no real balances — same precedent as F4-9.)
+    const digits = rawDigits.length === 11 && rawDigits.startsWith('1') ? rawDigits.slice(1) : rawDigits;
     // C-7: the phone hash is an HMAC keyed with the server secret — a bare
     // sha256 of location+digits was reversible by dictionary attack over
     // phone-number space. v0.8.5 (F4-9): the HMAC key is purpose-derived

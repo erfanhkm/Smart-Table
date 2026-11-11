@@ -1,10 +1,14 @@
-// Smart Table — Founder Admin (v0.10.6)
+// Smart Table — Founder Admin (v0.10.7)
 (function () {
   const $ = (id) => document.getElementById(id);
   const TOKEN_KEY = 'st_admin_token';
   let token = sessionStorage.getItem(TOKEN_KEY);
   let pollTimer = null;
   let loadInFlight = false;
+  // C3-8 (M17): session epoch — bumped on every sign-out. An in-flight
+  // load() that resolves afterwards must not render the previous
+  // session's data into the DOM signOut() just wiped.
+  let sessionEpoch = 0;
 
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -51,6 +55,7 @@
   }
 
   function signOut() {
+    sessionEpoch++;
     const t = token;
     token = null;
     sessionStorage.removeItem(TOKEN_KEY);
@@ -79,6 +84,7 @@
   async function load() {
     if (loadInFlight) return;
     loadInFlight = true;
+    const epoch = sessionEpoch;
     try {
       const [ov, locs, pays, health] = await Promise.all([
         api('/api/admin/overview'),
@@ -86,14 +92,19 @@
         api('/api/admin/payments?limit=20'),
         api('/api/admin/health'),
       ]);
+      // C3-8 (M17): a sign-out (manual, or a 401 inside one of the calls
+      // above) invalidates everything this load fetched — render nothing.
+      if (epoch !== sessionEpoch) return;
 
       // Website analytics (best effort — may be unconfigured).
       try {
         const an = await apiAnalytics();
+        if (epoch !== sessionEpoch) return;
         $('analytics-body').innerHTML = (an.daily || []).map((d) => `
           <tr><td>${esc(d.date)}</td><td>${num(d.visitors)}</td><td>${num(d.pageviews)}</td></tr>
         `).join('') || '<tr><td colspan="3">No data yet.</td></tr>';
       } catch (e) {
+        if (epoch !== sessionEpoch) return;
         $('analytics-body').innerHTML = `<tr><td colspan="3">${e && e.message === 'not-configured' ? 'Analytics not configured.' : 'Analytics unavailable — could not load the data.'}</td></tr>`;
       }
 
@@ -180,8 +191,17 @@
     e.preventDefault();
     const errBox = $('nr-error');
     errBox.classList.add('hidden');
-    const tier = document.querySelector('input[name="nr-tier"]:checked').value;
-    const plan = document.querySelector('input[name="nr-plan"]:checked').value;
+    // C3-8 (L16): a radio group with nothing checked used to throw on
+    // `.value` and kill the submit silently — surface it as a form error.
+    const tierEl = document.querySelector('input[name="nr-tier"]:checked');
+    const planEl = document.querySelector('input[name="nr-plan"]:checked');
+    if (!tierEl || !planEl) {
+      errBox.textContent = 'Choose a tier and a plan first.';
+      errBox.classList.remove('hidden');
+      return;
+    }
+    const tier = tierEl.value;
+    const plan = planEl.value;
     const tablesRaw = $('nr-tables').value;
     const body = {
       name: $('nr-name').value.trim(),
@@ -211,10 +231,14 @@
         </div>`;
       nrShow($('nr-summary'));
       const copyBtn = $('nr-copy-btn');
-      if (copyBtn) copyBtn.addEventListener('click', () => {
+      if (copyBtn) copyBtn.addEventListener('click', async () => {
+        // C3-8 (L15): the password is shown exactly once — the button
+        // must not claim "Copied" when the clipboard call failed or the
+        // API is missing (insecure context / older browser).
         const pw = $('nr-temp-pw').textContent;
-        if (navigator.clipboard) navigator.clipboard.writeText(pw).catch(() => {});
-        copyBtn.textContent = 'Copied';
+        let ok = false;
+        if (navigator.clipboard) { try { await navigator.clipboard.writeText(pw); ok = true; } catch { ok = false; } }
+        copyBtn.textContent = ok ? 'Copied' : 'Copy failed — select the password and copy it manually';
       });
       const doneBtn = $('nr-done-btn');
       if (doneBtn) doneBtn.addEventListener('click', () => { $('nr-summary').innerHTML = ''; nrShow(null); });

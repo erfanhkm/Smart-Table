@@ -71,7 +71,10 @@
         .menu-stepper span { font-size: 1rem; font-weight: 700; min-width: 24px; text-align: center; color: var(--navy); }
         .cart-sticky-bar { background: var(--navy); color: white; border-radius: 18px; padding: 16px 20px; position: sticky; bottom: 16px; margin-top: 24px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 10px 30px rgba(14, 27, 44, 0.3); z-index: 10; border: 1px solid rgba(255,255,255,0.1); }
         .cart-sticky-info { display: flex; flex-direction: column; gap: 2px; }
-        .cart-sticky-count { font-size: 0.75rem; color: #94A3B8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        /* C3-8 (H1): no letter-spacing / uppercase here — this span carries
+           t('itemsInCart'), and letter-spacing breaks Arabic-script joining
+           in the Persian cart bar. */
+        .cart-sticky-count { font-size: 0.75rem; color: #94A3B8; font-weight: 600; }
         .cart-sticky-total { font-size: 1.25rem; font-weight: 800; color: white; }
         .cart-sticky-btn { background: var(--gold); color: white; border: none; border-radius: 12px; padding: 12px 22px; font-size: 1rem; font-weight: 700; cursor: pointer; transition: background 0.2s, transform 0.1s; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 12px rgba(217, 119, 6, 0.3); }
         .cart-sticky-btn:hover { background: #b45309; }
@@ -107,13 +110,14 @@
 
         .star-rating { display: flex; justify-content: center; gap: 8px; font-size: 1.8rem; margin: 16px 0; cursor: pointer; color: #CBD5E1; }
 
-        textarea { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 10px; resize: none; height: 80px; font-family: inherit; font-size: 0.9rem; margin-bottom: 16px; }
+        /* C3-8 (L8): 1rem (16px) — anything smaller makes iOS zoom on focus. */
+        textarea { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 10px; resize: none; height: 80px; font-family: inherit; font-size: 1rem; margin-bottom: 16px; }
 
         /* Print receipt: only the receipt card prints */
         @media print {
             body { background: white; }
             .app-container { box-shadow: none; max-width: 100%; }
-            header, .pay-footer, .success-icon, [data-action="print"], [data-action="email-toggle"], #email-receipt-box { display: none !important; }
+            header, .pay-footer, .success-icon, #email-receipt-box { display: none !important; }
             .content { padding: 0; overflow: visible; }
             .card { box-shadow: none; break-inside: avoid; }
         }
@@ -146,6 +150,6 @@
         </div>
     </div>
 
-    <script src="/t/app.js?v=0.10.6" defer></script>
+    <script src="/t/app.js?v=0.10.7" defer></script>
 </body>
 </html>

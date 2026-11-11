@@ -58,7 +58,7 @@ export async function staffRoutes(app: FastifyInstance) {
     const u = req.portalUser;
     if (u) {
       const r = await query(
-        `SELECT id, pos_type, pos_location_ref, square_location_id, name, currency, qr_ordering_enabled,
+        `SELECT id, pos_type, pos_location_ref, square_location_id, name, currency, tier, qr_ordering_enabled,
                 loyalty_enabled, loyalty_visits_required, loyalty_reward_text, google_review_url
          FROM locations WHERE id = $1`,
         [u.location_id],
@@ -66,7 +66,7 @@ export async function staffRoutes(app: FastifyInstance) {
       return { locations: r.rows };
     }
     const r = await query(
-      `SELECT id, pos_type, pos_location_ref, square_location_id, name, currency, qr_ordering_enabled,
+      `SELECT id, pos_type, pos_location_ref, square_location_id, name, currency, tier, qr_ordering_enabled,
               loyalty_enabled, loyalty_visits_required, loyalty_reward_text, google_review_url
        FROM locations ORDER BY name`,
     );

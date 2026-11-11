@@ -27,7 +27,7 @@ describe('H-1: guest render() tenders shadowing', () => {
     assert.ok(!src.includes('check.tenders.map((t)'), 'buggy shadowing pattern must not return');
     assert.ok(src.includes('check.tenders.map((td)'), 'tenders map must use the td parameter');
     assert.ok(src.includes("esc(td.type || t('cardWord'))"), 'tender type falls back to the translated card word');
-    assert.ok(src.includes('formatMoney(td.amount_cents, check.currency)'), 'tender amount renders from td');
+    assert.ok(src.includes('formatMoney(td.amount_cents - (td.tip_cents || 0), check.currency)'), 'tender amount renders from td, net of the tip (C3-8 H3)');
   });
 
   it('render() guards renderInner() with try/catch and clears the render key', () => {

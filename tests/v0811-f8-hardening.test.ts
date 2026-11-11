@@ -43,8 +43,8 @@ describe('v0.8.11 F8 guest hardening', () => {
     assert.ok(src.includes('function normalizeDigits('), 'normalizer exists');
     assert.ok(src.includes('normalizeDigits(loyaltyPhone)'), 'loyalty phone');
     assert.ok(src.includes('normalizeDigits($(\'cc-num\')'), 'Clover fields');
-    assert.ok(src.includes('parseFloat(normalizeDigits(e.target.value)'), 'custom amount');
-    assert.ok(src.includes('<input type="text" inputmode="decimal"'), 'custom amount no longer uses type=number');
+    assert.ok(src.includes('let raw = normalizeDigits(e.target.value)'), 'custom amount');
+    assert.ok(src.includes('<input type="text" dir="ltr" inputmode="decimal"'), 'custom amount no longer uses type=number');
     assert.ok(!src.includes('<input type="number" inputmode="decimal"'), 'old swallowing input is gone');
   });
 
@@ -98,12 +98,12 @@ describe('v0.8.11 F8 guest hardening', () => {
 
   it('F8-Lows: load race, loud env failure, dead placeholders, receipt guards', () => {
     assert.ok(src.includes('const scriptLoads = new Map()'), 'script loads share one promise');
-    assert.ok(src.includes("if (!cfg.extra?.environment) throw"), 'missing Square environment fails loudly');
+    assert.ok(src.includes("cfg.extra?.environment !== 'production' && cfg.extra?.environment !== 'sandbox'"), 'Square environment is allow-listed (C3-8 L1): anything else fails loudly');
     assert.ok(!src.includes('SQUARE_APP_ID'), 'dead placeholder constants removed');
     assert.ok(src.includes('rel="noopener noreferrer"'), 'review link hardened');
     assert.ok(src.includes('let receiptEmailSending = false'), 'receipt email double-tap guard');
     assert.ok(src.includes("receiptPrintState === 'failed' || receiptPrintState === 'unavailable'"), 'failed print offers a retry');
-    assert.ok(html.includes('/t/app.js?v=0.10.6'), 'guest script is version-pinned against the CDN cache');
+    assert.ok(html.includes('/t/app.js?v=0.10.7'), 'guest script is version-pinned against the CDN cache');
   });
 
   it('i18n: all five languages keep identical keys and placeholders', () => {
@@ -111,7 +111,7 @@ describe('v0.8.11 F8 guest hardening', () => {
     const block = src.slice(start + 'const I18N = '.length, src.indexOf('};', start) + 1);
     const I18N = eval('(' + block + ')') as Record<string, Record<string, string>>;
     const base = Object.keys(I18N.en).sort();
-    assert.equal(base.length, 114, '114 keys after the six F8 additions');
+    assert.equal(base.length, 131, '131 keys after the 17 C3-8 additions');
     for (const lang of Object.keys(I18N)) {
       assert.deepEqual(Object.keys(I18N[lang]).sort(), base, `${lang} key set matches en`);
       for (const k of base) {

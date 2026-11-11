@@ -34,10 +34,14 @@ function formatMoney(cents, currency) {
 // Normalize digits + the Arabic/Persian decimal (٫) and thousands (٬)
 // separators to ASCII before any parsing.
 function normalizeDigits(s) {
-    return String(s ?? '').replace(/[٠-٩۰-۹०-९੦-੯٫٬]/g, (ch) => {
+    return String(s ?? '').replace(/[٠-٩۰-۹०-९੦-੯٫٬،]/g, (ch) => {
         const c = ch.codePointAt(0);
         if (ch === '٫') return '.';
         if (ch === '٬') return '';
+        // C3-8 (M4): the Arabic comma is a separator, not a digit — map it
+        // to ',' so the decimal-comma rule in the custom-amount handler
+        // can see it.
+        if (ch === '،') return ',';
         if (c >= 0x660 && c <= 0x669) return String(c - 0x660);
         if (c >= 0x6f0 && c <= 0x6f9) return String(c - 0x6f0);
         if (c >= 0x966 && c <= 0x96f) return String(c - 0x966);
@@ -57,11 +61,11 @@ const tableToken = getTableToken();
 // Menu item names come from the restaurant's POS and are never translated; all
 // Smart Table chrome (bill, split, tip, pay, review, loyalty) is.
 const I18N = {
-en: { tableWord: "Table", secureNote: "🔒 Secure payment · No app needed · No account needed", orPayWithCard: "or pay with card", payWord: "Pay", payBtn: "Pay {amt}", processing: "Processing payment...", retryPayment: "Retry payment · {amt}", askServer: "Ask your server", askServer2: "Please ask your server.", loadingBill: "Loading your bill...", connecting: "Connecting securely to the restaurant.", invalidLink: "Invalid link", invalidLinkBody: "Please scan the QR code on your table again.", couldNotLoad: "Could not load your bill", couldNotLoadBody: "Retrying… If this continues, please ask your server.", billSoon: "Your bill will appear here soon", billSoonBody: "Your bill will appear here as soon as your order is fired by your server.", posUnavailable: "Bill temporarily unavailable", posUnavailableBody: "We couldn't reach the restaurant's system just now. Please ask your server — you can still pay at the counter.", hungry: "Hungry?", hungryBody: "Browse the menu and order from your table.", viewMenu: "🍽️ View Menu", menuTab: "🍽️ Menu", billTab: "💳 Pay Your Bill", menuLoading: "Loading menu...", waitMoment: "Please wait a moment.", noMenu: "No menu available", menuTitle: "Menu", menuSub: "Tap + to add items, then send your order directly to the kitchen.", itemsInCart: "{n} items in cart", itemsInCart_1: "1 item in cart", sending: "Sending...", sendOrder: "Send Order →", orderSent: "Order sent to the kitchen ✓", orderDup: "Order already placed ✓", splitPayment: "Split Payment", splitFull: "Full", splitEqual: "Equal", splitCustom: "Custom", splitItems: "Group Pay", addTip: "Add Tip", tipNone: "None", itemizedBill: "Itemized Bill", alreadyPaid: "ALREADY PAID", paymentWord: "Payment", cardWord: "Card", totalBill: "Total Bill", remainingDue: "Remaining Due", fullBody: "Paying the full remaining balance of {amt}.", splitAmong: "Split among {n} people", yourShare: "Your share:", customAmount: "Custom Amount", myItemsHelp: "Tap the items you had — your claim shows on everyone's phone, so nothing gets paid twice. Everyone pays for their own claimed items.", unconfirmedTitle: "Unconfirmed payment", attentionTitle: "Payment needs attention", blockedBody: "Please ask your server before paying again.", unconfirmedBody: "Your last attempt ({amt} + {tip} tip) was not confirmed. Retrying re-sends exactly that payment and cannot charge you twice.", paySuccess: "Payment Successful!", thanksDining: "Thank you for dining with us. Your payment has been processed.", receiptSummary: "Receipt Summary", totalSettled: "Total Settled", printReceipt: "🖨️ Print Receipt", emailReceipt: "✉️ Email Receipt", sendReceipt: "Send Receipt", receiptOptions: "Receipt", printAndEmail: "🖨️✉️ Print + Email", noReceipt: "No receipt, thanks", receiptPrinting: "Sending to the printer…", receiptPrintedOk: "Your receipt is printing at your table ✓", receiptPrintUnavailable: "Printing isn't available at this table right now — your server can print it for you.", receiptAlreadyPrinted: "Your receipt was already sent to this table's printer.", receiptPrintFailed: "Could not reach the printer. Please ask your server.", noReceiptOk: "No receipt — you're all set ✓", howWasIt: "How was it?", thanksExcl: "Thanks! 🎉", gladLoved: "Glad you loved it.", googleReviewHelp: "Glad you loved it — a quick Google review helps us a lot.", leaveGoogleReview: "⭐ Leave a Google Review", thanksFeedback: "Thanks for the feedback", wellWork: "We'll work on it.", commentPlaceholder: "What could be better? (optional)", sendFeedback: "Send Feedback", loyaltyTitle: "Loyalty", rewardUnlocked: "🎉 Reward Unlocked!", showServer: "Show this screen to your server.", moreVisits: "{n} more visits for {reward}", moreVisits_1: "1 more visit for {reward}", joinLoyalty: "Join Loyalty 🎁", loyaltyHelp: "Earn rewards — just your phone number, no account.", phonePlaceholder: "Phone number", countMyVisit: "Count My Visit", joining: "Joining...", validPhone: "Please enter a valid phone number.", validEmail: "Please enter a valid email address.", validAmount: "Please select a valid amount to pay.", paymentReceived: "Payment received ✓ Remaining balance: {amt}", receiptSentTo: "Receipt sent to {email} ✓", declined: "Card declined or could not be charged — you were not charged. Please try another card.", attemptFailed: "That attempt did not go through and you were not charged. Please try again or use another card.", unconfirmed: "We could not confirm whether your payment went through. Tap “Retry payment” — it is safe: the same request is re-sent and you will not be charged twice.", askStaff: "We could not confirm your payment. Please ask your server — do NOT pay again.", billChanged: "Your bill changed since your last payment attempt. If that payment went through you will see it under “Already paid”. Please review the balance before paying again.", cardNumber: "Card number", checkCardDetails: "Please check your card details.", loadMenuFailed: "Could not load the menu. Please try again.", joinFailed: "Could not join. Please try again.", ratingFailed: "Your feedback could not be sent. Please try again.", tapAgain: "The total changed — please tap again to review it.", cancelWord: "Cancel", taken: "Taken", claimedProgress: "{n} of {total} items claimed", paidSoFar: "Paid so far: {amt} of {total}", justClaimed: "Someone at your table just claimed that item.", claimFailed: "Could not update your selection. Please try again." },
-fa: { tableWord: "میز", secureNote: "🔒 پرداخت امن · بدون نیاز به اپ · بدون نیاز به حساب", orPayWithCard: "یا با کارت پرداخت کنید", payWord: "پرداخت", payBtn: "پرداخت {amt}", processing: "در حال پردازش پرداخت...", retryPayment: "تلاش دوباره · {amt}", askServer: "از گارسون خود بپرسید", askServer2: "لطفاً از گارسون خود بپرسید.", loadingBill: "در حال بارگذاری صورت‌حساب...", connecting: "در حال اتصال امن به رستوران.", invalidLink: "لینک نامعتبر است", invalidLinkBody: "لطفاً کد QR روی میز خود را دوباره اسکن کنید.", couldNotLoad: "صورت‌حساب بارگذاری نشد", couldNotLoadBody: "در حال تلاش دوباره… اگر ادامه داشت، از گارسون خود بپرسید.", billSoon: "صورت‌حساب شما به‌زودی اینجا نمایش داده می‌شود", billSoonBody: "به محض ثبت سفارش شما توسط گارسون، صورت‌حساب اینجا نمایش داده می‌شود.", posUnavailable: "صورت‌حساب موقتاً در دسترس نیست", posUnavailableBody: "الان نتوانستیم به سیستم رستوران وصل شویم. لطفاً از گارسون خود بپرسید — پرداخت پای صندوق هم ممکن است.", hungry: "گرسنه‌اید؟", hungryBody: "منو را ببینید و از سر میز خود سفارش دهید.", viewMenu: "🍽️ مشاهده منو", menuTab: "🍽️ منو", billTab: "💳 پرداخت صورت‌حساب", menuLoading: "در حال بارگذاری منو...", waitMoment: "لطفاً چند لحظه صبر کنید.", noMenu: "منو در دسترس نیست", menuTitle: "منو", menuSub: "برای افزودن، + را بزنید و سفارش خود را مستقیم به آشپزخانه بفرستید.", itemsInCart: "{n} قلم در سبد", itemsInCart_1: "۱ قلم در سبد", sending: "در حال ارسال...", sendOrder: "ارسال سفارش", orderSent: "سفارش به آشپزخانه ارسال شد ✓", orderDup: "سفارش قبلاً ثبت شده ✓", splitPayment: "تقسیم پرداخت", splitFull: "کامل", splitEqual: "مساوی", splitCustom: "دلخواه", splitItems: "پرداخت گروهی", addTip: "افزودن انعام", tipNone: "هیچ‌کدام", itemizedBill: "صورت‌حساب جزئی", alreadyPaid: "پرداخت‌شده‌ها", paymentWord: "پرداخت", cardWord: "کارت", totalBill: "جمع صورت‌حساب", remainingDue: "مبلغ باقی‌مانده", fullBody: "پرداخت کامل مبلغ باقی‌مانده: {amt}", splitAmong: "تقسیم بین {n} نفر", yourShare: "سهم شما:", customAmount: "مبلغ دلخواه", myItemsHelp: "آیتم‌هایی را که داشتید انتخاب کنید — انتخاب شما روی گوشی همه سر میز نشان داده می‌شود تا چیزی دوبار پرداخت نشود. هر نفر آیتم‌های خودش را پرداخت می‌کند.", unconfirmedTitle: "پرداخت تأییدنشده", attentionTitle: "پرداخت نیاز به بررسی دارد", blockedBody: "قبل از پرداخت دوباره، از گارسون خود بپرسید.", unconfirmedBody: "تلاش قبلی شما ({amt} + {tip} انعام) تأیید نشد. تلاش دوباره دقیقاً همان پرداخت را می‌فرستد و دوبار از شما کم نمی‌شود.", paySuccess: "پرداخت موفق بود!", thanksDining: "ممنون که پیش ما بودید. پرداخت شما انجام شد.", receiptSummary: "خلاصه رسید", totalSettled: "جمع تسویه‌شده", printReceipt: "🖨️ چاپ رسید", emailReceipt: "✉️ ایمیل رسید", sendReceipt: "ارسال رسید", receiptOptions: "رسید", printAndEmail: "🖨️✉️ چاپ + ایمیل", noReceipt: "رسید نمی‌خواهم", receiptPrinting: "در حال ارسال به چاپگر…", receiptPrintedOk: "رسیدتان سر میز در حال چاپ است ✓", receiptPrintUnavailable: "الان چاپگر این میز در دسترس نیست — گارسون می‌تواند رسید را برایتان چاپ کند.", receiptAlreadyPrinted: "رسیدتان قبلاً به چاپگر این میز فرستاده شده است.", receiptPrintFailed: "نشد به چاپگر برسیم. لطفاً از گارسون بپرسید.", noReceiptOk: "بدون رسید — همه‌چیز انجام شد ✓", howWasIt: "چطور بود؟", thanksExcl: "ممنون! 🎉", gladLoved: "خوشحالیم که راضی بودید.", googleReviewHelp: "خوشحالیم که راضی بودید — یک نظر کوتاه در گوگل خیلی به ما کمک می‌کند.", leaveGoogleReview: "⭐ ثبت نظر در گوگل", thanksFeedback: "ممنون از بازخوردتان", wellWork: "حتماً بهترش می‌کنیم.", commentPlaceholder: "چه چیزی می‌توانست بهتر باشد؟ (اختیاری)", sendFeedback: "ارسال بازخورد", loyaltyTitle: "باشگاه مشتریان", rewardUnlocked: "🎉 جایزه‌تان فعال شد!", showServer: "این صفحه را به گارسون نشان دهید.", moreVisits: "{n} بازدید دیگر تا {reward}", moreVisits_1: "۱ بازدید دیگر تا {reward}", joinLoyalty: "عضویت در باشگاه مشتریان 🎁", loyaltyHelp: "جایزه بگیرید — فقط شماره تلفن، بدون ساخت حساب.", phonePlaceholder: "شماره تلفن", countMyVisit: "ثبت بازدید من", joining: "در حال عضویت...", validPhone: "لطفاً یک شماره تلفن معتبر وارد کنید.", validEmail: "لطفاً یک ایمیل معتبر وارد کنید.", validAmount: "لطفاً یک مبلغ معتبر برای پرداخت انتخاب کنید.", paymentReceived: "پرداخت دریافت شد ✓ مانده: {amt}", receiptSentTo: "رسید به {email} ارسال شد ✓", declined: "کارت رد شد یا نتوانستیم از آن برداشت کنیم — از شما کم نشده است. لطفاً کارت دیگری امتحان کنید.", attemptFailed: "آن تلاش انجام نشد و از شما کم نشده است. لطفاً دوباره تلاش کنید یا کارت دیگری استفاده کنید.", unconfirmed: "نتوانستیم تأیید کنیم پرداخت شما انجام شده یا نه. روی «تلاش دوباره» بزنید — امن است: همان درخواست دوباره فرستاده می‌شود و دوبار از شما کم نمی‌شود.", askStaff: "نتوانستیم پرداخت شما را تأیید کنیم. لطفاً از گارسون بپرسید — دوباره پرداخت نکنید.", billChanged: "صورت‌حساب شما از آخرین تلاش پرداخت‌تان تغییر کرده است. اگر آن پرداخت انجام شده باشد، زیر «پرداخت‌شده‌ها» می‌بینیدش. لطفاً قبل از پرداخت دوباره، مانده را بررسی کنید.", cardNumber: "شماره کارت", checkCardDetails: "لطفاً مشخصات کارت خود را بررسی کنید.", loadMenuFailed: "منو بارگذاری نشد. لطفاً دوباره تلاش کنید.", joinFailed: "عضویت انجام نشد. لطفاً دوباره تلاش کنید.", ratingFailed: "بازخوردتان ارسال نشد. لطفاً دوباره تلاش کنید.", tapAgain: "مبلغ تغییر کرد — لطفاً برای بررسی، دوباره بزنید.", cancelWord: "لغو", taken: "گرفته شده", claimedProgress: "{n} از {total} آیتم انتخاب شده", paidSoFar: "پرداخت‌شده تا حالا: {amt} از {total}", justClaimed: "یکی سر میزتان همین الان این آیتم را انتخاب کرد.", claimFailed: "انتخابتان به‌روز نشد. لطفاً دوباره تلاش کنید." },
-zh: { tableWord: "餐桌", secureNote: "🔒 安全支付 · 无需应用 · 无需账户", orPayWithCard: "或使用银行卡支付", payWord: "支付", payBtn: "支付 {amt}", processing: "正在处理付款...", retryPayment: "重试付款 · {amt}", askServer: "请询问您的服务员", askServer2: "请询问您的服务员。", loadingBill: "正在加载您的账单...", connecting: "正在安全连接到餐厅。", invalidLink: "链接无效", invalidLinkBody: "请重新扫描您桌上的二维码。", couldNotLoad: "无法加载您的账单", couldNotLoadBody: "正在重试…如果持续出现，请询问您的服务员。", billSoon: "您的账单很快会显示在这里", billSoonBody: "服务员下单后，您的账单会立即显示在这里。", posUnavailable: "账单暂时无法显示", posUnavailableBody: "暂时无法连接到餐厅系统。请询问您的服务员——您也可以在柜台付款。", hungry: "饿了吗？", hungryBody: "浏览菜单，直接在餐桌旁点餐。", viewMenu: "🍽️ 查看菜单", menuTab: "🍽️ 菜单", billTab: "💳 支付账单", menuLoading: "正在加载菜单...", waitMoment: "请稍等片刻。", noMenu: "暂无菜单", menuTitle: "菜单", menuSub: "点击 + 添加菜品，然后将订单直接发送到厨房。", itemsInCart: "购物车中有 {n} 件", itemsInCart_1: "购物车中有 1 件", sending: "正在发送...", sendOrder: "发送订单", orderSent: "订单已发送到厨房 ✓", orderDup: "订单已下 ✓", splitPayment: "分开付款", splitFull: "全额", splitEqual: "均分", splitCustom: "自定义", splitItems: "分组付款", addTip: "添加小费", tipNone: "无", itemizedBill: "详细账单", alreadyPaid: "已支付", paymentWord: "付款", cardWord: "银行卡", totalBill: "账单总额", remainingDue: "待付金额", fullBody: "支付全部剩余金额 {amt}。", splitAmong: "由 {n} 人分摊", yourShare: "您的份额：", customAmount: "自定义金额", myItemsHelp: "点击您点的菜品——您的选择会显示在桌上每个人的手机上，避免重复付款。每个人支付自己选的菜品。", unconfirmedTitle: "未确认的付款", attentionTitle: "付款需要处理", blockedBody: "请在再次付款前询问您的服务员。", unconfirmedBody: "您上次的付款（{amt} + 小费 {tip}）未得到确认。重试将重新发送同一笔付款，不会重复收费。", paySuccess: "付款成功！", thanksDining: "感谢您的光临。您的付款已处理。", receiptSummary: "收据摘要", totalSettled: "已结总额", printReceipt: "🖨️ 打印收据", emailReceipt: "✉️ 邮件发送收据", sendReceipt: "发送收据", receiptOptions: "收据", printAndEmail: "🖨️✉️ 打印 + 邮件", noReceipt: "不需要收据", receiptPrinting: "正在发送到打印机…", receiptPrintedOk: "您的收据正在餐桌旁打印 ✓", receiptPrintUnavailable: "此桌目前无法打印——服务员可为您打印。", receiptAlreadyPrinted: "您的收据已发送到此桌的打印机。", receiptPrintFailed: "无法连接到打印机。请询问您的服务员。", noReceiptOk: "不需要收据——一切就绪 ✓", howWasIt: "体验如何？", thanksExcl: "谢谢！🎉", gladLoved: "很高兴您喜欢。", googleReviewHelp: "很高兴您喜欢——在 Google 上留下简短评价对我们帮助很大。", leaveGoogleReview: "⭐ 在 Google 上评价", thanksFeedback: "感谢您的反馈", wellWork: "我们会改进的。", commentPlaceholder: "哪些方面可以改进？（可选）", sendFeedback: "发送反馈", loyaltyTitle: "会员奖励", rewardUnlocked: "🎉 奖励已解锁！", showServer: "请将此屏幕展示给您的服务员。", moreVisits: "再来 {n} 次即可获得 {reward}", moreVisits_1: "再来 1 次即可获得 {reward}", joinLoyalty: "加入会员奖励 🎁", loyaltyHelp: "赢取奖励——只需手机号码，无需账户。", phonePlaceholder: "电话号码", countMyVisit: "记录我的到访", joining: "正在加入...", validPhone: "请输入有效的电话号码。", validEmail: "请输入有效的电子邮箱。", validAmount: "请选择有效的付款金额。", paymentReceived: "已收到付款 ✓ 剩余金额：{amt}", receiptSentTo: "收据已发送至 {email} ✓", declined: "银行卡被拒绝或无法扣款——您未被收费。请换一张卡重试。", attemptFailed: "该次尝试未成功，您未被收费。请重试或使用另一张卡。", unconfirmed: "我们无法确认您的付款是否成功。请点击“重试付款”——这是安全的：系统会重新发送同一请求，不会重复收费。", askStaff: "我们无法确认您的付款。请询问您的服务员——不要再次付款。", billChanged: "您的账单自上次付款尝试后已发生变化。如果那笔付款已成功，您会在“已支付”下看到它。请在再次付款前核对余额。", cardNumber: "卡号", checkCardDetails: "请检查您的银行卡信息。", loadMenuFailed: "无法加载菜单，请重试。", joinFailed: "无法加入，请重试。", ratingFailed: "您的反馈未能发送，请重试。", tapAgain: "金额已更改——请再次点击确认。", cancelWord: "取消", taken: "已被选", claimedProgress: "已选 {n} / {total} 件", paidSoFar: "已支付：{total} 中的 {amt}", justClaimed: "您桌上的另一位刚刚选了这道菜。", claimFailed: "无法更新您的选择。请重试。" },
-hi: { tableWord: "टेबल", secureNote: "🔒 सुरक्षित भुगतान · ऐप की ज़रूरत नहीं · खाते की ज़रूरत नहीं", orPayWithCard: "या कार्ड से भुगतान करें", payWord: "भुगतान करें", payBtn: "{amt} का भुगतान करें", processing: "भुगताना संसाधित हो रहा है...", retryPayment: "फिर से प्रयास करें · {amt}", askServer: "अपने सर्वर से पूछें", askServer2: "कृपया अपने सर्वर से पूछें।", loadingBill: "आपका बिल लोड हो रहा है...", connecting: "रेस्तरां से सुरक्षित रूप से जुड़ रहे हैं।", invalidLink: "अमान्य लिंक", invalidLinkBody: "कृपया अपनी टेबल पर लगा QR कोड फिर से स्कैन करें।", couldNotLoad: "आपका बिल लोड नहीं हो सका", couldNotLoadBody: "फिर से कोशिश कर रहे हैं… अगर यह जारी रहे तो अपने सर्वर से पूछें।", billSoon: "आपका बिल जल्द ही यहाँ दिखाई देगा", billSoonBody: "जैसे ही सर्वर आपका ऑर्डर भेजेगा, बिल यहाँ दिखेगा।", posUnavailable: "बिल अस्थायी रूप से उपलब्ध नहीं है", posUnavailableBody: "हम अभी रेस्तरां के सिस्टम से कनेक्ट नहीं कर सके। कृपया अपने सर्वर से पूछें — आप काउंटर पर भी भुगतान कर सकते हैं।", hungry: "भूख लगी है?", hungryBody: "मेनू देखें और अपनी टेबल से ही ऑर्डर करें।", viewMenu: "🍽️ मेनू देखें", menuTab: "🍽️ मेनू", billTab: "💳 बिल चुकाएं", menuLoading: "मेनू लोड हो रहा है...", waitMoment: "कृपया कुछ देर प्रतीक्षा करें।", noMenu: "मेनू उपलब्ध नहीं है", menuTitle: "मेनू", menuSub: "+ दबाकर आइटम जोड़ें, फिर ऑर्डर सीधे रसोई में भेजें।", itemsInCart: "कार्ट में {n} आइटम", itemsInCart_1: "कार्ट में 1 आइटम", sending: "भेज रहे हैं...", sendOrder: "ऑर्डर भेजें", orderSent: "ऑर्डर रसोई में भेज दिया गया ✓", orderDup: "ऑर्डर पहले से दिया गया है ✓", splitPayment: "भुगतान बाँटें", splitFull: "पूरा", splitEqual: "बराबर", splitCustom: "कस्टम", splitItems: "ग्रुप पेमेंट", addTip: "टिप जोड़ें", tipNone: "कोई नहीं", itemizedBill: "विस्तृत बिल", alreadyPaid: "पहले से भुगतान किया गया", paymentWord: "भुगतान", cardWord: "कार्ड", totalBill: "कुल बिल", remainingDue: "शेष राशि", fullBody: "पूरी शेष राशि {amt} का भुगतान कर रहे हैं।", splitAmong: "{n} लोगों में बाँटें", yourShare: "आपका हिस्सा:", customAmount: "कस्टम राशि", myItemsHelp: "आपने जो खाया, उसे चुनें — आपकी पसंद टेबल पर सबके फ़ोन पर दिखेगी, ताकि कोई चीज़ दो बार न चुकाई जाए। हर कोई अपने चुने आइटम का भुगतान करता है।", unconfirmedTitle: "अपुष्ट भुगतान", attentionTitle: "भुगतान पर ध्यान देना ज़रूरी है", blockedBody: "फिर से भुगतान करने से पहले अपने सर्वर से पूछें।", unconfirmedBody: "आपका पिछला प्रयास ({amt} + {tip} टिप) पक्का नहीं हुआ। फिर से प्रयास करने पर वही भुगतान दोबारा भेजा जाएगा और आपसे दो बार पैसे नहीं कटेंगे।", paySuccess: "भुगतान सफल!", thanksDining: "हमारे यहाँ भोजन करने के लिए धन्यवाद। आपका भुगतान हो गया है।", receiptSummary: "रसीद सारांश", totalSettled: "कुल निपटान", printReceipt: "🖨️ रसीद प्रिंट करें", emailReceipt: "✉️ रसीद ईमेल करें", sendReceipt: "रसीद भेजें", receiptOptions: "रसीद", printAndEmail: "🖨️✉️ प्रिंट + ईमेल", noReceipt: "रसीद नहीं चाहिए", receiptPrinting: "प्रिंटर को भेज रहे हैं…", receiptPrintedOk: "आपकी रसीद आपकी टेबल पर प्रिंट हो रही है ✓", receiptPrintUnavailable: "इस टेबल पर अभी प्रिंट उपलब्ध नहीं है — आपका सर्वर प्रिंट कर देगा।", receiptAlreadyPrinted: "आपकी रसीद पहले ही इस टेबल के प्रिंटर पर भेज दी गई है।", receiptPrintFailed: "प्रिंटर तक नहीं पहुँच सके। कृपया अपने सर्वर से पूछें।", noReceiptOk: "रसीद नहीं — सब हो गया ✓", howWasIt: "कैसा रहा?", thanksExcl: "धन्यवाद! 🎉", gladLoved: "खुशी है कि आपको पसंद आया।", googleReviewHelp: "खुशी है कि आपको पसंद आया — Google पर एक छोटी समीक्षा हमारी बहुत मदद करती है।", leaveGoogleReview: "⭐ Google पर समीक्षा दें", thanksFeedback: "आपकी प्रतिक्रिया के लिए धन्यवाद", wellWork: "हम इस पर काम करेंगे।", commentPlaceholder: "क्या बेहतर हो सकता था? (वैकल्पिक)", sendFeedback: "प्रतिक्रिया भेजें", loyaltyTitle: "लॉयल्टी", rewardUnlocked: "🎉 इनाम अनलॉक हो गया!", showServer: "यह स्क्रीन अपने सर्वर को दिखाएं।", moreVisits: "{reward} के लिए {n} और विज़िट", moreVisits_1: "{reward} के लिए 1 और विज़िट", joinLoyalty: "लॉयल्टी से जुड़ें 🎁", loyaltyHelp: "इनाम पाएं — सिर्फ़ आपका फ़ोन नंबर, कोई खाता नहीं।", phonePlaceholder: "फ़ोन नंबर", countMyVisit: "मेरी विज़िट गिनें", joining: "जुड़ रहे हैं...", validPhone: "कृपया मान्य फ़ोन नंबर डालें।", validEmail: "कृपया मान्य ईमेल पता डालें।", validAmount: "कृपया भुगतान के लिए मान्य राशि चुनें।", paymentReceived: "भुगतान मिल गया ✓ शेष राशि: {amt}", receiptSentTo: "रसीद {email} पर भेज दी गई ✓", declined: "कार्ड अस्वीकार हुआ या चार्ज नहीं हो सका — आपसे पैसे नहीं कटे। कृपया दूसरा कार्ड आज़माएं।", attemptFailed: "वह प्रयास सफल नहीं हुआ और आपसे पैसे नहीं कटे। कृपया फिर से प्रयास करें या दूसरा कार्ड उपयोग करें।", unconfirmed: "हम पुष्टि नहीं कर सके कि आपका भुगतान हुआ या नहीं। “फिर से प्रयास करें” दबाएं — यह सुरक्षित है: वही अनुरोध दोबारा भेजा जाएगा और आपसे दो बार पैसे नहीं कटेंगे।", askStaff: "हम आपके भुगतान की पुष्टि नहीं कर सके। कृपया अपने सर्वर से पूछें — दोबारा भुगतान न करें।", billChanged: "आपके पिछले भुगतान प्रयास के बाद बिल बदल गया है। अगर वह भुगतान हो गया होगा तो वह “पहले से भुगतान किया गया” के नीचे दिखेगा। दोबारा भुगतान से पहले शेष राशि जांच लें।", cardNumber: "कार्ड नंबर", checkCardDetails: "कृपया अपने कार्ड का विवरण जांचें।", loadMenuFailed: "मेनू लोड नहीं हो सका। कृपया फिर से प्रयास करें।", joinFailed: "जुड़ नहीं सके। कृपया फिर से प्रयास करें।", ratingFailed: "आपकी प्रतिक्रिया भेजी नहीं जा सकी। कृपया फिर से प्रयास करें।", tapAgain: "कुल राशि बदल गई है — कृपया समीक्षा के लिए फिर से टैप करें।", cancelWord: "रद्द करें", taken: "लिया गया", claimedProgress: "{total} में से {n} आइटम चुने गए", paidSoFar: "अब तक भुगतान: {total} में से {amt}", justClaimed: "आपकी टेबल पर किसी ने अभी-अभी यह आइटम चुन लिया।", claimFailed: "आपकी पसंद अपडेट नहीं हो सकी। कृपया फिर से प्रयास करें।" },
-pa: { tableWord: "ਮੇਜ਼", secureNote: "🔒 ਸੁਰੱਖਿਅਤ ਭੁਗਤਾਨ · ਐਪ ਦੀ ਲੋੜ ਨਹੀਂ · ਖਾਤੇ ਦੀ ਲੋੜ ਨਹੀਂ", orPayWithCard: "ਜਾਂ ਕਾਰਡ ਨਾਲ ਭੁਗਤਾਨ ਕਰੋ", payWord: "ਭੁਗਤਾਨ ਕਰੋ", payBtn: "{amt} ਦਾ ਭੁਗਤਾਨ ਕਰੋ", processing: "ਭੁਗਤਾਨ ਦੀ ਪ੍ਰਕਿਰਿਆ ਚੱਲ ਰਹੀ ਹੈ...", retryPayment: "ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ · {amt}", askServer: "ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਪੁੱਛੋ", askServer2: "ਕਿਰਪਾ ਕਰਕੇ ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਪੁੱਛੋ।", loadingBill: "ਤੁਹਾਡਾ ਬਿੱਲ ਲੋਡ ਹੋ ਰਿਹਾ ਹੈ...", connecting: "ਰੈਸਟੋਰੈਂਟ ਨਾਲ ਸੁਰੱਖਿਅਤ ਢੰਗ ਨਾਲ ਜੁੜ ਰਹੇ ਹਾਂ।", invalidLink: "ਅਵੈਧ ਲਿੰਕ", invalidLinkBody: "ਕਿਰਪਾ ਕਰਕੇ ਆਪਣੀ ਮੇਜ਼ 'ਤੇ ਲੱਗਾ QR ਕੋਡ ਮੁੜ ਸਕੈਨ ਕਰੋ।", couldNotLoad: "ਤੁਹਾਡਾ ਬਿੱਲ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕਿਆ", couldNotLoadBody: "ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰ ਰਹੇ ਹਾਂ… ਜੇ ਇਹ ਜਾਰੀ ਰਹੇ ਤਾਂ ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਪੁੱਛੋ।", billSoon: "ਤੁਹਾਡਾ ਬਿੱਲ ਜਲਦੀ ਹੀ ਇੱਥੇ ਦਿਖਾਈ ਦੇਵੇਗਾ", billSoonBody: "ਜਿਵੇਂ ਹੀ ਸਰਵਰ ਤੁਹਾਡਾ ਆਰਡਰ ਭੇਜੇਗਾ, ਬਿੱਲ ਇੱਥੇ ਦਿਖੇਗਾ।", posUnavailable: "ਬਿੱਲ ਅਸਥਾਈ ਤੌਰ 'ਤੇ ਉਪਲਬਧ ਨਹੀਂ ਹੈ", posUnavailableBody: "ਅਸੀਂ ਹੁਣੇ ਰੈਸਟੋਰੈਂਟ ਦੇ ਸਿਸਟਮ ਨਾਲ ਕਨੈਕਟ ਨਹੀਂ ਕਰ ਸਕੇ। ਕਿਰਪਾ ਕਰਕੇ ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਪੁੱਛੋ — ਤੁਸੀਂ ਕਾਊਂਟਰ 'ਤੇ ਵੀ ਭੁਗਤਾਨ ਕਰ ਸਕਦੇ ਹੋ।", hungry: "ਭੁੱਖ ਲੱਗੀ ਹੈ?", hungryBody: "ਮੇਨੂ ਵੇਖੋ ਅਤੇ ਆਪਣੀ ਮੇਜ਼ ਤੋਂ ਹੀ ਆਰਡਰ ਕਰੋ।", viewMenu: "🍽️ ਮੇਨੂ ਵੇਖੋ", menuTab: "🍽️ ਮੇਨੂ", billTab: "💳 ਬਿੱਲ ਭਰੋ", menuLoading: "ਮੇਨੂ ਲੋਡ ਹੋ ਰਿਹਾ ਹੈ...", waitMoment: "ਕਿਰਪਾ ਕਰਕੇ ਥੋੜ੍ਹੀ ਦੇਰ ਉਡੀਕ ਕਰੋ।", noMenu: "ਮੇਨੂ ਉਪਲਬਧ ਨਹੀਂ ਹੈ", menuTitle: "ਮੇਨੂ", menuSub: "+ ਦਬਾ ਕੇ ਆਈਟਮਾਂ ਜੋੜੋ, ਫਿਰ ਆਰਡਰ ਸਿੱਧਾ ਰਸੋਈ ਵਿੱਚ ਭੇਜੋ।", itemsInCart: "ਕਾਰਟ ਵਿੱਚ {n} ਆਈਟਮਾਂ", itemsInCart_1: "ਕਾਰਟ ਵਿੱਚ 1 ਆਈਟਮ", sending: "ਭੇਜ ਰਹੇ ਹਾਂ...", sendOrder: "ਆਰਡਰ ਭੇਜੋ", orderSent: "ਆਰਡਰ ਰਸੋਈ ਵਿੱਚ ਭੇਜ ਦਿੱਤਾ ਗਿਆ ✓", orderDup: "ਆਰਡਰ ਪਹਿਲਾਂ ਹੀ ਦਿੱਤਾ ਗਿਆ ਹੈ ✓", splitPayment: "ਭੁਗਤਾਨ ਵੰਡੋ", splitFull: "ਪੂਰਾ", splitEqual: "ਬਰਾਬਰ", splitCustom: "ਕਸਟਮ", splitItems: "ਗਰੁੱਪ ਭੁਗਤਾਨ", addTip: "ਟਿੱਪ ਜੋੜੋ", tipNone: "ਕੋਈ ਨਹੀਂ", itemizedBill: "ਵਿਸਤ੍ਰਿਤ ਬਿੱਲ", alreadyPaid: "ਪਹਿਲਾਂ ਹੀ ਭੁਗਤਾਨ ਕੀਤਾ", paymentWord: "ਭੁਗਤਾਨ", cardWord: "ਕਾਰਡ", totalBill: "ਕੁੱਲ ਬਿੱਲ", remainingDue: "ਬਾਕੀ ਰਕਮ", fullBody: "ਪੂਰੀ ਬਾਕੀ ਰਕਮ {amt} ਦਾ ਭੁਗਤਾਨ ਕਰ ਰਹੇ ਹੋ।", splitAmong: "{n} ਲੋਕਾਂ ਵਿੱਚ ਵੰਡੋ", yourShare: "ਤੁਹਾਡਾ ਹਿੱਸਾ:", customAmount: "ਕਸਟਮ ਰਕਮ", myItemsHelp: "ਜੋ ਤੁਸੀਂ ਖਾਧਾ, ਉਹ ਚੁਣੋ — ਤੁਹਾਡੀ ਚੋਣ ਮੇਜ਼ 'ਤੇ ਸਭ ਦੇ ਫ਼ੋਨ 'ਤੇ ਦਿਖੇਗੀ, ਤਾਂ ਜੋ ਕੁਝ ਵੀ ਦੋ ਵਾਰ ਨਾ ਚੁਕਾਇਆ ਜਾਵੇ। ਹਰ ਕੋਈ ਆਪਣੀਆਂ ਚੁਣੀਆਂ ਆਈਟਮਾਂ ਦਾ ਭੁਗਤਾਨ ਕਰਦਾ ਹੈ।", unconfirmedTitle: "ਅਪੁਸ਼ਟ ਭੁਗਤਾਨ", attentionTitle: "ਭੁਗਤਾਨ 'ਤੇ ਧਿਆਨ ਦੇਣਾ ਜ਼ਰੂਰੀ ਹੈ", blockedBody: "ਮੁੜ ਭੁਗਤਾਨ ਕਰਨ ਤੋਂ ਪਹਿਲਾਂ ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਪੁੱਛੋ।", unconfirmedBody: "ਤੁਹਾਡੀ ਪਿਛਲੀ ਕੋਸ਼ਿਸ਼ ({amt} + {tip} ਟਿੱਪ) ਪੱਕੀ ਨਹੀਂ ਹੋਈ। ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰਨ 'ਤੇ ਉਹੀ ਭੁਗਤਾਨ ਮੁੜ ਭੇਜਿਆ ਜਾਵੇਗਾ ਅਤੇ ਤੁਹਾਡੇ ਤੋਂ ਦੋ ਵਾਰ ਪੈਸੇ ਨਹੀਂ ਕੱਟੇ ਜਾਣਗੇ।", paySuccess: "ਭੁਗਤਾਨ ਸਫਲ!", thanksDining: "ਸਾਡੇ ਇੱਥੇ ਖਾਣਾ ਖਾਣ ਲਈ ਧੰਨਵਾਦ। ਤੁਹਾਡਾ ਭੁਗਤਾਨ ਹੋ ਗਿਆ ਹੈ।", receiptSummary: "ਰਸੀਦ ਸਾਰ", totalSettled: "ਕੁੱਲ ਨਿਪਟਾਰਾ", printReceipt: "🖨️ ਰਸੀਦ ਪ੍ਰਿੰਟ ਕਰੋ", emailReceipt: "✉️ ਰਸੀਦ ਈਮੇਲ ਕਰੋ", sendReceipt: "ਰਸੀਦ ਭੇਜੋ", receiptOptions: "ਰਸੀਦ", printAndEmail: "🖨️✉️ ਪ੍ਰਿੰਟ + ਈਮੇਲ", noReceipt: "ਰਸੀਦ ਨਹੀਂ ਚਾਹੀਦੀ", receiptPrinting: "ਪ੍ਰਿੰਟਰ ਨੂੰ ਭੇਜ ਰਹੇ ਹਾਂ…", receiptPrintedOk: "ਤੁਹਾਡੀ ਰਸੀਦ ਤੁਹਾਡੀ ਮੇਜ਼ 'ਤੇ ਪ੍ਰਿੰਟ ਹੋ ਰਹੀ ਹੈ ✓", receiptPrintUnavailable: "ਇਸ ਮੇਜ਼ 'ਤੇ ਹੁਣ ਪ੍ਰਿੰਟ ਉਪਲਬਧ ਨਹੀਂ — ਤੁਹਾਡਾ ਸਰਵਰ ਪ੍ਰਿੰਟ ਕਰ ਦੇਵੇਗਾ।", receiptAlreadyPrinted: "ਤੁਹਾਡੀ ਰਸੀਦ ਪਹਿਲਾਂ ਹੀ ਇਸ ਮੇਜ਼ ਦੇ ਪ੍ਰਿੰਟਰ 'ਤੇ ਭੇਜੀ ਜਾ ਚੁੱਕੀ ਹੈ।", receiptPrintFailed: "ਪ੍ਰਿੰਟਰ ਤੱਕ ਨਹੀਂ ਪਹੁੰਚ ਸਕੇ। ਕਿਰਪਾ ਕਰਕੇ ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਪੁੱਛੋ।", noReceiptOk: "ਰਸੀਦ ਨਹੀਂ — ਸਭ ਹੋ ਗਿਆ ✓", howWasIt: "ਕਿਵੇਂ ਰਿਹਾ?", thanksExcl: "ਧੰਨਵਾਦ! 🎉", gladLoved: "ਖੁਸ਼ੀ ਹੈ ਕਿ ਤੁਹਾਨੂੰ ਪਸੰਦ ਆਇਆ।", googleReviewHelp: "ਖੁਸ਼ੀ ਹੈ ਕਿ ਤੁਹਾਨੂੰ ਪਸੰਦ ਆਇਆ — Google 'ਤੇ ਛੋਟੀ ਸਮੀਖਿਆ ਸਾਡੀ ਬਹੁਤ ਮਦਦ ਕਰਦੀ ਹੈ।", leaveGoogleReview: "⭐ Google 'ਤੇ ਸਮੀਖਿਆ ਦਿਓ", thanksFeedback: "ਤੁਹਾਡੀ ਪ੍ਰਤੀਕਿਰਿਆ ਲਈ ਧੰਨਵਾਦ", wellWork: "ਅਸੀਂ ਇਸ 'ਤੇ ਕੰਮ ਕਰਾਂਗੇ।", commentPlaceholder: "ਕੀ ਬਿਹਤਰ ਹੋ ਸਕਦਾ ਸੀ? (ਵਿਕਲਪਿਕ)", sendFeedback: "ਪ੍ਰਤੀਕਿਰਿਆ ਭੇਜੋ", loyaltyTitle: "ਲਾਇਲਟੀ", rewardUnlocked: "🎉 ਇਨਾਮ ਅਨਲੌਕ ਹੋ ਗਿਆ!", showServer: "ਇਹ ਸਕਰੀਨ ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਵਿਖਾਓ।", moreVisits: "{reward} ਲਈ ਹੋਰ {n} ਵਿਜ਼ਿਟ", moreVisits_1: "{reward} ਲਈ ਹੋਰ 1 ਵਿਜ਼ਿਟ", joinLoyalty: "ਲਾਇਲਟੀ ਵਿੱਚ ਸ਼ਾਮਲ ਹੋਵੋ 🎁", loyaltyHelp: "ਇਨਾਮ ਪਾਓ — ਸਿਰਫ਼ ਤੁਹਾਡਾ ਫ਼ੋਨ ਨੰਬਰ, ਕੋਈ ਖਾਤਾ ਨਹੀਂ।", phonePlaceholder: "ਫ਼ੋਨ ਨੰਬਰ", countMyVisit: "ਮੇਰੀ ਵਿਜ਼ਿਟ ਗਿਣੋ", joining: "ਸ਼ਾਮਲ ਹੋ ਰਹੇ ਹਾਂ...", validPhone: "ਕਿਰਪਾ ਕਰਕੇ ਸਹੀ ਫ਼ੋਨ ਨੰਬਰ ਦਰਜ ਕਰੋ।", validEmail: "ਕਿਰਪਾ ਕਰਕੇ ਸਹੀ ਈਮੇਲ ਪਤਾ ਦਰਜ ਕਰੋ।", validAmount: "ਕਿਰਪਾ ਕਰਕੇ ਭੁਗਤਾਨ ਲਈ ਸਹੀ ਰਕਮ ਚੁਣੋ।", paymentReceived: "ਭੁਗਤਾਨ ਮਿਲ ਗਿਆ ✓ ਬਾਕੀ ਰਕਮ: {amt}", receiptSentTo: "ਰਸੀਦ {email} 'ਤੇ ਭੇਜ ਦਿੱਤੀ ਗਈ ✓", declined: "ਕਾਰਡ ਅਸਵੀਕਾਰ ਹੋਇਆ ਜਾਂ ਚਾਰਜ ਨਹੀਂ ਹੋ ਸਕਿਆ — ਤੁਹਾਡੇ ਤੋਂ ਪੈਸੇ ਨਹੀਂ ਕੱਟੇ। ਕਿਰਪਾ ਕਰਕੇ ਹੋਰ ਕਾਰਡ ਅਜ਼ਮਾਓ।", attemptFailed: "ਉਹ ਕੋਸ਼ਿਸ਼ ਸਫਲ ਨਹੀਂ ਹੋਈ ਅਤੇ ਤੁਹਾਡੇ ਤੋਂ ਪੈਸੇ ਨਹੀਂ ਕੱਟੇ। ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ ਜਾਂ ਹੋਰ ਕਾਰਡ ਵਰਤੋ।", unconfirmed: "ਅਸੀਂ ਪੁਸ਼ਟੀ ਨਹੀਂ ਕਰ ਸਕੇ ਕਿ ਤੁਹਾਡਾ ਭੁਗਤਾਨ ਹੋਇਆ ਜਾਂ ਨਹੀਂ। “ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ” ਦਬਾਓ — ਇਹ ਸੁਰੱਖਿਅਤ ਹੈ: ਉਹੀ ਬੇਨਤੀ ਮੁੜ ਭੇਜੀ ਜਾਵੇਗੀ ਅਤੇ ਤੁਹਾਡੇ ਤੋਂ ਦੋ ਵਾਰ ਪੈਸੇ ਨਹੀਂ ਕੱਟੇ ਜਾਣਗੇ।", askStaff: "ਅਸੀਂ ਤੁਹਾਡੇ ਭੁਗਤਾਨ ਦੀ ਪੁਸ਼ਟੀ ਨਹੀਂ ਕਰ ਸਕੇ। ਕਿਰਪਾ ਕਰਕੇ ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਪੁੱਛੋ — ਮੁੜ ਭੁਗਤਾਨ ਨਾ ਕਰੋ।", billChanged: "ਤੁਹਾਡੀ ਪਿਛਲੀ ਭੁਗਤਾਨ ਕੋਸ਼ਿਸ਼ ਤੋਂ ਬਾਅਦ ਬਿੱਲ ਬਦਲ ਗਿਆ ਹੈ। ਜੇ ਉਹ ਭੁਗਤਾਨ ਹੋ ਗਿਆ ਹੋਵੇਗਾ ਤਾਂ ਉਹ “ਪਹਿਲਾਂ ਹੀ ਭੁਗਤਾਨ ਕੀਤਾ” ਹੇਠ ਦਿਖੇਗਾ। ਮੁੜ ਭੁਗਤਾਨ ਤੋਂ ਪਹਿਲਾਂ ਬਾਕੀ ਰਕਮ ਵੇਖ ਲਓ।", cardNumber: "ਕਾਰਡ ਨੰਬਰ", checkCardDetails: "ਕਿਰਪਾ ਕਰਕੇ ਆਪਣੇ ਕਾਰਡ ਦੇ ਵੇਰਵੇ ਜਾਂਚੋ।", loadMenuFailed: "ਮੇਨੂ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ।", joinFailed: "ਸ਼ਾਮਲ ਨਹੀਂ ਹੋ ਸਕੇ। ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ।", ratingFailed: "ਤੁਹਾਡੀ ਪ੍ਰਤੀਕਿਰਿਆ ਭੇਜੀ ਨਹੀਂ ਜਾ ਸਕੀ। ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ।", tapAgain: "ਕੁੱਲ ਰਕਮ ਬਦਲ ਗਈ ਹੈ — ਕਿਰਪਾ ਕਰਕੇ ਜਾਂਚ ਲਈ ਮੁੜ ਟੈਪ ਕਰੋ।", cancelWord: "ਰੱਦ ਕਰੋ", taken: "ਲਿਆ ਗਿਆ", claimedProgress: "{total} ਵਿੱਚੋਂ {n} ਆਈਟਮਾਂ ਚੁਣੀਆਂ ਗਈਆਂ", paidSoFar: "ਹੁਣ ਤੱਕ ਭੁਗਤਾਨ: {total} ਵਿੱਚੋਂ {amt}", justClaimed: "ਤੁਹਾਡੀ ਮੇਜ਼ 'ਤੇ ਕਿਸੇ ਨੇ ਹੁਣੇ ਇਹ ਆਈਟਮ ਚੁਣ ਲਈ ਹੈ।", claimFailed: "ਤੁਹਾਡੀ ਚੋਣ ਅਪਡੇਟ ਨਹੀਂ ਹੋ ਸਕੀ। ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ।" }
+en: { tableWord: "Table", secureNote: "🔒 Secure payment · No app needed · No account needed", orPayWithCard: "or pay with card", payWord: "Pay", payBtn: "Pay {amt}", processing: "Processing payment...", retryPayment: "Retry payment · {amt}", askServer: "Ask your server", askServer2: "Please ask your server.", loadingBill: "Loading your bill...", connecting: "Connecting securely to the restaurant.", invalidLink: "Invalid link", invalidLinkBody: "Please scan the QR code on your table again.", couldNotLoad: "Could not load your bill", couldNotLoadBody: "Retrying… If this continues, please ask your server.", billSoon: "Your bill will appear here soon", billSoonBody: "Your bill will appear here as soon as your order is fired by your server.", posUnavailable: "Bill temporarily unavailable", posUnavailableBody: "We couldn't reach the restaurant's system just now. Please ask your server — you can still pay at the counter.", hungry: "Hungry?", hungryBody: "Browse the menu and order from your table.", viewMenu: "🍽️ View Menu", menuTab: "🍽️ Menu", billTab: "💳 Pay Your Bill", menuLoading: "Loading menu...", waitMoment: "Please wait a moment.", noMenu: "No menu available", menuTitle: "Menu", menuSub: "Tap + to add items, then send your order directly to the kitchen.", itemsInCart: "{n} items in cart", itemsInCart_1: "1 item in cart", sending: "Sending...", sendOrder: "Send Order →", orderSent: "Order sent to the kitchen ✓", orderDup: "Order already placed ✓", splitPayment: "Split Payment", splitFull: "Full", splitEqual: "Equal", splitCustom: "Custom", splitItems: "Group Pay", addTip: "Add Tip", tipNone: "None", itemizedBill: "Itemized Bill", alreadyPaid: "ALREADY PAID", paymentWord: "Payment", cardWord: "Card", totalBill: "Total Bill", remainingDue: "Remaining Due", fullBody: "Paying the full remaining balance of {amt}.", splitAmong: "Split among {n} people", yourShare: "Your share:", customAmount: "Custom Amount", myItemsHelp: "Tap the items you had — your claim shows on everyone's phone, so nothing gets paid twice. Everyone pays for their own claimed items.", unconfirmedTitle: "Unconfirmed payment", attentionTitle: "Payment needs attention", blockedBody: "Your server can confirm this payment. You can also tap “Retry payment” — it re-checks exactly this payment and cannot charge you twice.", unconfirmedBody: "Your last attempt ({amt} + {tip} tip) was not confirmed. Retrying re-sends exactly that payment and cannot charge you twice.", paySuccess: "Payment Successful!", thanksDining: "Thank you for dining with us. Your payment has been processed.", receiptSummary: "Receipt Summary", totalSettled: "Total Settled", printReceipt: "🖨️ Print Receipt", emailReceipt: "✉️ Email Receipt", sendReceipt: "Send Receipt", receiptOptions: "Receipt", printAndEmail: "🖨️✉️ Print + Email", noReceipt: "No receipt, thanks", receiptPrinting: "Sending to the printer…", receiptPrintedOk: "Your receipt is printing at your table ✓", receiptPrintUnavailable: "Printing isn't available at this table right now — your server can print it for you.", receiptAlreadyPrinted: "Your receipt was already sent to this table's printer.", receiptPrintFailed: "Could not reach the printer. Please ask your server.", noReceiptOk: "No receipt — you're all set ✓", howWasIt: "How was it?", thanksExcl: "Thanks! 🎉", gladLoved: "Glad you loved it.", googleReviewHelp: "Glad you loved it — a quick Google review helps us a lot.", leaveGoogleReview: "⭐ Leave a Google Review", thanksFeedback: "Thanks for the feedback", wellWork: "We'll work on it.", commentPlaceholder: "What could be better? (optional)", sendFeedback: "Send Feedback", loyaltyTitle: "Loyalty", rewardUnlocked: "🎉 Reward Unlocked!", showServer: "Show this screen to your server.", moreVisits: "{n} more visits for {reward}", moreVisits_1: "1 more visit for {reward}", joinLoyalty: "Join Loyalty 🎁", loyaltyHelp: "Earn rewards — just your phone number, no account.", phonePlaceholder: "Phone number", countMyVisit: "Count My Visit", joining: "Joining...", validPhone: "Please enter a valid phone number.", validEmail: "Please enter a valid email address.", validAmount: "Please select a valid amount to pay.", paymentReceived: "Payment received ✓ Remaining balance: {amt}", receiptSentTo: "Receipt sent to {email} ✓", declined: "Card declined or could not be charged — you were not charged. Please try another card.", attemptFailed: "That attempt did not go through and you were not charged. Please try again or use another card.", unconfirmed: "We could not confirm whether your payment went through. Tap “Retry payment” — it is safe: the same request is re-sent and you will not be charged twice.", askStaff: "We could not confirm your payment. Please ask your server — do NOT pay again.", billChanged: "Your bill changed since your last payment attempt. If that payment went through you will see it under “Already paid”. Please review the balance before paying again.", cardNumber: "Card number", checkCardDetails: "Please check your card details.", loadMenuFailed: "Could not load the menu. Please try again.", joinFailed: "Could not join. Please try again.", ratingFailed: "Your feedback could not be sent. Please try again.", tapAgain: "The total changed — please tap again to review it.", cancelWord: "Cancel", taken: "Taken", claimedProgress: "{n} of {total} items claimed", paidSoFar: "Paid so far: {amt} of {total}", justClaimed: "Someone at your table just claimed that item.", claimFailed: "Could not update your selection. Please try again.", shareTipTotal: "Share {share} · Tip {tip} · Total {total}", cappedNotice: "That is more than the remaining balance — the amount was capped at {amt}.", splitRest: "Split the remaining balance among {n} people", yourShareOfCheck: "Your share of the check", tipWord: "Tip", cardUnavailable: "Card payments are not available at this location.", orderFailed: "Order could not be placed. Please try again.", payProcessFailed: "Payment could not be processed.", cardEntryFailed: "Card entry failed — please try again.", receiptSendFailed: "Could not send receipt. Please try again.", paymentCancelled: "Payment cancelled.", walletUnavailable: "That payment option is not available on this device.", walletIncomplete: "Payment was not completed.", libraryFailed: "Could not load the payment library. Please try again.", tokenizeFailed: "Card could not be tokenized. Please try again.", formStartFailed: "Could not start the payment form.", cardProcessFailed: "Card could not be processed." },
+fa: { tableWord: "میز", secureNote: "🔒 پرداخت امن · بدون نیاز به اپ · بدون نیاز به حساب", orPayWithCard: "یا با کارت پرداخت کنید", payWord: "پرداخت", payBtn: "پرداخت {amt}", processing: "در حال پردازش پرداخت...", retryPayment: "تلاش دوباره · {amt}", askServer: "از گارسون خود بپرسید", askServer2: "لطفاً از گارسون خود بپرسید.", loadingBill: "در حال بارگذاری صورت‌حساب...", connecting: "در حال اتصال امن به رستوران.", invalidLink: "لینک نامعتبر است", invalidLinkBody: "لطفاً کد QR روی میز خود را دوباره اسکن کنید.", couldNotLoad: "صورت‌حساب بارگذاری نشد", couldNotLoadBody: "در حال تلاش دوباره… اگر ادامه داشت، از گارسون خود بپرسید.", billSoon: "صورت‌حساب شما به‌زودی اینجا نمایش داده می‌شود", billSoonBody: "به محض ثبت سفارش شما توسط گارسون، صورت‌حساب اینجا نمایش داده می‌شود.", posUnavailable: "صورت‌حساب موقتاً در دسترس نیست", posUnavailableBody: "الان نتوانستیم به سیستم رستوران وصل شویم. لطفاً از گارسون خود بپرسید — پرداخت پای صندوق هم ممکن است.", hungry: "گرسنه‌اید؟", hungryBody: "منو را ببینید و از سر میز خود سفارش دهید.", viewMenu: "🍽️ مشاهده منو", menuTab: "🍽️ منو", billTab: "💳 پرداخت صورت‌حساب", menuLoading: "در حال بارگذاری منو...", waitMoment: "لطفاً چند لحظه صبر کنید.", noMenu: "منو در دسترس نیست", menuTitle: "منو", menuSub: "برای افزودن، + را بزنید و سفارش خود را مستقیم به آشپزخانه بفرستید.", itemsInCart: "{n} قلم در سبد", itemsInCart_1: "۱ قلم در سبد", sending: "در حال ارسال...", sendOrder: "ارسال سفارش", orderSent: "سفارش به آشپزخانه ارسال شد ✓", orderDup: "سفارش قبلاً ثبت شده ✓", splitPayment: "تقسیم پرداخت", splitFull: "کامل", splitEqual: "مساوی", splitCustom: "دلخواه", splitItems: "پرداخت گروهی", addTip: "افزودن انعام", tipNone: "هیچ‌کدام", itemizedBill: "صورت‌حساب جزئی", alreadyPaid: "پرداخت‌شده‌ها", paymentWord: "پرداخت", cardWord: "کارت", totalBill: "جمع صورت‌حساب", remainingDue: "مبلغ باقی‌مانده", fullBody: "پرداخت کامل مبلغ باقی‌مانده: {amt}", splitAmong: "تقسیم بین {n} نفر", yourShare: "سهم شما:", customAmount: "مبلغ دلخواه", myItemsHelp: "آیتم‌هایی را که داشتید انتخاب کنید — انتخاب شما روی گوشی همه سر میز نشان داده می‌شود تا چیزی دوبار پرداخت نشود. هر نفر آیتم‌های خودش را پرداخت می‌کند.", unconfirmedTitle: "پرداخت تأییدنشده", attentionTitle: "پرداخت نیاز به بررسی دارد", blockedBody: "گارسون شما می‌تواند این پرداخت را تأیید کند. می‌توانید «تلاش دوباره» را هم بزنید — دقیقاً همین پرداخت را دوباره بررسی می‌کند و دوبار از شما کم نمی‌شود.", unconfirmedBody: "تلاش قبلی شما ({amt} + {tip} انعام) تأیید نشد. تلاش دوباره دقیقاً همان پرداخت را می‌فرستد و دوبار از شما کم نمی‌شود.", paySuccess: "پرداخت موفق بود!", thanksDining: "ممنون که پیش ما بودید. پرداخت شما انجام شد.", receiptSummary: "خلاصه رسید", totalSettled: "جمع تسویه‌شده", printReceipt: "🖨️ چاپ رسید", emailReceipt: "✉️ ایمیل رسید", sendReceipt: "ارسال رسید", receiptOptions: "رسید", printAndEmail: "🖨️✉️ چاپ + ایمیل", noReceipt: "رسید نمی‌خواهم", receiptPrinting: "در حال ارسال به چاپگر…", receiptPrintedOk: "رسیدتان سر میز در حال چاپ است ✓", receiptPrintUnavailable: "الان چاپگر این میز در دسترس نیست — گارسون می‌تواند رسید را برایتان چاپ کند.", receiptAlreadyPrinted: "رسیدتان قبلاً به چاپگر این میز فرستاده شده است.", receiptPrintFailed: "نشد به چاپگر برسیم. لطفاً از گارسون بپرسید.", noReceiptOk: "بدون رسید — همه‌چیز انجام شد ✓", howWasIt: "چطور بود؟", thanksExcl: "ممنون! 🎉", gladLoved: "خوشحالیم که راضی بودید.", googleReviewHelp: "خوشحالیم که راضی بودید — یک نظر کوتاه در گوگل خیلی به ما کمک می‌کند.", leaveGoogleReview: "⭐ ثبت نظر در گوگل", thanksFeedback: "ممنون از بازخوردتان", wellWork: "حتماً بهترش می‌کنیم.", commentPlaceholder: "چه چیزی می‌توانست بهتر باشد؟ (اختیاری)", sendFeedback: "ارسال بازخورد", loyaltyTitle: "باشگاه مشتریان", rewardUnlocked: "🎉 جایزه‌تان فعال شد!", showServer: "این صفحه را به گارسون نشان دهید.", moreVisits: "{n} بازدید دیگر تا {reward}", moreVisits_1: "۱ بازدید دیگر تا {reward}", joinLoyalty: "عضویت در باشگاه مشتریان 🎁", loyaltyHelp: "جایزه بگیرید — فقط شماره تلفن، بدون ساخت حساب.", phonePlaceholder: "شماره تلفن", countMyVisit: "ثبت بازدید من", joining: "در حال عضویت...", validPhone: "لطفاً یک شماره تلفن معتبر وارد کنید.", validEmail: "لطفاً یک ایمیل معتبر وارد کنید.", validAmount: "لطفاً یک مبلغ معتبر برای پرداخت انتخاب کنید.", paymentReceived: "پرداخت دریافت شد ✓ مانده: {amt}", receiptSentTo: "رسید به {email} ارسال شد ✓", declined: "کارت رد شد یا نتوانستیم از آن برداشت کنیم — از شما کم نشده است. لطفاً کارت دیگری امتحان کنید.", attemptFailed: "آن تلاش انجام نشد و از شما کم نشده است. لطفاً دوباره تلاش کنید یا کارت دیگری استفاده کنید.", unconfirmed: "نتوانستیم تأیید کنیم پرداخت شما انجام شده یا نه. روی «تلاش دوباره» بزنید — امن است: همان درخواست دوباره فرستاده می‌شود و دوبار از شما کم نمی‌شود.", askStaff: "نتوانستیم پرداخت شما را تأیید کنیم. لطفاً از گارسون بپرسید — دوباره پرداخت نکنید.", billChanged: "صورت‌حساب شما از آخرین تلاش پرداخت‌تان تغییر کرده است. اگر آن پرداخت انجام شده باشد، زیر «پرداخت‌شده‌ها» می‌بینیدش. لطفاً قبل از پرداخت دوباره، مانده را بررسی کنید.", cardNumber: "شماره کارت", checkCardDetails: "لطفاً مشخصات کارت خود را بررسی کنید.", loadMenuFailed: "منو بارگذاری نشد. لطفاً دوباره تلاش کنید.", joinFailed: "عضویت انجام نشد. لطفاً دوباره تلاش کنید.", ratingFailed: "بازخوردتان ارسال نشد. لطفاً دوباره تلاش کنید.", tapAgain: "مبلغ تغییر کرد — لطفاً برای بررسی، دوباره بزنید.", cancelWord: "لغو", taken: "گرفته شده", claimedProgress: "{n} از {total} آیتم انتخاب شده", paidSoFar: "پرداخت‌شده تا حالا: {amt} از {total}", justClaimed: "یکی سر میزتان همین الان این آیتم را انتخاب کرد.", claimFailed: "انتخابتان به‌روز نشد. لطفاً دوباره تلاش کنید.", shareTipTotal: "سهم {share} · انعام {tip} · جمع {total}", cappedNotice: "این مبلغ از مانده بیشتر است — مبلغ به {amt} محدود شد.", splitRest: "تقسیم مانده بین {n} نفر", yourShareOfCheck: "سهم شما از صورت‌حساب", tipWord: "انعام", cardUnavailable: "پرداخت با کارت در این مکان در دسترس نیست.", orderFailed: "سفارش ثبت نشد. لطفاً دوباره تلاش کنید.", payProcessFailed: "پرداخت انجام نشد.", cardEntryFailed: "ورود کارت ناموفق بود — لطفاً دوباره تلاش کنید.", receiptSendFailed: "رسید ارسال نشد. لطفاً دوباره تلاش کنید.", paymentCancelled: "پرداخت لغو شد.", walletUnavailable: "این روش پرداخت روی این دستگاه در دسترس نیست.", walletIncomplete: "پرداخت کامل نشد.", libraryFailed: "کتابخانه پرداخت بارگذاری نشد. لطفاً دوباره تلاش کنید.", tokenizeFailed: "کارت پردازش نشد. لطفاً دوباره تلاش کنید.", formStartFailed: "فرم پرداخت باز نشد.", cardProcessFailed: "کارت پردازش نشد." },
+zh: { tableWord: "餐桌", secureNote: "🔒 安全支付 · 无需应用 · 无需账户", orPayWithCard: "或使用银行卡支付", payWord: "支付", payBtn: "支付 {amt}", processing: "正在处理付款...", retryPayment: "重试付款 · {amt}", askServer: "请询问您的服务员", askServer2: "请询问您的服务员。", loadingBill: "正在加载您的账单...", connecting: "正在安全连接到餐厅。", invalidLink: "链接无效", invalidLinkBody: "请重新扫描您桌上的二维码。", couldNotLoad: "无法加载您的账单", couldNotLoadBody: "正在重试…如果持续出现，请询问您的服务员。", billSoon: "您的账单很快会显示在这里", billSoonBody: "服务员下单后，您的账单会立即显示在这里。", posUnavailable: "账单暂时无法显示", posUnavailableBody: "暂时无法连接到餐厅系统。请询问您的服务员——您也可以在柜台付款。", hungry: "饿了吗？", hungryBody: "浏览菜单，直接在餐桌旁点餐。", viewMenu: "🍽️ 查看菜单", menuTab: "🍽️ 菜单", billTab: "💳 支付账单", menuLoading: "正在加载菜单...", waitMoment: "请稍等片刻。", noMenu: "暂无菜单", menuTitle: "菜单", menuSub: "点击 + 添加菜品，然后将订单直接发送到厨房。", itemsInCart: "购物车中有 {n} 件", itemsInCart_1: "购物车中有 1 件", sending: "正在发送...", sendOrder: "发送订单", orderSent: "订单已发送到厨房 ✓", orderDup: "订单已下 ✓", splitPayment: "分开付款", splitFull: "全额", splitEqual: "均分", splitCustom: "自定义", splitItems: "分组付款", addTip: "添加小费", tipNone: "无", itemizedBill: "详细账单", alreadyPaid: "已支付", paymentWord: "付款", cardWord: "银行卡", totalBill: "账单总额", remainingDue: "待付金额", fullBody: "支付全部剩余金额 {amt}。", splitAmong: "由 {n} 人分摊", yourShare: "您的份额：", customAmount: "自定义金额", myItemsHelp: "点击您点的菜品——您的选择会显示在桌上每个人的手机上，避免重复付款。每个人支付自己选的菜品。", unconfirmedTitle: "未确认的付款", attentionTitle: "付款需要处理", blockedBody: "您的服务员可以确认这笔付款。您也可以点击“重试付款”——它会重新核对这笔付款，不会重复收费。", unconfirmedBody: "您上次的付款（{amt} + 小费 {tip}）未得到确认。重试将重新发送同一笔付款，不会重复收费。", paySuccess: "付款成功！", thanksDining: "感谢您的光临。您的付款已处理。", receiptSummary: "收据摘要", totalSettled: "已结总额", printReceipt: "🖨️ 打印收据", emailReceipt: "✉️ 邮件发送收据", sendReceipt: "发送收据", receiptOptions: "收据", printAndEmail: "🖨️✉️ 打印 + 邮件", noReceipt: "不需要收据", receiptPrinting: "正在发送到打印机…", receiptPrintedOk: "您的收据正在餐桌旁打印 ✓", receiptPrintUnavailable: "此桌目前无法打印——服务员可为您打印。", receiptAlreadyPrinted: "您的收据已发送到此桌的打印机。", receiptPrintFailed: "无法连接到打印机。请询问您的服务员。", noReceiptOk: "不需要收据——一切就绪 ✓", howWasIt: "体验如何？", thanksExcl: "谢谢！🎉", gladLoved: "很高兴您喜欢。", googleReviewHelp: "很高兴您喜欢——在 Google 上留下简短评价对我们帮助很大。", leaveGoogleReview: "⭐ 在 Google 上评价", thanksFeedback: "感谢您的反馈", wellWork: "我们会改进的。", commentPlaceholder: "哪些方面可以改进？（可选）", sendFeedback: "发送反馈", loyaltyTitle: "会员奖励", rewardUnlocked: "🎉 奖励已解锁！", showServer: "请将此屏幕展示给您的服务员。", moreVisits: "再来 {n} 次即可获得 {reward}", moreVisits_1: "再来 1 次即可获得 {reward}", joinLoyalty: "加入会员奖励 🎁", loyaltyHelp: "赢取奖励——只需手机号码，无需账户。", phonePlaceholder: "电话号码", countMyVisit: "记录我的到访", joining: "正在加入...", validPhone: "请输入有效的电话号码。", validEmail: "请输入有效的电子邮箱。", validAmount: "请选择有效的付款金额。", paymentReceived: "已收到付款 ✓ 剩余金额：{amt}", receiptSentTo: "收据已发送至 {email} ✓", declined: "银行卡被拒绝或无法扣款——您未被收费。请换一张卡重试。", attemptFailed: "该次尝试未成功，您未被收费。请重试或使用另一张卡。", unconfirmed: "我们无法确认您的付款是否成功。请点击“重试付款”——这是安全的：系统会重新发送同一请求，不会重复收费。", askStaff: "我们无法确认您的付款。请询问您的服务员——不要再次付款。", billChanged: "您的账单自上次付款尝试后已发生变化。如果那笔付款已成功，您会在“已支付”下看到它。请在再次付款前核对余额。", cardNumber: "卡号", checkCardDetails: "请检查您的银行卡信息。", loadMenuFailed: "无法加载菜单，请重试。", joinFailed: "无法加入，请重试。", ratingFailed: "您的反馈未能发送，请重试。", tapAgain: "金额已更改——请再次点击确认。", cancelWord: "取消", taken: "已被选", claimedProgress: "已选 {n} / {total} 件", paidSoFar: "已支付：{total} 中的 {amt}", justClaimed: "您桌上的另一位刚刚选了这道菜。", claimFailed: "无法更新您的选择。请重试。", shareTipTotal: "份额 {share} · 小费 {tip} · 总计 {total}", cappedNotice: "该金额超过了待付金额——已自动调整为 {amt}。", splitRest: "将剩余金额由 {n} 人分摊", yourShareOfCheck: "您应付的份额", tipWord: "小费", cardUnavailable: "此地点暂不支持银行卡支付。", orderFailed: "订单提交失败，请重试。", payProcessFailed: "付款未能处理。", cardEntryFailed: "银行卡输入失败——请重试。", receiptSendFailed: "收据发送失败，请重试。", paymentCancelled: "付款已取消。", walletUnavailable: "此设备不支持该付款方式。", walletIncomplete: "付款未完成。", libraryFailed: "付款组件加载失败，请重试。", tokenizeFailed: "银行卡处理失败，请重试。", formStartFailed: "无法打开付款表单。", cardProcessFailed: "银行卡无法处理。" },
+hi: { tableWord: "टेबल", secureNote: "🔒 सुरक्षित भुगतान · ऐप की ज़रूरत नहीं · खाते की ज़रूरत नहीं", orPayWithCard: "या कार्ड से भुगतान करें", payWord: "भुगतान करें", payBtn: "{amt} का भुगतान करें", processing: "भुगतान संसाधित हो रहा है...", retryPayment: "फिर से प्रयास करें · {amt}", askServer: "अपने सर्वर से पूछें", askServer2: "कृपया अपने सर्वर से पूछें।", loadingBill: "आपका बिल लोड हो रहा है...", connecting: "रेस्तरां से सुरक्षित रूप से जुड़ रहे हैं।", invalidLink: "अमान्य लिंक", invalidLinkBody: "कृपया अपनी टेबल पर लगा QR कोड फिर से स्कैन करें।", couldNotLoad: "आपका बिल लोड नहीं हो सका", couldNotLoadBody: "फिर से कोशिश कर रहे हैं… अगर यह जारी रहे तो अपने सर्वर से पूछें।", billSoon: "आपका बिल जल्द ही यहाँ दिखाई देगा", billSoonBody: "जैसे ही सर्वर आपका ऑर्डर भेजेगा, बिल यहाँ दिखेगा।", posUnavailable: "बिल अस्थायी रूप से उपलब्ध नहीं है", posUnavailableBody: "हम अभी रेस्तरां के सिस्टम से कनेक्ट नहीं कर सके। कृपया अपने सर्वर से पूछें — आप काउंटर पर भी भुगतान कर सकते हैं।", hungry: "भूख लगी है?", hungryBody: "मेनू देखें और अपनी टेबल से ही ऑर्डर करें।", viewMenu: "🍽️ मेनू देखें", menuTab: "🍽️ मेनू", billTab: "💳 बिल चुकाएं", menuLoading: "मेनू लोड हो रहा है...", waitMoment: "कृपया कुछ देर प्रतीक्षा करें।", noMenu: "मेनू उपलब्ध नहीं है", menuTitle: "मेनू", menuSub: "+ दबाकर आइटम जोड़ें, फिर ऑर्डर सीधे रसोई में भेजें।", itemsInCart: "कार्ट में {n} आइटम", itemsInCart_1: "कार्ट में 1 आइटम", sending: "भेज रहे हैं...", sendOrder: "ऑर्डर भेजें", orderSent: "ऑर्डर रसोई में भेज दिया गया ✓", orderDup: "ऑर्डर पहले से दिया गया है ✓", splitPayment: "भुगतान बाँटें", splitFull: "पूरा", splitEqual: "बराबर", splitCustom: "कस्टम", splitItems: "ग्रुप पेमेंट", addTip: "टिप जोड़ें", tipNone: "कोई नहीं", itemizedBill: "विस्तृत बिल", alreadyPaid: "पहले से भुगतान किया गया", paymentWord: "भुगतान", cardWord: "कार्ड", totalBill: "कुल बिल", remainingDue: "शेष राशि", fullBody: "पूरी शेष राशि {amt} का भुगतान कर रहे हैं।", splitAmong: "{n} लोगों में बाँटें", yourShare: "आपका हिस्सा:", customAmount: "कस्टम राशि", myItemsHelp: "आपने जो खाया, उसे चुनें — आपकी पसंद टेबल पर सबके फ़ोन पर दिखेगी, ताकि कोई चीज़ दो बार न चुकाई जाए। हर कोई अपने चुने आइटम का भुगतान करता है।", unconfirmedTitle: "अपुष्ट भुगतान", attentionTitle: "भुगतान पर ध्यान देना ज़रूरी है", blockedBody: "आपका सर्वर इस भुगतान की पुष्टि कर सकता है। आप “फिर से प्रयास करें” भी दबा सकते हैं — यह ठीक इसी भुगतान की फिर से जांच करता है और आपसे दो बार पैसे नहीं कटेंगे।", unconfirmedBody: "आपका पिछला प्रयास ({amt} + {tip} टिप) पक्का नहीं हुआ। फिर से प्रयास करने पर वही भुगतान दोबारा भेजा जाएगा और आपसे दो बार पैसे नहीं कटेंगे।", paySuccess: "भुगतान सफल!", thanksDining: "हमारे यहाँ भोजन करने के लिए धन्यवाद। आपका भुगतान हो गया है।", receiptSummary: "रसीद सारांश", totalSettled: "कुल निपटान", printReceipt: "🖨️ रसीद प्रिंट करें", emailReceipt: "✉️ रसीद ईमेल करें", sendReceipt: "रसीद भेजें", receiptOptions: "रसीद", printAndEmail: "🖨️✉️ प्रिंट + ईमेल", noReceipt: "रसीद नहीं चाहिए", receiptPrinting: "प्रिंटर को भेज रहे हैं…", receiptPrintedOk: "आपकी रसीद आपकी टेबल पर प्रिंट हो रही है ✓", receiptPrintUnavailable: "इस टेबल पर अभी प्रिंट उपलब्ध नहीं है — आपका सर्वर प्रिंट कर देगा।", receiptAlreadyPrinted: "आपकी रसीद पहले ही इस टेबल के प्रिंटर पर भेज दी गई है।", receiptPrintFailed: "प्रिंटर तक नहीं पहुँच सके। कृपया अपने सर्वर से पूछें।", noReceiptOk: "रसीद नहीं — सब हो गया ✓", howWasIt: "कैसा रहा?", thanksExcl: "धन्यवाद! 🎉", gladLoved: "खुशी है कि आपको पसंद आया।", googleReviewHelp: "खुशी है कि आपको पसंद आया — Google पर एक छोटी समीक्षा हमारी बहुत मदद करती है।", leaveGoogleReview: "⭐ Google पर समीक्षा दें", thanksFeedback: "आपकी प्रतिक्रिया के लिए धन्यवाद", wellWork: "हम इस पर काम करेंगे।", commentPlaceholder: "क्या बेहतर हो सकता था? (वैकल्पिक)", sendFeedback: "प्रतिक्रिया भेजें", loyaltyTitle: "लॉयल्टी", rewardUnlocked: "🎉 इनाम अनलॉक हो गया!", showServer: "यह स्क्रीन अपने सर्वर को दिखाएं।", moreVisits: "{reward} के लिए {n} और विज़िट", moreVisits_1: "{reward} के लिए 1 और विज़िट", joinLoyalty: "लॉयल्टी से जुड़ें 🎁", loyaltyHelp: "इनाम पाएं — सिर्फ़ आपका फ़ोन नंबर, कोई खाता नहीं।", phonePlaceholder: "फ़ोन नंबर", countMyVisit: "मेरी विज़िट गिनें", joining: "जुड़ रहे हैं...", validPhone: "कृपया मान्य फ़ोन नंबर डालें।", validEmail: "कृपया मान्य ईमेल पता डालें।", validAmount: "कृपया भुगतान के लिए मान्य राशि चुनें।", paymentReceived: "भुगतान मिल गया ✓ शेष राशि: {amt}", receiptSentTo: "रसीद {email} पर भेज दी गई ✓", declined: "कार्ड अस्वीकार हुआ या चार्ज नहीं हो सका — आपसे पैसे नहीं कटे। कृपया दूसरा कार्ड आज़माएं।", attemptFailed: "वह प्रयास सफल नहीं हुआ और आपसे पैसे नहीं कटे। कृपया फिर से प्रयास करें या दूसरा कार्ड उपयोग करें।", unconfirmed: "हम पुष्टि नहीं कर सके कि आपका भुगतान हुआ या नहीं। “फिर से प्रयास करें” दबाएं — यह सुरक्षित है: वही अनुरोध दोबारा भेजा जाएगा और आपसे दो बार पैसे नहीं कटेंगे।", askStaff: "हम आपके भुगतान की पुष्टि नहीं कर सके। कृपया अपने सर्वर से पूछें — दोबारा भुगतान न करें।", billChanged: "आपके पिछले भुगतान प्रयास के बाद बिल बदल गया है। अगर वह भुगतान हो गया होगा तो वह “पहले से भुगतान किया गया” के नीचे दिखेगा। दोबारा भुगतान से पहले शेष राशि जांच लें।", cardNumber: "कार्ड नंबर", checkCardDetails: "कृपया अपने कार्ड का विवरण जांचें।", loadMenuFailed: "मेनू लोड नहीं हो सका। कृपया फिर से प्रयास करें।", joinFailed: "जुड़ नहीं सके। कृपया फिर से प्रयास करें।", ratingFailed: "आपकी प्रतिक्रिया भेजी नहीं जा सकी। कृपया फिर से प्रयास करें।", tapAgain: "कुल राशि बदल गई है — कृपया समीक्षा के लिए फिर से टैप करें।", cancelWord: "रद्द करें", taken: "लिया गया", claimedProgress: "{total} में से {n} आइटम चुने गए", paidSoFar: "अब तक भुगतान: {total} में से {amt}", justClaimed: "आपकी टेबल पर किसी ने अभी-अभी यह आइटम चुन लिया।", claimFailed: "आपकी पसंद अपडेट नहीं हो सकी। कृपया फिर से प्रयास करें।", shareTipTotal: "हिस्सा {share} · टिप {tip} · कुल {total}", cappedNotice: "यह राशि शेष राशि से अधिक है — राशि {amt} तक सीमित कर दी गई है।", splitRest: "शेष राशि {n} लोगों में बाँटें", yourShareOfCheck: "बिल में आपका हिस्सा", tipWord: "टिप", cardUnavailable: "इस स्थान पर कार्ड भुगतान उपलब्ध नहीं है।", orderFailed: "ऑर्डर नहीं दिया जा सका। कृपया फिर से प्रयास करें।", payProcessFailed: "भुगतान संसाधित नहीं हो सका।", cardEntryFailed: "कार्ड प्रविष्टि विफल — कृपया फिर से प्रयास करें।", receiptSendFailed: "रसीद नहीं भेजी जा सकी। कृपया फिर से प्रयास करें।", paymentCancelled: "भुगतान रद्द हो गया।", walletUnavailable: "यह भुगतान विकल्प इस डिवाइस पर उपलब्ध नहीं है।", walletIncomplete: "भुगतान पूरा नहीं हुआ।", libraryFailed: "भुगतान लाइब्रेरी लोड नहीं हो सकी। कृपया फिर से प्रयास करें।", tokenizeFailed: "कार्ड संसाधित नहीं हो सका। कृपया फिर से प्रयास करें।", formStartFailed: "भुगतान फ़ॉर्म शुरू नहीं हो सका।", cardProcessFailed: "कार्ड संसाधित नहीं हो सका।" },
+pa: { tableWord: "ਮੇਜ਼", secureNote: "🔒 ਸੁਰੱਖਿਅਤ ਭੁਗਤਾਨ · ਐਪ ਦੀ ਲੋੜ ਨਹੀਂ · ਖਾਤੇ ਦੀ ਲੋੜ ਨਹੀਂ", orPayWithCard: "ਜਾਂ ਕਾਰਡ ਨਾਲ ਭੁਗਤਾਨ ਕਰੋ", payWord: "ਭੁਗਤਾਨ ਕਰੋ", payBtn: "{amt} ਦਾ ਭੁਗਤਾਨ ਕਰੋ", processing: "ਭੁਗਤਾਨ ਦੀ ਪ੍ਰਕਿਰਿਆ ਚੱਲ ਰਹੀ ਹੈ...", retryPayment: "ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ · {amt}", askServer: "ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਪੁੱਛੋ", askServer2: "ਕਿਰਪਾ ਕਰਕੇ ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਪੁੱਛੋ।", loadingBill: "ਤੁਹਾਡਾ ਬਿੱਲ ਲੋਡ ਹੋ ਰਿਹਾ ਹੈ...", connecting: "ਰੈਸਟੋਰੈਂਟ ਨਾਲ ਸੁਰੱਖਿਅਤ ਢੰਗ ਨਾਲ ਜੁੜ ਰਹੇ ਹਾਂ।", invalidLink: "ਅਵੈਧ ਲਿੰਕ", invalidLinkBody: "ਕਿਰਪਾ ਕਰਕੇ ਆਪਣੀ ਮੇਜ਼ 'ਤੇ ਲੱਗਾ QR ਕੋਡ ਮੁੜ ਸਕੈਨ ਕਰੋ।", couldNotLoad: "ਤੁਹਾਡਾ ਬਿੱਲ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕਿਆ", couldNotLoadBody: "ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰ ਰਹੇ ਹਾਂ… ਜੇ ਇਹ ਜਾਰੀ ਰਹੇ ਤਾਂ ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਪੁੱਛੋ।", billSoon: "ਤੁਹਾਡਾ ਬਿੱਲ ਜਲਦੀ ਹੀ ਇੱਥੇ ਦਿਖਾਈ ਦੇਵੇਗਾ", billSoonBody: "ਜਿਵੇਂ ਹੀ ਸਰਵਰ ਤੁਹਾਡਾ ਆਰਡਰ ਭੇਜੇਗਾ, ਬਿੱਲ ਇੱਥੇ ਦਿਖੇਗਾ।", posUnavailable: "ਬਿੱਲ ਅਸਥਾਈ ਤੌਰ 'ਤੇ ਉਪਲਬਧ ਨਹੀਂ ਹੈ", posUnavailableBody: "ਅਸੀਂ ਹੁਣੇ ਰੈਸਟੋਰੈਂਟ ਦੇ ਸਿਸਟਮ ਨਾਲ ਕਨੈਕਟ ਨਹੀਂ ਕਰ ਸਕੇ। ਕਿਰਪਾ ਕਰਕੇ ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਪੁੱਛੋ — ਤੁਸੀਂ ਕਾਊਂਟਰ 'ਤੇ ਵੀ ਭੁਗਤਾਨ ਕਰ ਸਕਦੇ ਹੋ।", hungry: "ਭੁੱਖ ਲੱਗੀ ਹੈ?", hungryBody: "ਮੇਨੂ ਵੇਖੋ ਅਤੇ ਆਪਣੀ ਮੇਜ਼ ਤੋਂ ਹੀ ਆਰਡਰ ਕਰੋ।", viewMenu: "🍽️ ਮੇਨੂ ਵੇਖੋ", menuTab: "🍽️ ਮੇਨੂ", billTab: "💳 ਬਿੱਲ ਭਰੋ", menuLoading: "ਮੇਨੂ ਲੋਡ ਹੋ ਰਿਹਾ ਹੈ...", waitMoment: "ਕਿਰਪਾ ਕਰਕੇ ਥੋੜ੍ਹੀ ਦੇਰ ਉਡੀਕ ਕਰੋ।", noMenu: "ਮੇਨੂ ਉਪਲਬਧ ਨਹੀਂ ਹੈ", menuTitle: "ਮੇਨੂ", menuSub: "+ ਦਬਾ ਕੇ ਆਈਟਮਾਂ ਜੋੜੋ, ਫਿਰ ਆਰਡਰ ਸਿੱਧਾ ਰਸੋਈ ਵਿੱਚ ਭੇਜੋ।", itemsInCart: "ਕਾਰਟ ਵਿੱਚ {n} ਆਈਟਮਾਂ", itemsInCart_1: "ਕਾਰਟ ਵਿੱਚ 1 ਆਈਟਮ", sending: "ਭੇਜ ਰਹੇ ਹਾਂ...", sendOrder: "ਆਰਡਰ ਭੇਜੋ", orderSent: "ਆਰਡਰ ਰਸੋਈ ਵਿੱਚ ਭੇਜ ਦਿੱਤਾ ਗਿਆ ✓", orderDup: "ਆਰਡਰ ਪਹਿਲਾਂ ਹੀ ਦਿੱਤਾ ਗਿਆ ਹੈ ✓", splitPayment: "ਭੁਗਤਾਨ ਵੰਡੋ", splitFull: "ਪੂਰਾ", splitEqual: "ਬਰਾਬਰ", splitCustom: "ਕਸਟਮ", splitItems: "ਗਰੁੱਪ ਭੁਗਤਾਨ", addTip: "ਟਿੱਪ ਜੋੜੋ", tipNone: "ਕੋਈ ਨਹੀਂ", itemizedBill: "ਵਿਸਤ੍ਰਿਤ ਬਿੱਲ", alreadyPaid: "ਪਹਿਲਾਂ ਹੀ ਭੁਗਤਾਨ ਕੀਤਾ", paymentWord: "ਭੁਗਤਾਨ", cardWord: "ਕਾਰਡ", totalBill: "ਕੁੱਲ ਬਿੱਲ", remainingDue: "ਬਾਕੀ ਰਕਮ", fullBody: "ਪੂਰੀ ਬਾਕੀ ਰਕਮ {amt} ਦਾ ਭੁਗਤਾਨ ਕਰ ਰਹੇ ਹੋ।", splitAmong: "{n} ਲੋਕਾਂ ਵਿੱਚ ਵੰਡੋ", yourShare: "ਤੁਹਾਡਾ ਹਿੱਸਾ:", customAmount: "ਕਸਟਮ ਰਕਮ", myItemsHelp: "ਜੋ ਤੁਸੀਂ ਖਾਧਾ, ਉਹ ਚੁਣੋ — ਤੁਹਾਡੀ ਚੋਣ ਮੇਜ਼ 'ਤੇ ਸਭ ਦੇ ਫ਼ੋਨ 'ਤੇ ਦਿਖੇਗੀ, ਤਾਂ ਜੋ ਕੁਝ ਵੀ ਦੋ ਵਾਰ ਨਾ ਚੁਕਾਇਆ ਜਾਵੇ। ਹਰ ਕੋਈ ਆਪਣੀਆਂ ਚੁਣੀਆਂ ਆਈਟਮਾਂ ਦਾ ਭੁਗਤਾਨ ਕਰਦਾ ਹੈ।", unconfirmedTitle: "ਅਪੁਸ਼ਟ ਭੁਗਤਾਨ", attentionTitle: "ਭੁਗਤਾਨ 'ਤੇ ਧਿਆਨ ਦੇਣਾ ਜ਼ਰੂਰੀ ਹੈ", blockedBody: "ਤੁਹਾਡਾ ਸਰਵਰ ਇਸ ਭੁਗਤਾਨ ਦੀ ਪੁਸ਼ਟੀ ਕਰ ਸਕਦਾ ਹੈ। ਤੁਸੀਂ “ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ” ਵੀ ਦਬਾ ਸਕਦੇ ਹੋ — ਇਹ ਠੀਕ ਇਸੇ ਭੁਗਤਾਨ ਦੀ ਮੁੜ ਜਾਂਚ ਕਰਦਾ ਹੈ ਅਤੇ ਤੁਹਾਡੇ ਤੋਂ ਦੋ ਵਾਰ ਪੈਸੇ ਨਹੀਂ ਕੱਟੇ ਜਾਣਗੇ।", unconfirmedBody: "ਤੁਹਾਡੀ ਪਿਛਲੀ ਕੋਸ਼ਿਸ਼ ({amt} + {tip} ਟਿੱਪ) ਪੱਕੀ ਨਹੀਂ ਹੋਈ। ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰਨ 'ਤੇ ਉਹੀ ਭੁਗਤਾਨ ਮੁੜ ਭੇਜਿਆ ਜਾਵੇਗਾ ਅਤੇ ਤੁਹਾਡੇ ਤੋਂ ਦੋ ਵਾਰ ਪੈਸੇ ਨਹੀਂ ਕੱਟੇ ਜਾਣਗੇ।", paySuccess: "ਭੁਗਤਾਨ ਸਫਲ!", thanksDining: "ਸਾਡੇ ਇੱਥੇ ਖਾਣਾ ਖਾਣ ਲਈ ਧੰਨਵਾਦ। ਤੁਹਾਡਾ ਭੁਗਤਾਨ ਹੋ ਗਿਆ ਹੈ।", receiptSummary: "ਰਸੀਦ ਸਾਰ", totalSettled: "ਕੁੱਲ ਨਿਪਟਾਰਾ", printReceipt: "🖨️ ਰਸੀਦ ਪ੍ਰਿੰਟ ਕਰੋ", emailReceipt: "✉️ ਰਸੀਦ ਈਮੇਲ ਕਰੋ", sendReceipt: "ਰਸੀਦ ਭੇਜੋ", receiptOptions: "ਰਸੀਦ", printAndEmail: "🖨️✉️ ਪ੍ਰਿੰਟ + ਈਮੇਲ", noReceipt: "ਰਸੀਦ ਨਹੀਂ ਚਾਹੀਦੀ", receiptPrinting: "ਪ੍ਰਿੰਟਰ ਨੂੰ ਭੇਜ ਰਹੇ ਹਾਂ…", receiptPrintedOk: "ਤੁਹਾਡੀ ਰਸੀਦ ਤੁਹਾਡੀ ਮੇਜ਼ 'ਤੇ ਪ੍ਰਿੰਟ ਹੋ ਰਹੀ ਹੈ ✓", receiptPrintUnavailable: "ਇਸ ਮੇਜ਼ 'ਤੇ ਹੁਣ ਪ੍ਰਿੰਟ ਉਪਲਬਧ ਨਹੀਂ — ਤੁਹਾਡਾ ਸਰਵਰ ਪ੍ਰਿੰਟ ਕਰ ਦੇਵੇਗਾ।", receiptAlreadyPrinted: "ਤੁਹਾਡੀ ਰਸੀਦ ਪਹਿਲਾਂ ਹੀ ਇਸ ਮੇਜ਼ ਦੇ ਪ੍ਰਿੰਟਰ 'ਤੇ ਭੇਜੀ ਜਾ ਚੁੱਕੀ ਹੈ।", receiptPrintFailed: "ਪ੍ਰਿੰਟਰ ਤੱਕ ਨਹੀਂ ਪਹੁੰਚ ਸਕੇ। ਕਿਰਪਾ ਕਰਕੇ ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਪੁੱਛੋ।", noReceiptOk: "ਰਸੀਦ ਨਹੀਂ — ਸਭ ਹੋ ਗਿਆ ✓", howWasIt: "ਕਿਵੇਂ ਰਿਹਾ?", thanksExcl: "ਧੰਨਵਾਦ! 🎉", gladLoved: "ਖੁਸ਼ੀ ਹੈ ਕਿ ਤੁਹਾਨੂੰ ਪਸੰਦ ਆਇਆ।", googleReviewHelp: "ਖੁਸ਼ੀ ਹੈ ਕਿ ਤੁਹਾਨੂੰ ਪਸੰਦ ਆਇਆ — Google 'ਤੇ ਛੋਟੀ ਸਮੀਖਿਆ ਸਾਡੀ ਬਹੁਤ ਮਦਦ ਕਰਦੀ ਹੈ।", leaveGoogleReview: "⭐ Google 'ਤੇ ਸਮੀਖਿਆ ਦਿਓ", thanksFeedback: "ਤੁਹਾਡੀ ਪ੍ਰਤੀਕਿਰਿਆ ਲਈ ਧੰਨਵਾਦ", wellWork: "ਅਸੀਂ ਇਸ 'ਤੇ ਕੰਮ ਕਰਾਂਗੇ।", commentPlaceholder: "ਕੀ ਬਿਹਤਰ ਹੋ ਸਕਦਾ ਸੀ? (ਵਿਕਲਪਿਕ)", sendFeedback: "ਪ੍ਰਤੀਕਿਰਿਆ ਭੇਜੋ", loyaltyTitle: "ਲਾਇਲਟੀ", rewardUnlocked: "🎉 ਇਨਾਮ ਅਨਲੌਕ ਹੋ ਗਿਆ!", showServer: "ਇਹ ਸਕਰੀਨ ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਵਿਖਾਓ।", moreVisits: "{reward} ਲਈ ਹੋਰ {n} ਵਿਜ਼ਿਟ", moreVisits_1: "{reward} ਲਈ ਹੋਰ 1 ਵਿਜ਼ਿਟ", joinLoyalty: "ਲਾਇਲਟੀ ਵਿੱਚ ਸ਼ਾਮਲ ਹੋਵੋ 🎁", loyaltyHelp: "ਇਨਾਮ ਪਾਓ — ਸਿਰਫ਼ ਤੁਹਾਡਾ ਫ਼ੋਨ ਨੰਬਰ, ਕੋਈ ਖਾਤਾ ਨਹੀਂ।", phonePlaceholder: "ਫ਼ੋਨ ਨੰਬਰ", countMyVisit: "ਮੇਰੀ ਵਿਜ਼ਿਟ ਗਿਣੋ", joining: "ਸ਼ਾਮਲ ਹੋ ਰਹੇ ਹਾਂ...", validPhone: "ਕਿਰਪਾ ਕਰਕੇ ਸਹੀ ਫ਼ੋਨ ਨੰਬਰ ਦਰਜ ਕਰੋ।", validEmail: "ਕਿਰਪਾ ਕਰਕੇ ਸਹੀ ਈਮੇਲ ਪਤਾ ਦਰਜ ਕਰੋ।", validAmount: "ਕਿਰਪਾ ਕਰਕੇ ਭੁਗਤਾਨ ਲਈ ਸਹੀ ਰਕਮ ਚੁਣੋ।", paymentReceived: "ਭੁਗਤਾਨ ਮਿਲ ਗਿਆ ✓ ਬਾਕੀ ਰਕਮ: {amt}", receiptSentTo: "ਰਸੀਦ {email} 'ਤੇ ਭੇਜ ਦਿੱਤੀ ਗਈ ✓", declined: "ਕਾਰਡ ਅਸਵੀਕਾਰ ਹੋਇਆ ਜਾਂ ਚਾਰਜ ਨਹੀਂ ਹੋ ਸਕਿਆ — ਤੁਹਾਡੇ ਤੋਂ ਪੈਸੇ ਨਹੀਂ ਕੱਟੇ। ਕਿਰਪਾ ਕਰਕੇ ਹੋਰ ਕਾਰਡ ਅਜ਼ਮਾਓ।", attemptFailed: "ਉਹ ਕੋਸ਼ਿਸ਼ ਸਫਲ ਨਹੀਂ ਹੋਈ ਅਤੇ ਤੁਹਾਡੇ ਤੋਂ ਪੈਸੇ ਨਹੀਂ ਕੱਟੇ। ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ ਜਾਂ ਹੋਰ ਕਾਰਡ ਵਰਤੋ।", unconfirmed: "ਅਸੀਂ ਪੁਸ਼ਟੀ ਨਹੀਂ ਕਰ ਸਕੇ ਕਿ ਤੁਹਾਡਾ ਭੁਗਤਾਨ ਹੋਇਆ ਜਾਂ ਨਹੀਂ। “ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ” ਦਬਾਓ — ਇਹ ਸੁਰੱਖਿਅਤ ਹੈ: ਉਹੀ ਬੇਨਤੀ ਮੁੜ ਭੇਜੀ ਜਾਵੇਗੀ ਅਤੇ ਤੁਹਾਡੇ ਤੋਂ ਦੋ ਵਾਰ ਪੈਸੇ ਨਹੀਂ ਕੱਟੇ ਜਾਣਗੇ।", askStaff: "ਅਸੀਂ ਤੁਹਾਡੇ ਭੁਗਤਾਨ ਦੀ ਪੁਸ਼ਟੀ ਨਹੀਂ ਕਰ ਸਕੇ। ਕਿਰਪਾ ਕਰਕੇ ਆਪਣੇ ਸਰਵਰ ਨੂੰ ਪੁੱਛੋ — ਮੁੜ ਭੁਗਤਾਨ ਨਾ ਕਰੋ।", billChanged: "ਤੁਹਾਡੀ ਪਿਛਲੀ ਭੁਗਤਾਨ ਕੋਸ਼ਿਸ਼ ਤੋਂ ਬਾਅਦ ਬਿੱਲ ਬਦਲ ਗਿਆ ਹੈ। ਜੇ ਉਹ ਭੁਗਤਾਨ ਹੋ ਗਿਆ ਹੋਵੇਗਾ ਤਾਂ ਉਹ “ਪਹਿਲਾਂ ਹੀ ਭੁਗਤਾਨ ਕੀਤਾ” ਹੇਠ ਦਿਖੇਗਾ। ਮੁੜ ਭੁਗਤਾਨ ਤੋਂ ਪਹਿਲਾਂ ਬਾਕੀ ਰਕਮ ਵੇਖ ਲਓ।", cardNumber: "ਕਾਰਡ ਨੰਬਰ", checkCardDetails: "ਕਿਰਪਾ ਕਰਕੇ ਆਪਣੇ ਕਾਰਡ ਦੇ ਵੇਰਵੇ ਜਾਂਚੋ।", loadMenuFailed: "ਮੇਨੂ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ।", joinFailed: "ਸ਼ਾਮਲ ਨਹੀਂ ਹੋ ਸਕੇ। ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ।", ratingFailed: "ਤੁਹਾਡੀ ਪ੍ਰਤੀਕਿਰਿਆ ਭੇਜੀ ਨਹੀਂ ਜਾ ਸਕੀ। ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ।", tapAgain: "ਕੁੱਲ ਰਕਮ ਬਦਲ ਗਈ ਹੈ — ਕਿਰਪਾ ਕਰਕੇ ਜਾਂਚ ਲਈ ਮੁੜ ਟੈਪ ਕਰੋ।", cancelWord: "ਰੱਦ ਕਰੋ", taken: "ਲਿਆ ਗਿਆ", claimedProgress: "{total} ਵਿੱਚੋਂ {n} ਆਈਟਮਾਂ ਚੁਣੀਆਂ ਗਈਆਂ", paidSoFar: "ਹੁਣ ਤੱਕ ਭੁਗਤਾਨ: {total} ਵਿੱਚੋਂ {amt}", justClaimed: "ਤੁਹਾਡੀ ਮੇਜ਼ 'ਤੇ ਕਿਸੇ ਨੇ ਹੁਣੇ ਇਹ ਆਈਟਮ ਚੁਣ ਲਈ ਹੈ।", claimFailed: "ਤੁਹਾਡੀ ਚੋਣ ਅਪਡੇਟ ਨਹੀਂ ਹੋ ਸਕੀ। ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ।", shareTipTotal: "ਹਿੱਸਾ {share} · ਟਿੱਪ {tip} · ਕੁੱਲ {total}", cappedNotice: "ਇਹ ਰਕਮ ਬਾਕੀ ਰਕਮ ਤੋਂ ਵੱਧ ਹੈ — ਰਕਮ {amt} ਤੱਕ ਸੀਮਿਤ ਕਰ ਦਿੱਤੀ ਗਈ ਹੈ।", splitRest: "ਬਾਕੀ ਰਕਮ {n} ਲੋਕਾਂ ਵਿੱਚ ਵੰਡੋ", yourShareOfCheck: "ਬਿੱਲ ਵਿੱਚ ਤੁਹਾਡਾ ਹਿੱਸਾ", tipWord: "ਟਿੱਪ", cardUnavailable: "ਇਸ ਸਥਾਨ 'ਤੇ ਕਾਰਡ ਭੁਗਤਾਨ ਉਪਲਬਧ ਨਹੀਂ ਹੈ।", orderFailed: "ਆਰਡਰ ਨਹੀਂ ਦਿੱਤਾ ਜਾ ਸਕਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ।", payProcessFailed: "ਭੁਗਤਾਨ ਦੀ ਪ੍ਰਕਿਰਿਆ ਨਹੀਂ ਹੋ ਸਕੀ।", cardEntryFailed: "ਕਾਰਡ ਐਂਟਰੀ ਅਸਫਲ — ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ।", receiptSendFailed: "ਰਸੀਦ ਨਹੀਂ ਭੇਜੀ ਜਾ ਸਕੀ। ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ।", paymentCancelled: "ਭੁਗਤਾਨ ਰੱਦ ਹੋ ਗਿਆ।", walletUnavailable: "ਇਹ ਭੁਗਤਾਨ ਵਿਕਲਪ ਇਸ ਡਿਵਾਈਸ 'ਤੇ ਉਪਲਬਧ ਨਹੀਂ ਹੈ।", walletIncomplete: "ਭੁਗਤਾਨ ਪੂਰਾ ਨਹੀਂ ਹੋਇਆ।", libraryFailed: "ਭੁਗਤਾਨ ਲਾਇਬ੍ਰੇਰੀ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕੀ। ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ।", tokenizeFailed: "ਕਾਰਡ ਦੀ ਪ੍ਰਕਿਰਿਆ ਨਹੀਂ ਹੋ ਸਕੀ। ਕਿਰਪਾ ਕਰਕੇ ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ।", formStartFailed: "ਭੁਗਤਾਨ ਫਾਰਮ ਸ਼ੁਰੂ ਨਹੀਂ ਹੋ ਸਕਿਆ।", cardProcessFailed: "ਕਾਰਡ ਦੀ ਪ੍ਰਕਿਰਿਆ ਨਹੀਂ ਹੋ ਸਕੀ।" }
 };
 const LOCALES = { en: 'en-CA', fa: 'fa-IR', zh: 'zh-CN', hi: 'hi-IN', pa: 'pa-IN' };
 function detectLang() {
@@ -110,9 +114,11 @@ const claimAt = (idx) => {
 let table = null;
 let check = null;
 let receipt = null;          // sticky success snapshot
+let lastPayment = null;      // C3-8 (M9): THIS device's latest successful payment (receipt-shaped), kept even when the check stayed open
 let receiptChoice = null;    // null | 'print' | 'email' | 'both' | 'none' — guest picks on the success screen
 let receiptPrintState = null; // null | 'printing' | 'done' | 'unavailable' | 'already' | 'failed'
 let receiptEmailDone = false;
+let receiptEmailDraft = ''; // C3-8 (M20): the typed receipt email survives async re-renders (print status changes force them)
 let loadFailed = false;
 let posUnavailable = false;
 let mode = 'full', people = 2, customCents = 0, items = {}, tipPct = 15;
@@ -243,7 +249,7 @@ async function getCardConfig(checkRef) {
     if (!cardConfigCache[checkRef]) {
         const res = await fetchTimeout(`/api/checks/${encodeURIComponent(checkRef)}/card-config?table_token=${encodeURIComponent(tableToken)}`);
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || 'Card payments are not available at this location.');
+        if (!res.ok) throw new Error(t('cardUnavailable'));
         cardConfigCache[checkRef] = data;
     }
     return cardConfigCache[checkRef];
@@ -258,7 +264,7 @@ function loadScript(src) {
     const p = new Promise((resolve, reject) => {
         const s = document.createElement('script');
         s.src = src; s.async = true;
-        s.onload = resolve; s.onerror = () => { scriptLoads.delete(src); reject(new Error('Could not load payment library.')); };
+        s.onload = resolve; s.onerror = () => { scriptLoads.delete(src); reject(new Error(t('libraryFailed'))); };
         document.head.appendChild(s);
     });
     scriptLoads.set(src, p);
@@ -273,27 +279,45 @@ async function getSquarePayments(cfg) {
     // F8-Low: a missing environment used to silently select the sandbox
     // SDK. Fail loudly instead — a wrong-environment SDK must never be
     // discovered by a guest at the till.
-    if (!cfg.extra?.environment) throw new Error('Card payments are not available at this location.');
+    // C3-8 (L1): allow-list BOTH values — any other string (a typo'd
+    // 'prod', a staging name) also fails loudly rather than silently
+    // loading the sandbox SDK.
+    if (cfg.extra?.environment !== 'production' && cfg.extra?.environment !== 'sandbox') throw new Error(t('cardUnavailable'));
     const env = cfg.extra.environment === 'production' ? '' : 'sandbox.';
     await loadScript(`https://${env}web.squarecdn.com/v1/square.js`);
-    if (!window.Square) throw new Error('Square payments library failed to load.');
+    if (!window.Square) throw new Error(t('libraryFailed'));
     const key = `${cfg.publishableKey}|${cfg.extra?.locationId || ''}`;
     if (!squarePayments || squarePaymentsKey !== key) {
         squarePayments = window.Square.payments(cfg.publishableKey, cfg.extra.locationId);
         squarePaymentsKey = key;
         squareCard = null; // card iframe belongs to the previous instance
+        squareAttachPromise = null;
     }
     return squarePayments;
 }
 
 let squareCard = null;
-async function squareTokenize(cfg) {
+let squareAttachPromise = null;
+// C3-8 (M11): the card iframe is attached as soon as the pay footer is
+// usable (see updatePayButton), NOT for the first time inside
+// squareTokenize — attaching on the Pay tap tokenized a still-empty form
+// and failed the guest's first attempt with a card-details error.
+async function ensureSquareCard(cfg) {
     const payments = await getSquarePayments(cfg);
-    if (!squareCard) {
-        squareCard = await payments.card();
-        await squareCard.attach('#card-container');
+    if (squareCard) return squareCard;
+    if (!squareAttachPromise) {
+        squareAttachPromise = (async () => {
+            const card = await payments.card();
+            await card.attach('#card-container');
+            squareCard = card;
+            return card;
+        })().catch((e) => { squareAttachPromise = null; throw e; });
     }
-    const r = await squareCard.tokenize();
+    return squareAttachPromise;
+}
+async function squareTokenize(cfg) {
+    const card = await ensureSquareCard(cfg);
+    const r = await card.tokenize();
     if (r.status !== 'OK') throw new Error(r.errors?.[0]?.message || t('checkCardDetails'));
     return r.token; // "cnon:..."
 }
@@ -306,7 +330,7 @@ async function squareTokenize(cfg) {
 // SDK at attach() time: Apple Pay needs Safari + a Wallet card + the domain
 // registered with Square; Google Pay needs a supported browser/device. When
 // neither attaches, the area stays hidden and card payment is unaffected.
-let walletState = { key: '', apple: null, google: null, busy: false };
+let walletState = { key: '', apple: null, google: null, busy: false, pendingKey: '', timer: null };
 
 function effectiveTotalCents() {
     const a = currentAttempt();
@@ -324,6 +348,19 @@ async function setupWallets() {
     const total = effectiveTotalCents();
     const key = `${check.square_order_id}|${total}|${check.currency || 'CAD'}`;
     if (walletState.key === key || walletState.busy) return;
+    // C3-8 (M13): rebuilds are debounced — every custom-amount keystroke
+    // used to destroy and rebuild both SDK wallet objects. The first
+    // build (no key yet) still happens immediately.
+    if (walletState.key) {
+        walletState.pendingKey = key;
+        if (!walletState.timer) {
+            walletState.timer = setTimeout(() => {
+                walletState.timer = null;
+                if (walletState.pendingKey && walletState.pendingKey !== walletState.key) setupWallets();
+            }, 600);
+        }
+        return;
+    }
     walletState.busy = true;
     try {
         const cfg = await getCardConfig(check.square_order_id);
@@ -335,7 +372,10 @@ async function setupWallets() {
         $('apple-pay-button').innerHTML = '';
         $('google-pay-button').innerHTML = '';
         const paymentRequest = payments.paymentRequest({
-            countryCode: 'CA',
+            // C3-8 (M7): the wallet country follows the CHECK's currency
+            // (which inherits the location's currency) — 'CA' used to be
+            // hardcoded even for a USD location.
+            countryCode: ({ CAD: 'CA', USD: 'US', GBP: 'GB', AUD: 'AU', NZD: 'NZ', EUR: 'IE', JPY: 'JP' })[check.currency || 'CAD'] || 'CA',
             currencyCode: check.currency || 'CAD',
             total: { amount: (total / 100).toFixed(2), label: 'Total' },
         });
@@ -358,6 +398,7 @@ async function setupWallets() {
         area.style.display = 'none';
     } finally {
         walletState.busy = false;
+        syncFooterPadding();
         // F8-4: a total change that arrived WHILE this setup was running
         // was dropped by the busy guard. Re-check once: if the payable
         // total no longer matches the sheet just built, rebuild so the
@@ -371,9 +412,9 @@ async function setupWallets() {
 
 async function walletTokenize(kind) {
     const w = kind === 'apple' ? walletState.apple : walletState.google;
-    if (!w) throw new Error('That payment option is not available on this device.');
+    if (!w) throw new Error(t('walletUnavailable'));
     const r = await w.tokenize();
-    if (r.status !== 'OK') throw new Error(r.errors?.[0]?.message || 'Payment was not completed.');
+    if (r.status !== 'OK') throw new Error(r.errors?.[0]?.message || t('walletIncomplete'));
     return r.token; // "cnon:..."
 }
 
@@ -384,12 +425,12 @@ function cloverCardForm() {
         const c = $('card-container');
         c.innerHTML = `
             <div style="display:grid;gap:8px">
-                <input id="cc-num" inputmode="numeric" placeholder="${t('cardNumber')}" autocomplete="cc-number"
+                <input id="cc-num" dir="ltr" inputmode="numeric" placeholder="${t('cardNumber')}" autocomplete="cc-number"
                     style="padding:10px;border:1px solid var(--border);border-radius:8px;font-size:16px">
                 <div style="display:flex;gap:8px">
-                    <input id="cc-exp" placeholder="MM / YY" autocomplete="cc-exp"
+                    <input id="cc-exp" dir="ltr" placeholder="MM / YY" autocomplete="cc-exp"
                         style="flex:1;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:16px">
-                    <input id="cc-cvv" inputmode="numeric" placeholder="CVV" autocomplete="cc-csc"
+                    <input id="cc-cvv" dir="ltr" inputmode="numeric" placeholder="CVV" autocomplete="cc-csc"
                         style="flex:1;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:16px">
                 </div>
                 <button id="cc-tokenize" class="btn-primary">${t('payWord')}</button>
@@ -404,6 +445,11 @@ function cloverCardForm() {
             const exp = normalizeDigits($('cc-exp').value).replace(/\D/g, '');
             const cvv = normalizeDigits($('cc-cvv').value).replace(/\D/g, '');
             if (num.length < 13 || exp.length !== 4 || cvv.length < 3) {
+                // C3-8 (M12): a settled promise used to leave this form in
+                // the DOM with a Pay button that did nothing — the guest
+                // re-tapped a dead form. Clear it on EVERY settle; the
+                // next attempt builds a fresh form.
+                c.innerHTML = '';
                 reject(new Error(t('checkCardDetails'))); return;
             }
             resolve({
@@ -422,15 +468,18 @@ async function cloverTokenize(cfg) {
     try {
         tokenUrl = new URL(cfg.extra.tokenHost);
         if (tokenUrl.protocol !== 'https:' || !/(^|\.)clover\.com$/.test(tokenUrl.hostname)) throw new Error('bad host');
-    } catch { throw new Error('Card payments are not available at this location.'); }
+    } catch { throw new Error(t('cardUnavailable')); }
     const card = await cloverCardForm();
+    // C3-8 (M12): the PAN fields leave the DOM the moment the form
+    // settles — they used to sit in #card-container after a success.
+    $('card-container').innerHTML = '';
     const res = await fetchTimeout(`${tokenUrl.origin}${tokenUrl.pathname.replace(/\/$/, '')}/v1/tokens`, {
         method: 'POST',
         headers: { 'apikey': cfg.publishableKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({ card }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.id) throw new Error(data.message || 'Card could not be tokenized. Please try again.');
+    if (!res.ok || !data.id) throw new Error(t('tokenizeFailed'));
     return data.id; // "clv_..."
 }
 
@@ -443,7 +492,7 @@ async function helcimTokenize(cfg) {
     try {
         const u = new URL(cfg.extra.helcimPayJs);
         if (u.protocol !== 'https:' || !/(^|\.)helcim\.(app|com)$/.test(u.hostname)) throw new Error('bad host');
-    } catch { throw new Error('Card payments are not available at this location.'); }
+    } catch { throw new Error(t('cardUnavailable')); }
     await loadScript(cfg.extra.helcimPayJs);
     try {
         return await new Promise((resolve, reject) => {
@@ -453,11 +502,18 @@ async function helcimTokenize(cfg) {
             // message carrying an attacker-chosen card token.
             let expectedOrigin = '';
             try { expectedOrigin = new URL(cfg.extra.helcimPayJs).origin; } catch { expectedOrigin = 'https://secure.helcim.app'; }
+            // C3-8 (L11): if the modal is closed without ANY event, this
+            // promise used to never settle — `paying` stayed true and the
+            // bill poll stayed paused until a reload. A timeout settles
+            // it as a cancellation; no charge was attempted.
+            let timer = null;
             const cleanup = () => {
+                if (timer) { clearTimeout(timer); timer = null; }
                 window.removeEventListener('message', onMsg);
                 // F8-8: never leave a Helcim iframe stacked in the page.
                 try { window.removeHelcimPayIframe?.(); } catch { /* ignore */ }
             };
+            timer = setTimeout(() => { cleanup(); reject(new Error(t('paymentCancelled'))); }, 180000);
             const onMsg = (ev) => {
                 if (ev.origin !== expectedOrigin) return;
                 let msg = null;
@@ -472,11 +528,11 @@ async function helcimTokenize(cfg) {
                         if (token) return resolve(token);
                     } catch { /* fall through */ }
                 }
-                reject(new Error(msg.eventStatus === 'ABORTED' ? 'Payment cancelled.' : 'Card could not be processed.'));
+                reject(new Error(msg.eventStatus === 'ABORTED' ? t('paymentCancelled') : t('cardProcessFailed')));
             };
             window.addEventListener('message', onMsg);
             try { window.appendHelcimPayIframe(cfg.publishableKey); }
-            catch (e) { cleanup(); reject(new Error('Could not start the payment form.')); }
+            catch (e) { cleanup(); reject(new Error(t('formStartFailed'))); }
         });
     } finally {
         // F8-8/F3-9: a Helcim checkout session may be single-use — the
@@ -493,7 +549,7 @@ async function getCardToken(checkRef) {
         try { return await helcimTokenize(cfg); }
         finally { delete cardConfigCache[checkRef]; }
     }
-    throw new Error('Card payments are not available at this location.');
+    throw new Error(t('cardUnavailable'));
 }
 
 // ---- data -------------------------------------------------------------------
@@ -508,7 +564,7 @@ async function fetchBill() {
     try {
         const res = await fetchTimeout(`/api/t/${encodeURIComponent(tableToken)}?device_id=${encodeURIComponent(deviceId)}`);
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || 'Failed to load table info');
+        if (!res.ok) throw new Error(t('couldNotLoad'));
         if (seq !== billFetchSeq) return; // a newer fetch already won
         table = data.table; check = data.check; loadFailed = false; posUnavailable = !!data.pos_unavailable;
         claimsByIdx = {};
@@ -520,7 +576,10 @@ async function fetchBill() {
         if (check) check.items.forEach((it, idx) => { const c = claimAt(idx); if (c && c.mine) items[idx] = true; });
         orderingEnabled = !!data.ordering_enabled;
         loyaltyEnabled = !!data.loyalty_enabled;
-        printEnabled = !data.capabilities || data.capabilities.print !== false;
+        // C3-8 (M15): fail CLOSED. A missing capabilities block used to
+        // show Print anyway; the server gates Starter printing itself
+        // (receipt-print route), and this matches it.
+        printEnabled = !!data.capabilities && data.capabilities.print === true;
         reconcileAttempt();
     } catch (err) {
         if (!table) loadFailed = true; // keep showing the last good bill on transient errors
@@ -558,11 +617,18 @@ async function submitRating(stars, comment = null) {
 
 function renderRating() {
     if (ratingDone) {
-        if (rated >= 4 && ratingResult?.google_review_url) {
+        // C3-8 (M14): the server validates this URL at write time (https +
+        // Google-host allow-list, staff settings) — the client ALSO only
+        // renders an https: link, so a legacy/poisoned value can never
+        // become a javascript: anchor. esc() alone stops breakout, not
+        // the scheme.
+        let safeReviewUrl = null;
+        try { if (new URL(ratingResult?.google_review_url).protocol === 'https:') safeReviewUrl = ratingResult.google_review_url; } catch { safeReviewUrl = null; }
+        if (rated >= 4 && safeReviewUrl) {
             return `<div class="card" style="text-align:center;">
                 <h2>${t('thanksExcl')}</h2>
                 <p style="font-size:0.9rem;color:var(--text-muted);margin-bottom:12px;">${t('googleReviewHelp')}</p>
-                <a href="${esc(ratingResult.google_review_url)}" target="_blank" rel="noopener noreferrer" class="btn-primary" style="text-decoration:none;">${t('leaveGoogleReview')}</a>
+                <a href="${esc(safeReviewUrl)}" target="_blank" rel="noopener noreferrer" class="btn-primary" style="text-decoration:none;">${t('leaveGoogleReview')}</a>
             </div>`;
         }
         if (rated >= 4) {
@@ -594,8 +660,10 @@ async function submitLoyalty() {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || t('joinFailed'));
         loyaltyResult = data;
-    } catch (err) {
-        setNotice(err.message || t('joinFailed'));
+    } catch {
+        // C3-8 (M22): never surface the server's raw error string to the
+        // guest — the notice is the localized fallback.
+        setNotice(t('joinFailed'));
     } finally {
         loyaltySubmitting = false; render(true);
     }
@@ -614,7 +682,7 @@ function renderLoyalty() {
         }
         return `<div class="card" style="text-align:center;">
             <h2>${t('loyaltyTitle')}</h2>
-            <p style="font-size:0.9rem;color:var(--text-muted);">${t('moreVisits', { n: esc(String(r.visits_remaining ?? '')), reward: esc(r.reward_text) })}</p>
+            <p style="font-size:0.9rem;color:var(--text-muted);">${t('moreVisits', { n: r.visits_remaining ?? '', reward: esc(r.reward_text) })}</p>
             <div style="background:var(--border);border-radius:8px;height:8px;margin-top:8px;overflow:hidden;">
                 <div style="background:var(--gold);height:100%;width:${Math.round(((r.visits || 0) / Math.max(1, r.visits_required || 1)) * 100)}%;"></div>
             </div>
@@ -623,7 +691,7 @@ function renderLoyalty() {
     return `<div class="card" style="text-align:center;">
         <h2>${t('joinLoyalty')}</h2>
         <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">${t('loyaltyHelp')}</p>
-        <input id="loyalty-phone" type="tel" inputmode="tel" placeholder="${t('phonePlaceholder')}"
+        <input id="loyalty-phone" dir="ltr" type="tel" inputmode="tel" placeholder="${t('phonePlaceholder')}"
             value="${esc(loyaltyPhone)}"
             style="width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;font-size:1rem;margin-bottom:10px;">
         <button class="btn-primary" data-action="loyalty" ${loyaltySubmitting ? 'disabled' : ''}>${loyaltySubmitting ? t('joining') : t('countMyVisit')}</button>
@@ -639,8 +707,8 @@ async function loadMenu() {
         if (!res.ok) throw new Error(data.error || t('loadMenuFailed'));
         menuItems = data.items || [];
         menuLoaded = true;
-    } catch (err) {
-        setNotice(err.message || t('loadMenuFailed'));
+    } catch {
+        setNotice(t('loadMenuFailed'));
     }
     render(true);
 }
@@ -698,15 +766,15 @@ async function submitOrder() {
             // refused — drop the key. 409/408/429/5xx and network errors
             // keep it: the order may already be with the kitchen.
             if ([400, 401, 403, 404, 422].includes(res.status)) dropOrderKey();
-            throw new Error(data.error || 'Order could not be placed.');
+            throw new Error(t('orderFailed'));
         }
         dropOrderKey();
         cart = {}; menuLoaded = false;
         check = data.check;
         view = 'bill';
         setNotice(data.duplicate ? t('orderDup') : t('orderSent'), 'ok');
-    } catch (err) {
-        setNotice(err.message || 'Order could not be placed. Please try again.');
+    } catch {
+        setNotice(t('orderFailed'));
     } finally {
         ordering = false; render(true);
     }
@@ -780,7 +848,12 @@ async function processPayment(tokenGetter, methodLabel) {
     const snapCheck = check;
     const snapItems = items;
     let a = loadAttempt(orderId);
-    if (a && a.blocked) return;
+    // C3-8 (M10): a blocked attempt is NOT a dead end — tapping Retry
+    // re-sends the SAME frozen attempt under the SAME idempotency key.
+    // The server replays a finished key, resumes a never-started one,
+    // and re-409s a genuinely unknown one, so the re-check can never
+    // charge twice; the old code stranded the phone for the 24h TTL
+    // even after staff had reconciled the payment.
 
     const base = a ? { mode: a.mode, amount: a.amount, tip: a.tip } : (() => { const p = payCents(); return { mode, amount: p, tip: tipCentsFor(p) }; })();
     if (!Number.isInteger(base.amount) || base.amount <= 0 || !Number.isInteger(base.tip) || base.tip < 0 || base.tip > base.amount) {
@@ -791,7 +864,7 @@ async function processPayment(tokenGetter, methodLabel) {
     try {
         let nonce;
         try { nonce = tokenGetter ? await tokenGetter() : await getCardToken(orderId); }
-        catch (e) { setNotice(e.message || 'Card entry failed — please try again.'); return; } // no attempt exists yet: nothing to resolve
+        catch (e) { setNotice(e.message || t('cardEntryFailed')); return; } // no attempt exists yet: nothing to resolve
 
         if (!a) {
             a = { orderId, key: uuid(), mode: base.mode, amount: base.amount, tip: base.tip, remainingBefore: check.remaining_cents, blocked: false, ts: Date.now() };
@@ -812,26 +885,40 @@ async function processPayment(tokenGetter, methodLabel) {
 
         if (res.ok) {
             clearAttempt(orderId);
+            // C3-8 (M9): remember THIS device's payment either way. When
+            // someone else later completes the check, the success screen
+            // (renderInner's completed branch) must show — and bind the
+            // receipt options to — the guest's OWN payment, not the full
+            // check with payment_id undefined. Claims are not a
+            // double-charge risk here: the server releases the payer's
+            // claims on a successful items payment.
+            const paidItems = a.mode === 'items'
+                ? snapCheck.items.filter((_, idx) => snapItems[idx])
+                : snapCheck.items;
+            lastPayment = {
+                order_id: orderId,
+                items: paidItems.length ? paidItems : snapCheck.items,
+                amount_cents: a.amount,
+                tip_cents: a.tip,
+                total_cents: a.amount + a.tip,
+                currency: snapCheck.currency,
+                // C-6: the receipt email binds to THIS payment.
+                payment_id: data.paymentId ?? null,
+            };
             if (data.checkState === 'COMPLETED') {
-                // Receipt shows what THIS person paid: their items in My Items
-                // mode, otherwise the full check. (Snapshot, F8-3.)
-                const paidItems = a.mode === 'items'
-                    ? snapCheck.items.filter((_, idx) => snapItems[idx])
-                    : snapCheck.items;
-                receiptChoice = null; receiptPrintState = null; receiptEmailDone = false;
-                receipt = {
-                    items: paidItems.length ? paidItems : snapCheck.items,
-                    total_cents: a.amount + a.tip,
-                    currency: snapCheck.currency,
-                    // C-6: the receipt email binds to THIS payment.
-                    payment_id: data.paymentId ?? null,
-                };
+                receiptChoice = null; receiptPrintState = null; receiptEmailDone = false; receiptEmailDraft = '';
+                receipt = { ...lastPayment };
             } else {
-                setNotice(t('paymentReceived', { amt: formatMoney(data.remainingCents ?? 0, snapCheck.currency) }), 'ok');
+                // C3-8 (M6): a bare {} success body (the JSON parse is
+                // swallowed by design) must not tell the guest the
+                // balance is $0.00 — fall back to the snapshot math; the
+                // post-pay bill fetch corrects the figure.
+                const rem = Number.isFinite(data.remainingCents) ? data.remainingCents : Math.max(0, snapCheck.remaining_cents - a.amount);
+                setNotice(t('paymentReceived', { amt: formatMoney(rem, snapCheck.currency) }), 'ok');
             }
             return;
         }
-        if (res.status === 400) { clearAttempt(orderId); setNotice(data.error || 'Payment could not be processed.'); return; }
+        if (res.status === 400) { clearAttempt(orderId); setNotice(t('payProcessFailed')); return; }
         if (res.status === 402) { clearAttempt(orderId); setNotice(t('declined')); return; }
         if (res.status === 409 && (code === 'payment_failed' || code === 'payment_cancelled')) {
             clearAttempt(orderId); setNotice(t('attemptFailed')); return;
@@ -854,18 +941,37 @@ function noticeHtml() {
     return `<div class="alert-box">${esc(notice.text)}</div>`;
 }
 
+// C3-8 (L7): the fixed pay footer is ~120px tall bare and ~300px with
+// wallets + the card iframe — a static 100px content padding let it hide
+// the lowest controls on small phones. The content padding now tracks
+// the footer's real height.
+function syncFooterPadding() {
+    const footer = $('pay-footer');
+    const content = document.querySelector('.content');
+    if (!footer || !content) return;
+    const h = footer.style.display === 'none' ? 0 : footer.offsetHeight;
+    content.style.paddingBottom = (h + 24) + 'px';
+}
+
 function updatePayButton() {
     const btn = $('btn-pay-main');
     const footer = $('pay-footer');
-    if (!check || receipt || check.remaining_cents <= 0) { footer.style.display = 'none'; return; }
+    if (!check || receipt || check.remaining_cents <= 0) { footer.style.display = 'none'; syncFooterPadding(); return; }
     footer.style.display = 'flex';
+    // C3-8 (M11): warm the Square card iframe as soon as the footer is
+    // usable, so the guest can type into it before ever tapping Pay
+    // (config + attach are cached; repeat renders are no-ops).
+    getCardConfig(check.square_order_id).then((cfg) => { if (cfg.provider === 'square') ensureSquareCard(cfg).catch(() => {}); }).catch(() => {});
     setupWallets(); // no-op unless the payable total changed; hides itself when blocked/unavailable
     const a = currentAttempt();
-    if (a && a.blocked) { btn.disabled = true; btn.textContent = t('askServer'); return; }
-    if (a) { btn.disabled = paying; btn.textContent = paying ? t('processing') : t('retryPayment', { amt: formatMoney(a.amount + a.tip, check.currency) }); return; }
+    // C3-8 (M10): a blocked attempt gets a working Retry (same-key
+    // re-check) instead of a dead disabled button.
+    if (a && a.blocked) { btn.disabled = paying; btn.textContent = paying ? t('processing') : t('retryPayment', { amt: formatMoney(a.amount + a.tip, check.currency) }); syncFooterPadding(); return; }
+    if (a) { btn.disabled = paying; btn.textContent = paying ? t('processing') : t('retryPayment', { amt: formatMoney(a.amount + a.tip, check.currency) }); syncFooterPadding(); return; }
     const p = payCents();
     btn.disabled = paying;
     btn.textContent = paying ? t('processing') : t('payBtn', { amt: formatMoney(p + tipCentsFor(p), check.currency) });
+    syncFooterPadding();
 }
 
 function render(force = false) {
@@ -910,17 +1016,23 @@ function renderInner(force = false) {
         container.innerHTML = `${noticeHtml()}${renderViewTabs()}<div class="empty-state"><h3>${!table ? t('loadingBill') : posUnavailable ? t('posUnavailable') : t('billSoon')}</h3><p>${!table ? t('connecting') : posUnavailable ? t('posUnavailableBody') : t('billSoonBody')}</p></div>${menuCta}`;
         return;
     }
-    if (check.state === 'COMPLETED' || check.remaining_cents <= 0) { $('pay-footer').style.display = 'none'; container.innerHTML = renderSuccessState(); return; }
+    // C3-8 (M9): the success screen includes the notice area here too —
+    // receipt errors/confirmations were invisible on this branch.
+    if (check.state === 'COMPLETED' || check.remaining_cents <= 0) { $('pay-footer').style.display = 'none'; container.innerHTML = noticeHtml() + renderSuccessState(); return; }
 
     const a = currentAttempt();
     updatePayButton();
 
     const itemsHtml = check.items.map((i) => `
         <div class="item-row"><span>${esc(i.quantity)} × ${esc(i.name)}</span><span class="tabular">${formatMoney(i.amount_cents, check.currency)}</span></div>`).join('');
+    // C3-8 (H3): tender amount_cents is tip-INCLUSIVE (POS contract
+    // F2-13) while check.total_cents is not — "Already paid" rows net
+    // the tip out (the API carries tip_cents alongside since v0.10.6),
+    // so the rows can add up against the bill total.
     const tendersHtml = check.tenders && check.tenders.length ? `
         <div style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--border);">
             <div style="font-size:0.8rem;font-weight:600;color:var(--text-muted);margin-bottom:6px;">${t('alreadyPaid')}</div>
-            ${check.tenders.map((td) => `<div class="item-row" style="color:var(--green);"><span>${t('paymentWord')} (${esc(td.type || t('cardWord'))})</span><span class="tabular"><bdi>−${formatMoney(td.amount_cents, check.currency)}</bdi></span></div>`).join('')}
+            ${check.tenders.map((td) => `<div class="item-row" style="color:var(--green);"><span>${t('paymentWord')} (${esc(td.type || t('cardWord'))})</span><span class="tabular"><bdi>−${formatMoney(td.amount_cents - (td.tip_cents || 0), check.currency)}</bdi></span></div>`).join('')}
         </div>` : '';
 
     let controls = '';
@@ -939,6 +1051,7 @@ function renderInner(force = false) {
                 <div class="tip-chips">
                     ${[15, 18, 20, 25, 0].map((p) => `<button type="button" class="tip-chip ${tipPct === p ? 'active' : ''}" data-action="tip" data-v="${p}" aria-pressed="${tipPct === p}">${p === 0 ? t('tipNone') : p + '%'}</button>`).join('')}
                 </div>
+                <p style="font-size:0.9rem;color:var(--text-muted);text-align:center;">${t('shareTipTotal', { share: formatMoney(payCents(), check.currency), tip: formatMoney(tipCentsFor(payCents()), check.currency), total: formatMoney(payCents() + tipCentsFor(payCents()), check.currency) })}</p>
             </div>`;
     }
 
@@ -961,20 +1074,25 @@ function renderSplitUI() {
     if (mode === 'full') return `<p style="font-size:0.9rem;color:var(--text-muted);">${t('fullBody', { amt: formatMoney(check.remaining_cents, cur) })}</p>`;
     if (mode === 'equal') {
         const share = Math.min(check.remaining_cents, Math.ceil(check.remaining_cents / people));
-        return `<div class="stepper"><button data-action="equal" data-v="-1">-</button><span>${t('splitAmong', { n: people })}</span><button data-action="equal" data-v="1">+</button></div>
+        // C3-8 (M5): equal split divides the REMAINING balance (so a late
+        // payer's share is right) — the copy now says exactly that
+        // instead of implying a split of the original total.
+        return `<div class="stepper"><button data-action="equal" data-v="-1">-</button><span>${t('splitRest', { n: people })}</span><button data-action="equal" data-v="1">+</button></div>
             <p style="font-size:0.9rem;color:var(--text-muted);text-align:center;">${t('yourShare')} <strong class="tabular">${formatMoney(share, cur)}</strong></p>`;
     }
     if (mode === 'custom') {
         // F8-5: type=text + inputmode — type=number silently swallows
         // native-script digits on mobile keyboards.
         return `<div class="input-group"><label>${t('customAmount')}</label>
-            <input type="text" inputmode="decimal" step="0.01" min="0" max="${check.remaining_cents / 100}" value="${customCents ? (customCents / 100).toFixed(2) : ''}" data-input="custom" placeholder="0.00"></div>`;
+            <input type="text" dir="ltr" inputmode="decimal" step="0.01" min="0" max="${check.remaining_cents / 100}" value="${customCents ? (customCents / 100).toFixed(2) : ''}" data-input="custom" placeholder="0.00"></div>`;
     }
     // Group Pay: tap the items YOU had — your claim shows on everyone's phone
     // so nothing is paid twice. Items claimed by another phone are locked.
     const myTotal = check.items.reduce((sum, it, idx) => sum + (items[idx] ? it.amount_cents : 0), 0);
     const claimedCount = check.items.reduce((n, it, idx) => n + (claimAt(idx) ? 1 : 0), 0);
-    const paidSoFar = (check.tenders || []).reduce((s, td) => s + td.amount_cents, 0);
+    // C3-8 (H3): net of tip, same as the "Already paid" rows — the raw
+    // tender sum is tip-inclusive and overstated progress vs the total.
+    const paidSoFar = (check.tenders || []).reduce((s, td) => s + td.amount_cents - (td.tip_cents || 0), 0);
     return `
         <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">${t('myItemsHelp')}</p>
         <div class="items-select-list">
@@ -991,13 +1109,28 @@ function renderSplitUI() {
 }
 
 function renderSuccessState() {
-    const src = receipt || check;
+    // C3-8 (M9): prefer the guest's OWN payment snapshot — when someone
+    // else completed the check, `check` is the full bill and carries no
+    // payment_id for this guest's receipt options.
+    const src = receipt || (lastPayment && check && lastPayment.order_id === check.square_order_id ? lastPayment : null) || check;
+    // C3-8 (M1): the receipt must add up. When the payment's amount does
+    // not equal the listed items' sum (equal/custom splits carry the
+    // full check's items against a partial payment), show one honest
+    // "Your share of the check" line instead of items that cannot sum
+    // to the total; the tip is always its own row.
+    const itemsSum = src.items.reduce((s, i) => s + i.amount_cents, 0);
+    const hasBreakdown = typeof src.amount_cents === 'number';
+    const itemRows = hasBreakdown && itemsSum !== src.amount_cents
+        ? `<div class="item-row"><span>${t('yourShareOfCheck')}</span><span class="tabular">${formatMoney(src.amount_cents, src.currency)}</span></div>`
+        : src.items.map((i) => `<div class="item-row"><span>${esc(i.quantity)} × ${esc(i.name)}</span><span class="tabular">${formatMoney(i.amount_cents, src.currency)}</span></div>`).join('');
+    const tipRow = hasBreakdown && src.tip_cents > 0
+        ? `<div class="total-line"><span>${t('tipWord')}</span><span class="tabular">${formatMoney(src.tip_cents, src.currency)}</span></div>` : '';
     return `<div class="success-box"><div class="success-icon">✓</div>
         <h2>${t('paySuccess')}</h2>
         <p style="color:var(--text-muted);font-size:0.9rem;margin-bottom:20px;">${t('thanksDining')}</p>
         <div class="card" style="text-align:start;"><h2>${t('receiptSummary')}</h2>
-            ${src.items.map((i) => `<div class="item-row"><span>${esc(i.quantity)} × ${esc(i.name)}</span><span class="tabular">${formatMoney(i.amount_cents, src.currency)}</span></div>`).join('')}
-            <div class="totals-box"><div class="total-line"><span>${t('totalSettled')}</span><span class="tabular">${formatMoney(src.total_cents, src.currency)}</span></div></div>
+            ${itemRows}
+            <div class="totals-box">${tipRow}<div class="total-line"><span>${t('totalSettled')}</span><span class="tabular">${formatMoney(src.total_cents, src.currency)}</span></div></div>
         </div>
         ${renderReceiptOptions()}
         </div>
@@ -1030,13 +1163,16 @@ function renderReceiptOptions() {
     }
     // F8-Low: a failed/unavailable print used to leave no way to retry —
     // the choice buttons were gone. Offer the print action again.
+    // C3-8 (L10): the retry must NOT reset the guest's choice — it used
+    // to fire the rc-print action, silently turning a Print + Email
+    // guest into a Print-only one and wiping the email form.
     const printRetry = printEnabled && (receiptPrintState === 'failed' || receiptPrintState === 'unavailable')
-        ? `<div style="text-align:center;margin-bottom:10px;"><button class="btn-primary" data-action="rc-print">${t('printReceipt')}</button></div>` : '';
+        ? `<div style="text-align:center;margin-bottom:10px;"><button class="btn-primary" data-action="rc-reprint">${t('printReceipt')}</button></div>` : '';
     const emailPart = receiptChoice === 'email' || receiptChoice === 'both'
         ? (receiptEmailDone
             ? ''
             : `<div id="email-receipt-box" class="card" style="text-align:start;">
-            <input id="receipt-email" type="email" placeholder="your@email.com"
+            <input id="receipt-email" dir="ltr" type="email" placeholder="your@email.com" value="${esc(receiptEmailDraft)}"
                 style="width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;font-size:1rem;margin-bottom:10px;">
             <button class="btn-primary" data-action="email-send">${t('sendReceipt')}</button>
         </div>`)
@@ -1082,11 +1218,11 @@ async function sendReceiptEmail() {
             body: JSON.stringify({ email, payment_id: receipt?.payment_id ?? undefined }),
         });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || 'Could not send receipt.');
+        if (!res.ok) throw new Error(t('receiptSendFailed'));
         receiptEmailDone = true;
         setNotice(t('receiptSentTo', { email }), 'ok');
-    } catch (err) {
-        setNotice(err.message || 'Could not send receipt. Please try again.');
+    } catch {
+        setNotice(t('receiptSendFailed'));
     } finally {
         receiptEmailSending = false;
     }
@@ -1144,6 +1280,7 @@ document.addEventListener('click', (e) => {
         }
         case 'loyalty': submitLoyalty(); break;
         case 'rc-print': receiptChoice = 'print'; requestReceiptPrint(); render(true); break;
+        case 'rc-reprint': requestReceiptPrint(); render(true); break; // C3-8 (L10): retry keeps the guest's existing choice
         case 'rc-email': receiptChoice = 'email'; render(true); break;
         case 'rc-both': receiptChoice = 'both'; requestReceiptPrint(); render(true); break;
         case 'rc-none': receiptChoice = 'none'; render(true); break;
@@ -1152,12 +1289,21 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('input', (e) => {
     if (e.target.matches && e.target.matches('[data-input="custom"]')) {
-        const v = parseFloat(normalizeDigits(e.target.value).replace(/,/g, ''));
+        // C3-8 (M4): a comma followed by 1–2 digits at the END is a
+        // decimal comma ("12,50" = $12.50 across much of the world), not
+        // a thousands separator — stripping every comma turned it into
+        // $1,250, which the cap then silently made the full balance.
+        let raw = normalizeDigits(e.target.value);
+        if (!raw.includes('.')) raw = raw.replace(/,(\d{1,2})$/, '.$1');
+        const v = parseFloat(raw.replace(/,/g, ''));
         customCents = Number.isFinite(v) && v > 0 ? Math.round(v * 100) : 0;
         updatePayButton(); // label only: do not rebuild the DOM while typing
     }
     if (e.target.matches && e.target.id === 'loyalty-phone') {
         loyaltyPhone = e.target.value;
+    }
+    if (e.target.matches && e.target.id === 'receipt-email') {
+        receiptEmailDraft = e.target.value; // C3-8 (M20)
     }
     if (e.target.matches && e.target.id === 'rating-comment') {
         // don't re-render while typing the comment
@@ -1165,6 +1311,12 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', (e) => {
     if (e.target.matches && e.target.matches('[data-item]')) { toggleClaim(Number(e.target.dataset.item), e.target.checked); }
+    // C3-8 (M4): an over-balance custom amount used to be capped
+    // silently at payment time — say so when the field loses focus.
+    if (e.target.matches && e.target.matches('[data-input="custom"]') && check && customCents > check.remaining_cents) {
+        setNotice(t('cappedNotice', { amt: formatMoney(check.remaining_cents, check.currency) }));
+        render(true);
+    }
 });
 
 // Group Pay: claim/unclaim an item on the server; the bill poll then shows
@@ -1186,7 +1338,7 @@ async function toggleClaim(idx, want) {
         if (!res.ok) {
             failed = true;
             const data = await res.json().catch(() => ({}));
-            setNotice(res.status === 409 ? t('justClaimed') : (data.error || t('claimFailed')));
+            setNotice(res.status === 409 ? t('justClaimed') : t('claimFailed'));
         }
     } catch { failed = true; setNotice(t('claimFailed')); }
     // F8-12: a failed claim must not leave the optimistic selection in
@@ -1195,6 +1347,7 @@ async function toggleClaim(idx, want) {
     fetchBill();
 }
 document.addEventListener('focusout', () => { if (renderDeferred) setTimeout(() => render(true), 0); });
+window.addEventListener('resize', () => syncFooterPadding()); // C3-8 (L7)
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { pollDelayMs = POLL_MIN_MS; fetchBill(); } });
 
 // H-3/G-5: adaptive poll backoff. A fixed 5s poll from every phone at a
