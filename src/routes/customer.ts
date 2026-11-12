@@ -178,7 +178,7 @@ export async function customerRoutes(app: FastifyInstance) {
   app.get('/api/t/:token', async (req) => {
     const { token } = req.params as { token: string };
     const t = await query(
-      `SELECT t.*, l.currency, l.qr_ordering_enabled, l.loyalty_enabled, l.tier FROM tables t
+      `SELECT t.*, l.currency, l.qr_ordering_enabled, l.loyalty_enabled, l.tier, l.google_review_url FROM tables t
        JOIN locations l ON l.id = t.location_id
        WHERE t.qr_token = $1`,
       [token],
@@ -244,6 +244,11 @@ export async function customerRoutes(app: FastifyInstance) {
       capabilities: { print: tier !== 'starter' },
       ordering_enabled: !!table.qr_ordering_enabled,
       loyalty_enabled: !!table.loyalty_enabled,
+      // v0.10.9 (C3-9 M8, Erfan's review-flow decision): the Google review
+      // link rides the bill payload so EVERY guest can reach it — before
+      // rating, after any rating, or without rating at all. The star
+      // rating never gates it (Google policy: no selective solicitation).
+      google_review_url: table.google_review_url ?? null,
       // Open checks exist but none could be loaded from the POS.
       pos_unavailable: c.rowCount > 0 && checks.length === 0 && posFailures > 0,
     };
@@ -477,8 +482,12 @@ export async function customerRoutes(app: FastifyInstance) {
 
   // ---- Review capture (frictionless: tap stars, no login) ---------------------
   // POST /api/t/:token/feedback { rating: 1-5, comment? }
-  // 4-5 stars: guest gets the Google review link (frontend shows it).
-  // 1-3 stars: private feedback saved for the owner.
+  // v0.10.9 (C3-9 M8, Erfan's review-flow decision): the rating is PRIVATE
+  // feedback + internal metrics only — it never gates the Google review
+  // link. Every guest is offered the Google link and the private feedback
+  // channel with equal prominence (research verdict: gating violates
+  // Google's ban on selectively soliciting positive reviews). 1-3 stars
+  // still raise the Service Recovery alert exactly as before.
   app.post('/api/t/:token/feedback', { preHandler: [tokenWriteLimiter, feedbackLimiter] }, async (req) => {
     const { token } = req.params as { token: string };
     const t = await query(
@@ -525,8 +534,9 @@ export async function customerRoutes(app: FastifyInstance) {
     }
     return {
       ok: true,
-      // Frontend: 4-5 stars -> open this URL; otherwise show "thanks".
-      google_review_url: rating >= 4 ? t.rows[0].google_review_url : null,
+      // v0.10.9 (M8): returned for EVERY rating — the frontend shows the
+      // Google option to all guests alike; the rating changes nothing.
+      google_review_url: t.rows[0].google_review_url ?? null,
     };
   });
 

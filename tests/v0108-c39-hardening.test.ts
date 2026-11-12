@@ -127,7 +127,8 @@ describe('v0.10.8 C3-9 site hygiene (H1/M3/M4/M5/L-e/L-i/L-l/L-m/L-n/L-o)', () =
   });
 
   it('L-e: demo.js cache pin bumped with the fixes', () => {
-    assert.ok(demoHtml.includes('/demo.js?v=5'), 'demo.html pins demo.js?v=5');
+    // v0.10.9 (M8) bumped the pin again: ?v=5 at C3-9 ship, now ?v=6.
+    assert.ok(demoHtml.includes('/demo.js?v=6'), 'demo.html pins demo.js?v=6');
   });
 
   it('L-i: owner-demo has a main landmark; privacy lists the website field', () => {
@@ -142,7 +143,7 @@ describe('v0.10.8 C3-9 site hygiene (H1/M3/M4/M5/L-e/L-i/L-l/L-m/L-n/L-o)', () =
     assert.ok(!securityTxt.includes('Policy:'), 'security.txt no longer points Policy at the privacy policy');
   });
 
-  it('release version is 0.10.8', () => {
-    assert.equal(pkg.version, '0.10.8', 'package.json at 0.10.8');
+  it('release version is 0.10.9 (was 0.10.8 at C3-9 ship)', () => {
+    assert.equal(pkg.version, '0.10.9', 'package.json at 0.10.9');
   });
 });
