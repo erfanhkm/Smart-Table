@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Owner Demo | Smart Table — The Restaurant Dashboard, By Request</title>
-    <meta name="description" content="See Smart Table from the owner's side: live floor, waiter calls, revenue reports, per-table analytics, device health and billing — a full working demo with a sample restaurant. Access is granted per request; tell us about your restaurant and we set it up for you.">
+    <meta name="description" content="See Smart Table from the owner's side: live floor, revenue reports, per-table analytics, device health and billing — a full working demo with a sample restaurant. Access is granted per request; tell us about your restaurant and we set it up for you.">
     <link rel="canonical" href="https://smarttablepay.com/owner-demo">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Smart Table">
@@ -13,6 +13,10 @@
     <meta property="og:url" content="https://smarttablepay.com/owner-demo">
     <meta property="og:image" content="https://smarttablepay.com/og-image.jpg">
     <meta property="og:locale" content="en_CA">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Smart Table Owner Demo — Your whole floor, in one dashboard.">
+    <meta name="twitter:description" content="Live floor, reports, per-table revenue and billing in the real owner portal. Request access and run it yourself with sample data.">
+    <meta name="twitter:image" content="https://smarttablepay.com/og-image.jpg">
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -28,6 +32,7 @@
     }
     </script>
     <link href="/fonts/fonts.css" rel="stylesheet">
+<!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "50093eb2d5dc4982bad58e9e46723827"}'></script><!-- End Cloudflare Web Analytics -->
     <style>
         :root {
             --navy: #0E1B2C; --navy-dark: #08101C; --paper: #FAF8F4; --card-bg: #FFFFFF;
@@ -53,6 +58,8 @@
         .nav-login:hover { color: white; }
         .nav-toggle-input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
         .nav-toggle { display: none; cursor: pointer; padding: 8px 4px; }
+        /* C3-9 L-h: visible focus style for the CSS-only hamburger label. */
+        .nav-toggle-input:focus-visible ~ .nav-toggle { outline: 2px solid var(--blue); outline-offset: 2px; }
         .nav-toggle span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px; margin: 5px 0; }
         .mobile-menu { display: none; }
         @media(max-width: 900px) {
@@ -158,10 +165,11 @@
         </div>
     </header>
 
+    <main id="main">
     <section class="hero">
         <div class="framing">For restaurant owners</div>
         <h1>Your whole floor, in one dashboard.</h1>
-        <p>The guest demo shows what your diners feel. This one shows what <em>you</em> get: the live floor, waiter calls, revenue reports, per-table analytics, device health and billing — the real owner portal, running with a sample restaurant you can click through yourself.</p>
+        <p>The guest demo shows what your diners feel. This one shows what <em>you</em> get: the live floor, revenue reports, per-table analytics and billing — the real owner portal, running with a sample restaurant you can click through yourself.</p>
         <div class="gate-note">🔒 The owner demo is access by request. Tell us about your restaurant below — we review every request personally, set the demo up around your POS, and email you your login. No card, no commitment.</div>
     </section>
 
@@ -171,7 +179,7 @@
         <div class="shots">
             <div class="shot-card">
                 <img src="/media/owner-dashboard.webp" alt="Smart Table owner portal overview: floor status for every table and open waiter calls" width="1680" height="1050" loading="lazy">
-                <div class="cap"><h3>Live floor overview</h3><p>Every table&rsquo;s state at a glance — seated, paying, paid — plus open waiter calls with one-tap acknowledge. Unhappy guests (1–3 star ratings) raise a Service Recovery alert here instantly, while you can still fix the experience.</p></div>
+                <div class="cap"><h3>Live floor overview</h3><p>Every table&rsquo;s state at a glance — seated, paying, paid. Open waiter calls with one-tap acknowledge arrive with the STT-101 table device. Unhappy guests (1–3 star ratings) raise a Service Recovery alert here instantly, while you can still fix the experience.</p></div>
             </div>
             <div class="shot-card">
                 <img src="/media/owner-reports.webp" alt="Smart Table reports: daily revenue breakdown and revenue by table" width="1680" height="1050" loading="lazy">
@@ -179,7 +187,7 @@
             </div>
             <div class="shot-card">
                 <img src="/media/owner-billing.webp" alt="Smart Table billing: commission or subscription plan, card on file and fee history" width="1680" height="1050" loading="lazy">
-                <div class="cap"><h3>Billing, in the open</h3><p>Choose per location: Starter at $49.99/month or 1% commission per guest card payment, or Base at $99/month or 2% commission — with the STT-101 table device. Every fee is listed line by line — no surprises at month end.</p></div>
+                <div class="cap"><h3>Billing, in the open</h3><p>Choose per location: Starter at $49.99/month or 1% commission per guest card payment, or Base at $99/month or 2% commission. The STT-101 table device is a separate one-time purchase per table once it ships. Every fee is listed line by line — no surprises at month end.</p></div>
             </div>
         </div>
         <div class="feature-grid">
@@ -289,6 +297,8 @@
             <p style="margin-top:16px; font-size:0.92rem;">Already running a room in Metro Vancouver? Ask about the <a class="alt" href="/#partner">founding program</a>.</p>
         </div>
     </div>
+
+    </main>
 
     <footer>
         <div class="footer-content">

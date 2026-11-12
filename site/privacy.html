@@ -8,7 +8,7 @@
     <meta name="robots" content="index, follow">
     <meta name="author" content="Smart Table">
     <meta name="geo.region" content="CA-BC">
-    <meta name="geo.placename" content="Vancouver">
+    <meta name="geo.placename" content="Coquitlam">
     <link rel="canonical" href="https://smarttablepay.com/privacy.html">
     <meta name="theme-color" content="#0E1B2C">
     <!-- Open Graph -->
@@ -75,6 +75,8 @@
         /* Mobile hamburger menu (pure CSS; no JS) */
         .nav-toggle-input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
         .nav-toggle { display: none; cursor: pointer; padding: 8px 4px; }
+        /* C3-9 L-h: visible focus style for the CSS-only hamburger label. */
+        .nav-toggle-input:focus-visible ~ .nav-toggle { outline: 2px solid var(--blue); outline-offset: 2px; }
         .nav-toggle span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px; margin: 5px 0; }
         .mobile-menu { display: none; }
 
@@ -191,7 +193,7 @@
                 <p><strong>From website visitors</strong></p>
                 <ul>
                     <li>Information submitted through the forms on this website (founding-restaurant application and contact form): name, restaurant name, email address, optional phone number, city, number of tables, POS system and message.</li>
-                    <li>Owner-demo access requests submitted through this website: your name, restaurant name, email address, phone number, city, POS system, approximate size and any message you add. The request is stored in our database and emailed to us so we can review it and reply to you.</li>
+                    <li>Owner-demo access requests submitted through this website: your name, restaurant name, email address, phone number, city, POS system, approximate size, your restaurant website if you provide one, and any message you add. The request is stored in our database and emailed to us so we can review it and reply to you.</li>
                     <li>Aggregate website analytics: pages visited, approximate region and device type, measured with Cloudflare Web Analytics. It does not use cookies and does not track individuals across websites.</li>
                     <li>Server and security logs: our servers automatically record technical logs — including IP addresses, timestamps and the pages or API endpoints requested — which we use to operate the service, keep it secure and troubleshoot problems.</li>
                 </ul>

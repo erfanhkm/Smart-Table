@@ -8,7 +8,7 @@
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
     <meta name="author" content="Smart Table">
     <meta name="geo.region" content="CA-BC">
-    <meta name="geo.placename" content="Vancouver">
+    <meta name="geo.placename" content="Coquitlam">
     <link rel="canonical" href="https://smarttablepay.com/blog/">
     <meta name="theme-color" content="#0E1B2C">
     <!-- Open Graph -->
@@ -63,7 +63,7 @@
           "logo": "https://smarttablepay.com/icon-512.png",
           "email": "info@smarttablepay.com",
           "description": "Smart Table is a QR code table payment system for restaurants. Guests scan a table QR code, split and pay the bill from their phone browser — no app download, no account — while staff watch every table's state live.",
-          "address": { "@type": "PostalAddress", "addressLocality": "Vancouver", "addressRegion": "BC", "addressCountry": "CA" },
+          "address": { "@type": "PostalAddress", "addressLocality": "Coquitlam", "addressRegion": "BC", "addressCountry": "CA" },
           "areaServed": { "@type": "AdministrativeArea", "name": "Metro Vancouver" }
         }
       ]
@@ -117,6 +117,8 @@
         /* Mobile hamburger menu (pure CSS; no JS) */
         .nav-toggle-input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
         .nav-toggle { display: none; cursor: pointer; padding: 8px 4px; }
+        /* C3-9 L-h: visible focus style for the CSS-only hamburger label. */
+        .nav-toggle-input:focus-visible ~ .nav-toggle { outline: 2px solid var(--blue); outline-offset: 2px; }
         .nav-toggle span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px; margin: 5px 0; }
         .mobile-menu { display: none; }
 

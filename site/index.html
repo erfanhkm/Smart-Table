@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Table | QR Code Table Payment System for Restaurants — The bill, without the wait.</title>
+    <title>Smart Table | QR Code Table Payments for Restaurants</title>
     <meta name="description" content="QR code table payment system for restaurants: guests scan, split &amp; pay from their phone — no app, no waiting for the card machine. Staff see every table live.">
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
     <meta name="author" content="Smart Table">
     <meta name="geo.region" content="CA-BC">
-    <meta name="geo.placename" content="Vancouver">
+    <meta name="geo.placename" content="Coquitlam">
     <link rel="canonical" href="https://smarttablepay.com/">
     <meta name="theme-color" content="#0E1B2C">
     <!-- Open Graph -->
@@ -44,7 +44,7 @@
           "logo": "https://smarttablepay.com/icon-512.png",
           "email": "info@smarttablepay.com",
           "description": "Smart Table is a QR code table payment system for restaurants. Guests scan a table QR code, split and pay the bill from their phone browser — no app download, no account — while staff watch every table's state live.",
-          "address": { "@type": "PostalAddress", "addressLocality": "Vancouver", "addressRegion": "BC", "addressCountry": "CA" },
+          "address": { "@type": "PostalAddress", "addressLocality": "Coquitlam", "addressRegion": "BC", "addressCountry": "CA" },
           "areaServed": { "@type": "AdministrativeArea", "name": "Metro Vancouver" }
         },
         {
@@ -62,8 +62,8 @@
           "operatingSystem": "Web browser",
           "url": "https://smarttablepay.com/",
           "provider": { "@id": "https://smarttablepay.com/#organization" },
-          "description": "QR code table payment and live floor management for restaurants. Guests split and pay the bill from their phone; staff see table states, waiter calls and settlement metrics in real time. Works with Square POS today.",
-          "featureList": "Pay at the table by QR code, Split bills (equal, by items, or custom), Live table states, Timestamped waiter calls, QR ordering from the POS menu, Service and settlement metrics",
+          "description": "QR code table payment and live floor management for restaurants. Guests split and pay the bill from their phone; staff see table states and settlement metrics in real time. Works with Square POS today.",
+          "featureList": "Pay at the table by QR code, Split bills (equal, by items, or custom), Live table states, Timestamped waiter calls (with the table device), QR ordering from the POS menu, Service and settlement metrics",
           "areaServed": { "@type": "AdministrativeArea", "name": "Metro Vancouver" }
         },
         {
@@ -200,13 +200,16 @@
         .device-specs { display: flex; flex-direction: column; gap: 20px; }
         .spec-item { display: flex; gap: 16px; align-items: flex-start; }
         .spec-icon { background: var(--gold-soft); color: var(--gold-hover); width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; }
-        .spec-text h4 { font-size: 1rem; color: var(--navy); margin-bottom: 4px; font-weight: 700; }
+        .spec-text h3 { font-size: 1rem; color: var(--navy); margin-bottom: 4px; font-weight: 700; }
         .spec-text p { font-size: 0.9rem; color: var(--text-muted); }
         .planned-badge { display: inline-block; vertical-align: middle; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gold-hover); background: var(--gold-soft); border-radius: 20px; padding: 4px 12px; margin-left: 10px; }
 
+        /* C3-9 L-h: visible focus style for the CSS-only hamburger label. */
+        .nav-toggle-input:focus-visible ~ .nav-toggle { outline: 2px solid var(--blue); outline-offset: 2px; }
+
         /* Owner Dashboard Section */
         .dashboard-preview { background: var(--navy); color: white; border-radius: 24px; padding: 50px; box-shadow: 0 20px 40px rgba(14,27,44,0.15); }
-        .dashboard-preview h3 { font-size: 1.8rem; font-weight: 700; margin-bottom: 16px; }
+        .dashboard-preview h2 { font-size: 1.8rem; font-weight: 700; margin-bottom: 16px; }
         .dashboard-preview p { color: #94A3B8; margin-bottom: 30px; max-width: 600px; }
         .dash-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 24px; }
         .dash-card h4 { color: white; margin-bottom: 8px; font-size: 1.1rem; }
@@ -381,7 +384,7 @@
                         <span>$210.30</span>
                     </div>
                     <div style="margin-top: 12px; font-size: 0.8rem; color: #94A3B8; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
-                        Waiter call queue: 0 active calls
+                        Waiter calls arrive with the table device (planned)
                     </div>
                 </div>
             </div>
@@ -461,7 +464,7 @@
                 </div>
                 <div class="card">
                     <h3>Service metrics</h3>
-                    <p>Average settlement time, waiter response time, settled checks and open calls — refreshed every few seconds.</p>
+                    <p>Average settlement time and settled checks — refreshed every few seconds.</p>
                 </div>
                 <div class="card">
                     <h3>Waiter calls, timestamped</h3>
@@ -503,28 +506,28 @@
                     <div class="spec-item">
                         <div class="spec-icon" aria-hidden="true">QR</div>
                         <div class="spec-text">
-                            <h4>Per-table QR code</h4>
+                            <h3>Per-table QR code</h3>
                             <p>Today: a unique QR per table, printed from your dashboard. Planned: built into the device.</p>
                         </div>
                     </div>
                     <div class="spec-item">
                         <div class="spec-icon" aria-hidden="true">LED</div>
                         <div class="spec-text">
-                            <h4>Status light</h4>
+                            <h3>Status light</h3>
                             <p>Planned: a light that mirrors the dashboard — blue seated, amber paying, green paid — so staff can read the room at a glance.</p>
                         </div>
                     </div>
                     <div class="spec-item">
                         <div class="spec-icon" aria-hidden="true">🔔</div>
                         <div class="spec-text">
-                            <h4>Waiter-call button</h4>
+                            <h3>Waiter-call button</h3>
                             <p>Planned: a physical button on the device — presses land in a timestamped queue in your dashboard.</p>
                         </div>
                     </div>
                     <div class="spec-item">
                         <div class="spec-icon" aria-hidden="true">⚡</div>
                         <div class="spec-text">
-                            <h4>Rechargeable USB-C</h4>
+                            <h3>Rechargeable USB-C</h3>
                             <p>Planned: rechargeable over USB-C. Battery life confirmed after prototype testing.</p>
                         </div>
                     </div>
@@ -537,7 +540,7 @@
     <section id="owners">
         <div class="container">
             <div class="dashboard-preview">
-                <h3>Run the floor from one screen</h3>
+                <h2>Run the floor from one screen</h2>
                 <p>See every table at a glance, with the numbers that matter.</p>
                 <div class="grid-3" style="margin-top: 20px;">
                     <div class="dash-card">
@@ -545,12 +548,12 @@
                         <p>Every table's state at a glance.</p>
                     </div>
                     <div class="dash-card">
-                        <h4>Waiter-call queue</h4>
-                        <p>Timestamped requests, acknowledged in one tap.</p>
+                        <h4>Waiter-call queue — planned with the device</h4>
+                        <p>Coming with the STT-101: timestamped requests, acknowledged in one tap.</p>
                     </div>
                     <div class="dash-card">
-                        <h4>Settlement &amp; response metrics</h4>
-                        <p>Average settlement and response times, settled checks, open calls.</p>
+                        <h4>Settlement metrics</h4>
+                        <p>Average settlement time and settled checks.</p>
                     </div>
                 </div>
             </div>
@@ -568,24 +571,28 @@
                 <div class="roi-grid">
                     <div class="roi-inputs">
                         <div class="form-group">
-                            <label>Tables <output id="roi-tables-out">12</output></label>
+                            <label for="roi-tables">Tables <output id="roi-tables-out" for="roi-tables">12</output></label>
                             <input type="range" id="roi-tables" min="4" max="60" step="1" value="12">
                         </div>
                         <div class="form-group">
-                            <label>Average check <output id="roi-check-out">$85</output></label>
+                            <label for="roi-check">Average check <output id="roi-check-out" for="roi-check">$85</output></label>
                             <input type="range" id="roi-check" min="25" max="250" step="5" value="85">
                         </div>
                         <div class="form-group">
-                            <label>Table turns per day <output id="roi-turns-out">3</output></label>
+                            <label for="roi-turns">Table turns per day <output id="roi-turns-out" for="roi-turns">3</output></label>
                             <input type="range" id="roi-turns" min="1" max="8" step="0.5" value="3">
                         </div>
                         <div class="form-group">
-                            <label>Minutes guests wait for the bill today <output id="roi-wait-out">8 min</output></label>
+                            <label for="roi-wait">Minutes guests wait for the bill today <output id="roi-wait-out" for="roi-wait">8 min</output></label>
                             <input type="range" id="roi-wait" min="2" max="20" step="1" value="8">
                         </div>
                         <div class="form-group">
-                            <label>Server wage (per hour) <output id="roi-wage-out">$17.50</output></label>
-                            <input type="range" id="roi-wage" min="15" max="30" step="0.25" value="17.5">
+                            <label for="roi-wage">Server wage (per hour) <output id="roi-wage-out" for="roi-wage">$18.25</output></label>
+                            <input type="range" id="roi-wage" min="18.25" max="30" step="0.25" value="18.25">
+                        </div>
+                        <div class="form-group">
+                            <label for="roi-adopt">Guests who pay by QR <output id="roi-adopt-out" for="roi-adopt">50%</output></label>
+                            <input type="range" id="roi-adopt" min="10" max="100" step="5" value="50">
                         </div>
                     </div>
                     <div class="roi-results" aria-live="polite">
@@ -595,7 +602,7 @@
                         </div>
                         <div class="roi-result">
                             <div class="num" id="roi-revenue">$0</div>
-                            <div class="lbl">potential extra revenue per month — tables freed sooner, more seatings</div>
+                            <div class="lbl">potential extra revenue per month, net of the $99 Base plan — an upper bound: it assumes freed peak minutes refill as new seatings</div>
                         </div>
                         <div class="roi-result">
                             <div class="num" id="roi-waitcut">8 → ~1 min</div>
@@ -603,7 +610,7 @@
                         </div>
                     </div>
                 </div>
-                <p class="roi-note">Estimates from your inputs, assuming 26 open days a month, about 2.5 minutes of server running eliminated per check, settlement in about 1 minute with Smart Table, and a 90-minute average seating. Your results will vary — founding restaurants get a measured baseline in their first month.</p>
+                <p class="roi-note">Estimates from your inputs, assuming 26 open days a month, about 2.5 minutes of server running eliminated per check, settlement in about 1 minute with Smart Table, and a 90-minute average seating. Only the share of guests you set as paying by QR is counted, the wage slider starts at BC&rsquo;s general minimum wage ($18.25 since June 1, 2026), and the revenue figure is shown net of the $99/month Base plan. Your results will vary — founding restaurants get a measured baseline in their first month.</p>
             </div>
         </div>
     </section>
@@ -624,6 +631,7 @@
                     <ul>
                         <li>Printed QR code for every table</li>
                         <li>Guests scan &amp; pay from their phone — bill, split &amp; group pay, tips</li>
+                        <li>QR ordering from your POS menu (enable it per location in your portal)</li>
                         <li>Email receipts</li>
                         <li>Review capture — guests can leave private feedback or a public review</li>
                         <li>Optional loyalty program</li>
@@ -633,16 +641,15 @@
                     <a href="#partner" class="btn-primary">Get started</a>
                 </div>
                 <div class="plan-card featured">
-                    <div class="pricing-badge">Available now</div>
+                    <div class="pricing-badge">Software available now · device planned</div>
                     <h3>Base</h3>
                     <div class="plan-price">$99 <span>/ month</span></div>
-                    <p class="plan-sub">One flat monthly price — or 2% commission per payment instead. Includes the STT-101 table device.</p>
+                    <p class="plan-sub">One flat monthly price — or 2% commission per payment instead. The full software today; STT-101 devices are a separate one-time purchase per table when they ship.</p>
                     <ul>
                         <li>Everything in Starter</li>
-                        <li>STT-101 device on every table — receipt printing + waiter-call button</li>
+                        <li>Receipt printing + waiter-call button, activated by the STT-101 device (planned — founding restaurants get first units)</li>
                         <li>Unlimited table payments on the subscription — no per-payment fee</li>
-                        <li>Email and print receipts</li>
-                        <li>QR ordering from your POS menu</li>
+                        <li>Email receipts today; print receipts with the device</li>
                         <li>Less than one server shift a month</li>
                         <li>Switch plans any time from your portal</li>
                     </ul>
@@ -675,6 +682,10 @@
                 <p>Join the first wave across Metro Vancouver.</p>
             </div>
             <div class="partner-grid">
+                <div class="partner-card">
+                    <h3>Founding Pilot</h3>
+                    <p>The first 3–5 founding restaurants run Starter free for 30 days — no card required — in exchange for honest feedback, a short testimonial and photo permission.</p>
+                </div>
                 <div class="partner-card">
                     <h3>Founding rates</h3>
                     <p>Founding rates on the device and subscription.</p>
@@ -839,24 +850,25 @@
     <script>
     // ROI calculator: pure client-side estimates from the slider inputs.
     (function () {
-        var ids = ['tables', 'check', 'turns', 'wait', 'wage'];
+        var ids = ['tables', 'check', 'turns', 'wait', 'wage', 'adopt'];
         var els = {};
         ids.forEach(function (k) { els[k] = document.getElementById('roi-' + k); });
         if (!els.tables) return;
         var money = function (n) { return '$' + Math.round(n).toLocaleString('en-CA'); };
         function update() {
             var tables = +els.tables.value, check = +els.check.value, turns = +els.turns.value,
-                wait = +els.wait.value, wage = +els.wage.value;
+                wait = +els.wait.value, wage = +els.wage.value, adopt = +els.adopt.value / 100;
             document.getElementById('roi-tables-out').textContent = tables;
             document.getElementById('roi-check-out').textContent = '$' + check;
             document.getElementById('roi-turns-out').textContent = turns;
             document.getElementById('roi-wait-out').textContent = wait + ' min';
             document.getElementById('roi-wage-out').textContent = '$' + wage.toFixed(2);
+            document.getElementById('roi-adopt-out').textContent = Math.round(adopt * 100) + '%';
             var checksPerMonth = tables * turns * 26;
-            var labour = checksPerMonth * 2.5 / 60 * wage;              // server minutes saved per check
-            var freedMinutes = checksPerMonth * Math.max(0, wait - 1);  // table time freed per month
-            var extraSeatings = freedMinutes / 90;                      // 90-min average seating
-            var revenue = extraSeatings * check;
+            var labour = checksPerMonth * adopt * 2.5 / 60 * wage;              // server minutes saved per QR-paid check
+            var freedMinutes = checksPerMonth * adopt * Math.max(0, wait - 1);  // table time freed per month
+            var extraSeatings = freedMinutes / 90;                              // 90-min average seating
+            var revenue = Math.max(0, extraSeatings * check - 99);              // net of the $99/mo Base plan
             document.getElementById('roi-labour').textContent = money(labour);
             document.getElementById('roi-revenue').textContent = money(revenue);
             document.getElementById('roi-waitcut').textContent = wait + ' → ~1 min';

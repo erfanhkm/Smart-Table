@@ -4,7 +4,7 @@
    Translations for the phone UI are extracted verbatim from the real guest app. */
 'use strict';
 
-const I18N = {"en": {"tableWord": "Table", "secureNote": "🔒 Secure payment · No app needed · No account needed", "itemizedBill": "Itemized Bill", "totalBill": "Total Bill", "remainingDue": "Remaining Due", "splitPayment": "Split Payment", "splitFull": "Full", "splitEqual": "Equal", "splitItems": "Group Pay", "addTip": "Add Tip", "tipNone": "None", "payBtn": "Pay {amt}", "processing": "Processing payment...", "paySuccess": "Payment Successful!", "thanksDining": "Thank you for dining with us. Your payment has been processed.", "receiptOptions": "Receipt", "printReceipt": "🖨️ Print Receipt", "emailReceipt": "✉️ Email Receipt", "printAndEmail": "🖨️✉️ Print + Email", "noReceipt": "No receipt, thanks", "receiptPrintedOk": "Your receipt is printing at your table ✓", "receiptSentTo": "Receipt sent to {email} ✓", "noReceiptOk": "No receipt — you're all set ✓", "howWasIt": "How was it?", "sendFeedback": "Send Feedback", "commentPlaceholder": "What could be better? (optional)", "thanksFeedback": "Thanks for the feedback", "leaveGoogleReview": "⭐ Leave a Google Review", "yourShare": "Your share:", "splitAmong": "Split among {n} people", "cardNumber": "Card number", "fullBody": "Paying the full remaining balance of {amt}.", "sendReceipt": "Send Receipt", "receiptSummary": "Receipt Summary", "totalSettled": "Total Settled", "thanksExcl": "Thanks! 🎉", "validEmail": "Please enter a valid email address.", "myItemsHelp": "Tap the items you had — your claim shows on everyone's phone, so nothing gets paid twice. Everyone pays for their own claimed items.", "claimedProgress": "{n} of {total} items claimed", "paidSoFar": "Paid so far: {amt} of {total}", "splitCustom": "Custom", "customAmount": "Custom Amount"}, "fa": {"tableWord": "میز", "secureNote": "🔒 پرداخت امن · بدون نیاز به اپ · بدون نیاز به حساب", "itemizedBill": "صورت‌حساب جزئی", "totalBill": "جمع صورت‌حساب", "remainingDue": "مبلغ باقی‌مانده", "splitPayment": "تقسیم پرداخت", "splitFull": "کامل", "splitEqual": "مساوی", "splitItems": "پرداخت گروهی", "addTip": "افزودن انعام", "tipNone": "هیچ‌کدام", "payBtn": "پرداخت {amt}", "processing": "در حال پردازش پرداخت...", "paySuccess": "پرداخت موفق بود!", "thanksDining": "ممنون که پیش ما بودید. پرداخت شما انجام شد.", "receiptOptions": "رسید", "printReceipt": "🖨️ چاپ رسید", "emailReceipt": "✉️ ایمیل رسید", "printAndEmail": "🖨️✉️ چاپ + ایمیل", "noReceipt": "رسید نمی‌خواهم", "receiptPrintedOk": "رسیدتان سر میز در حال چاپ است ✓", "receiptSentTo": "رسید به {email} ارسال شد ✓", "noReceiptOk": "بدون رسید — همه‌چیز انجام شد ✓", "howWasIt": "چطور بود؟", "sendFeedback": "ارسال بازخورد", "commentPlaceholder": "چه چیزی می‌توانست بهتر باشد؟ (اختیاری)", "thanksFeedback": "ممنون از بازخوردتان", "leaveGoogleReview": "⭐ ثبت نظر در گوگل", "yourShare": "سهم شما:", "splitAmong": "تقسیم بین {n} نفر", "cardNumber": "شماره کارت", "fullBody": "پرداخت کامل مبلغ باقی‌مانده: {amt}", "sendReceipt": "ارسال رسید", "receiptSummary": "خلاصه رسید", "totalSettled": "جمع تسویه‌شده", "thanksExcl": "ممنون! 🎉", "validEmail": "لطفاً یک ایمیل معتبر وارد کنید.", "myItemsHelp": "آیتم‌هایی را که داشتید انتخاب کنید — انتخاب شما روی گوشی همه سر میز نشان داده می‌شود تا چیزی دوبار پرداخت نشود. هر نفر آیتم‌های خودش را پرداخت می‌کند.", "claimedProgress": "{n} از {total} آیتم انتخاب شده", "paidSoFar": "پرداخت‌شده تا حالا: {amt} از {total}", "splitCustom": "دلخواه", "customAmount": "مبلغ دلخواه"}, "zh": {"tableWord": "餐桌", "secureNote": "🔒 安全支付 · 无需应用 · 无需账户", "itemizedBill": "详细账单", "totalBill": "账单总额", "remainingDue": "待付金额", "splitPayment": "分开付款", "splitFull": "全额", "splitEqual": "均分", "splitItems": "分组付款", "addTip": "添加小费", "tipNone": "无", "payBtn": "支付 {amt}", "processing": "正在处理付款...", "paySuccess": "付款成功！", "thanksDining": "感谢您的光临。您的付款已处理。", "receiptOptions": "收据", "printReceipt": "🖨️ 打印收据", "emailReceipt": "✉️ 邮件发送收据", "printAndEmail": "🖨️✉️ 打印 + 邮件", "noReceipt": "不需要收据", "receiptPrintedOk": "您的收据正在餐桌旁打印 ✓", "receiptSentTo": "收据已发送至 {email} ✓", "noReceiptOk": "不需要收据——一切就绪 ✓", "howWasIt": "体验如何？", "sendFeedback": "发送反馈", "commentPlaceholder": "哪些方面可以改进？（可选）", "thanksFeedback": "感谢您的反馈", "leaveGoogleReview": "⭐ 在 Google 上评价", "yourShare": "您的份额：", "splitAmong": "由 {n} 人分摊", "cardNumber": "卡号", "fullBody": "支付全部剩余金额 {amt}。", "sendReceipt": "发送收据", "receiptSummary": "收据摘要", "totalSettled": "已结总额", "thanksExcl": "谢谢！🎉", "validEmail": "请输入有效的电子邮箱。", "myItemsHelp": "点击您点的菜品——您的选择会显示在桌上每个人的手机上，避免重复付款。每个人支付自己选的菜品。", "claimedProgress": "已选 {n} / {total} 件", "paidSoFar": "已支付：{total} 中的 {amt}", "splitCustom": "自定义", "customAmount": "自定义金额"}, "hi": {"tableWord": "टेबल", "secureNote": "🔒 सुरक्षित भुगतान · ऐप की ज़रूरत नहीं · खाते की ज़रूरत नहीं", "itemizedBill": "विस्तृत बिल", "totalBill": "कुल बिल", "remainingDue": "शेष राशि", "splitPayment": "भुगतान बाँटें", "splitFull": "पूरा", "splitEqual": "बराबर", "splitItems": "ग्रुप पेमेंट", "addTip": "टिप जोड़ें", "tipNone": "कोई नहीं", "payBtn": "{amt} का भुगतान करें", "processing": "भुगताना संसाधित हो रहा है...", "paySuccess": "भुगतान सफल!", "thanksDining": "हमारे यहाँ भोजन करने के लिए धन्यवाद। आपका भुगतान हो गया है।", "receiptOptions": "रसीद", "printReceipt": "🖨️ रसीद प्रिंट करें", "emailReceipt": "✉️ रसीद ईमेल करें", "printAndEmail": "🖨️✉️ प्रिंट + ईमेल", "noReceipt": "रसीद नहीं चाहिए", "receiptPrintedOk": "आपकी रसीद आपकी टेबल पर प्रिंट हो रही है ✓", "receiptSentTo": "रसीद {email} पर भेज दी गई ✓", "noReceiptOk": "रसीद नहीं — सब हो गया ✓", "howWasIt": "कैसा रहा?", "sendFeedback": "प्रतिक्रिया भेजें", "commentPlaceholder": "क्या बेहतर हो सकता था? (वैकल्पिक)", "thanksFeedback": "आपकी प्रतिक्रिया के लिए धन्यवाद", "leaveGoogleReview": "⭐ Google पर समीक्षा दें", "yourShare": "आपका हिस्सा:", "splitAmong": "{n} लोगों में बाँटें", "cardNumber": "कार्ड नंबर", "fullBody": "पूरी शेष राशि {amt} का भुगतान कर रहे हैं।", "sendReceipt": "रसीद भेजें", "receiptSummary": "रसीद सारांश", "totalSettled": "कुल निपटान", "thanksExcl": "धन्यवाद! 🎉", "validEmail": "कृपया मान्य ईमेल पता डालें।", "myItemsHelp": "आपने जो खाया, उसे चुनें — आपकी पसंद टेबल पर सबके फ़ोन पर दिखेगी, ताकि कोई चीज़ दो बार न चुकाई जाए। हर कोई अपने चुने आइटम का भुगतान करता है।", "claimedProgress": "{total} में से {n} आइटम चुने गए", "paidSoFar": "अब तक भुगतान: {total} में से {amt}", "splitCustom": "कस्टम", "customAmount": "कस्टम राशि"}, "pa": {"tableWord": "ਮੇਜ਼", "secureNote": "🔒 ਸੁਰੱਖਿਅਤ ਭੁਗਤਾਨ · ਐਪ ਦੀ ਲੋੜ ਨਹੀਂ · ਖਾਤੇ ਦੀ ਲੋੜ ਨਹੀਂ", "itemizedBill": "ਵਿਸਤ੍ਰਿਤ ਬਿੱਲ", "totalBill": "ਕੁੱਲ ਬਿੱਲ", "remainingDue": "ਬਾਕੀ ਰਕਮ", "splitPayment": "ਭੁਗਤਾਨ ਵੰਡੋ", "splitFull": "ਪੂਰਾ", "splitEqual": "ਬਰਾਬਰ", "splitItems": "ਗਰੁੱਪ ਭੁਗਤਾਨ", "addTip": "ਟਿੱਪ ਜੋੜੋ", "tipNone": "ਕੋਈ ਨਹੀਂ", "payBtn": "{amt} ਦਾ ਭੁਗਤਾਨ ਕਰੋ", "processing": "ਭੁਗਤਾਨ ਦੀ ਪ੍ਰਕਿਰਿਆ ਚੱਲ ਰਹੀ ਹੈ...", "paySuccess": "ਭੁਗਤਾਨ ਸਫਲ!", "thanksDining": "ਸਾਡੇ ਇੱਥੇ ਖਾਣਾ ਖਾਣ ਲਈ ਧੰਨਵਾਦ। ਤੁਹਾਡਾ ਭੁਗਤਾਨ ਹੋ ਗਿਆ ਹੈ।", "receiptOptions": "ਰਸੀਦ", "printReceipt": "🖨️ ਰਸੀਦ ਪ੍ਰਿੰਟ ਕਰੋ", "emailReceipt": "✉️ ਰਸੀਦ ਈਮੇਲ ਕਰੋ", "printAndEmail": "🖨️✉️ ਪ੍ਰਿੰਟ + ਈਮੇਲ", "noReceipt": "ਰਸੀਦ ਨਹੀਂ ਚਾਹੀਦੀ", "receiptPrintedOk": "ਤੁਹਾਡੀ ਰਸੀਦ ਤੁਹਾਡੀ ਮੇਜ਼ 'ਤੇ ਪ੍ਰਿੰਟ ਹੋ ਰਹੀ ਹੈ ✓", "receiptSentTo": "ਰਸੀਦ {email} 'ਤੇ ਭੇਜ ਦਿੱਤੀ ਗਈ ✓", "noReceiptOk": "ਰਸੀਦ ਨਹੀਂ — ਸਭ ਹੋ ਗਿਆ ✓", "howWasIt": "ਕਿਵੇਂ ਰਿਹਾ?", "sendFeedback": "ਪ੍ਰਤੀਕਿਰਿਆ ਭੇਜੋ", "commentPlaceholder": "ਕੀ ਬਿਹਤਰ ਹੋ ਸਕਦਾ ਸੀ? (ਵਿਕਲਪਿਕ)", "thanksFeedback": "ਤੁਹਾਡੀ ਪ੍ਰਤੀਕਿਰਿਆ ਲਈ ਧੰਨਵਾਦ", "leaveGoogleReview": "⭐ Google 'ਤੇ ਸਮੀਖਿਆ ਦਿਓ", "yourShare": "ਤੁਹਾਡਾ ਹਿੱਸਾ:", "splitAmong": "{n} ਲੋਕਾਂ ਵਿੱਚ ਵੰਡੋ", "cardNumber": "ਕਾਰਡ ਨੰਬਰ", "fullBody": "ਪੂਰੀ ਬਾਕੀ ਰਕਮ {amt} ਦਾ ਭੁਗਤਾਨ ਕਰ ਰਹੇ ਹੋ।", "sendReceipt": "ਰਸੀਦ ਭੇਜੋ", "receiptSummary": "ਰਸੀਦ ਸਾਰ", "totalSettled": "ਕੁੱਲ ਨਿਪਟਾਰਾ", "thanksExcl": "ਧੰਨਵਾਦ! 🎉", "validEmail": "ਕਿਰਪਾ ਕਰਕੇ ਸਹੀ ਈਮੇਲ ਪਤਾ ਦਰਜ ਕਰੋ।", "myItemsHelp": "ਜੋ ਤੁਸੀਂ ਖਾਧਾ, ਉਹ ਚੁਣੋ — ਤੁਹਾਡੀ ਚੋਣ ਮੇਜ਼ 'ਤੇ ਸਭ ਦੇ ਫ਼ੋਨ 'ਤੇ ਦਿਖੇਗੀ, ਤਾਂ ਜੋ ਕੁਝ ਵੀ ਦੋ ਵਾਰ ਨਾ ਚੁਕਾਇਆ ਜਾਵੇ। ਹਰ ਕੋਈ ਆਪਣੀਆਂ ਚੁਣੀਆਂ ਆਈਟਮਾਂ ਦਾ ਭੁਗਤਾਨ ਕਰਦਾ ਹੈ।", "claimedProgress": "{total} ਵਿੱਚੋਂ {n} ਆਈਟਮਾਂ ਚੁਣੀਆਂ ਗਈਆਂ", "paidSoFar": "ਹੁਣ ਤੱਕ ਭੁਗਤਾਨ: {total} ਵਿੱਚੋਂ {amt}", "splitCustom": "ਕਸਟਮ", "customAmount": "ਕਸਟਮ ਰਕਮ"}};
+const I18N = {"en": {"tableWord": "Table", "secureNote": "🔒 Secure payment · No app needed · No account needed", "itemizedBill": "Itemized Bill", "totalBill": "Total Bill", "remainingDue": "Remaining Due", "splitPayment": "Split Payment", "splitFull": "Full", "splitEqual": "Equal", "splitItems": "Group Pay", "addTip": "Add Tip", "tipNone": "None", "payBtn": "Pay {amt}", "processing": "Processing payment...", "paySuccess": "Payment Successful!", "thanksDining": "Thank you for dining with us. Your payment has been processed.", "receiptOptions": "Receipt", "printReceipt": "🖨️ Print Receipt", "emailReceipt": "✉️ Email Receipt", "printAndEmail": "🖨️✉️ Print + Email", "noReceipt": "No receipt, thanks", "receiptPrintedOk": "Your receipt is printing at your table ✓", "receiptSentTo": "Receipt sent to {email} ✓", "noReceiptOk": "No receipt — you're all set ✓", "howWasIt": "How was it?", "sendFeedback": "Send Feedback", "commentPlaceholder": "What could be better? (optional)", "thanksFeedback": "Thanks for the feedback", "leaveGoogleReview": "⭐ Leave a Google Review", "yourShare": "Your share:", "splitAmong": "Split among {n} people", "cardNumber": "Card number", "fullBody": "Paying the full remaining balance of {amt}.", "sendReceipt": "Send Receipt", "receiptSummary": "Receipt Summary", "totalSettled": "Total Settled", "thanksExcl": "Thanks! 🎉", "validEmail": "Please enter a valid email address.", "myItemsHelp": "Tap the items you had — your claim shows on everyone's phone, so nothing gets paid twice. Everyone pays for their own claimed items.", "claimedProgress": "{n} of {total} items claimed", "paidSoFar": "Paid so far: {amt} of {total}", "splitCustom": "Custom", "customAmount": "Custom Amount", "orPayWithCard": "or pay with card", "cardWord": "Card", "googleReviewHelp": "Glad you loved it — a quick Google review helps us a lot.", "wellWork": "We'll work on it."}, "fa": {"tableWord": "میز", "secureNote": "🔒 پرداخت امن · بدون نیاز به اپ · بدون نیاز به حساب", "itemizedBill": "صورت‌حساب جزئی", "totalBill": "جمع صورت‌حساب", "remainingDue": "مبلغ باقی‌مانده", "splitPayment": "تقسیم پرداخت", "splitFull": "کامل", "splitEqual": "مساوی", "splitItems": "پرداخت گروهی", "addTip": "افزودن انعام", "tipNone": "هیچ‌کدام", "payBtn": "پرداخت {amt}", "processing": "در حال پردازش پرداخت...", "paySuccess": "پرداخت موفق بود!", "thanksDining": "ممنون که پیش ما بودید. پرداخت شما انجام شد.", "receiptOptions": "رسید", "printReceipt": "🖨️ چاپ رسید", "emailReceipt": "✉️ ایمیل رسید", "printAndEmail": "🖨️✉️ چاپ + ایمیل", "noReceipt": "رسید نمی‌خواهم", "receiptPrintedOk": "رسیدتان سر میز در حال چاپ است ✓", "receiptSentTo": "رسید به {email} ارسال شد ✓", "noReceiptOk": "بدون رسید — همه‌چیز انجام شد ✓", "howWasIt": "چطور بود؟", "sendFeedback": "ارسال بازخورد", "commentPlaceholder": "چه چیزی می‌توانست بهتر باشد؟ (اختیاری)", "thanksFeedback": "ممنون از بازخوردتان", "leaveGoogleReview": "⭐ ثبت نظر در گوگل", "yourShare": "سهم شما:", "splitAmong": "تقسیم بین {n} نفر", "cardNumber": "شماره کارت", "fullBody": "پرداخت کامل مبلغ باقی‌مانده: {amt}", "sendReceipt": "ارسال رسید", "receiptSummary": "خلاصه رسید", "totalSettled": "جمع تسویه‌شده", "thanksExcl": "ممنون! 🎉", "validEmail": "لطفاً یک ایمیل معتبر وارد کنید.", "myItemsHelp": "آیتم‌هایی را که داشتید انتخاب کنید — انتخاب شما روی گوشی همه سر میز نشان داده می‌شود تا چیزی دوبار پرداخت نشود. هر نفر آیتم‌های خودش را پرداخت می‌کند.", "claimedProgress": "{n} از {total} آیتم انتخاب شده", "paidSoFar": "پرداخت‌شده تا حالا: {amt} از {total}", "splitCustom": "دلخواه", "customAmount": "مبلغ دلخواه", "orPayWithCard": "یا با کارت پرداخت کنید", "cardWord": "کارت", "googleReviewHelp": "خوشحالیم که راضی بودید — یک نظر کوتاه در گوگل خیلی به ما کمک می‌کند.", "wellWork": "حتماً بهترش می‌کنیم."}, "zh": {"tableWord": "餐桌", "secureNote": "🔒 安全支付 · 无需应用 · 无需账户", "itemizedBill": "详细账单", "totalBill": "账单总额", "remainingDue": "待付金额", "splitPayment": "分开付款", "splitFull": "全额", "splitEqual": "均分", "splitItems": "分组付款", "addTip": "添加小费", "tipNone": "无", "payBtn": "支付 {amt}", "processing": "正在处理付款...", "paySuccess": "付款成功！", "thanksDining": "感谢您的光临。您的付款已处理。", "receiptOptions": "收据", "printReceipt": "🖨️ 打印收据", "emailReceipt": "✉️ 邮件发送收据", "printAndEmail": "🖨️✉️ 打印 + 邮件", "noReceipt": "不需要收据", "receiptPrintedOk": "您的收据正在餐桌旁打印 ✓", "receiptSentTo": "收据已发送至 {email} ✓", "noReceiptOk": "不需要收据——一切就绪 ✓", "howWasIt": "体验如何？", "sendFeedback": "发送反馈", "commentPlaceholder": "哪些方面可以改进？（可选）", "thanksFeedback": "感谢您的反馈", "leaveGoogleReview": "⭐ 在 Google 上评价", "yourShare": "您的份额：", "splitAmong": "由 {n} 人分摊", "cardNumber": "卡号", "fullBody": "支付全部剩余金额 {amt}。", "sendReceipt": "发送收据", "receiptSummary": "收据摘要", "totalSettled": "已结总额", "thanksExcl": "谢谢！🎉", "validEmail": "请输入有效的电子邮箱。", "myItemsHelp": "点击您点的菜品——您的选择会显示在桌上每个人的手机上，避免重复付款。每个人支付自己选的菜品。", "claimedProgress": "已选 {n} / {total} 件", "paidSoFar": "已支付：{total} 中的 {amt}", "splitCustom": "自定义", "customAmount": "自定义金额", "orPayWithCard": "或使用银行卡支付", "cardWord": "银行卡", "googleReviewHelp": "很高兴您喜欢——在 Google 上留下简短评价对我们帮助很大。", "wellWork": "我们会改进的。"}, "hi": {"tableWord": "टेबल", "secureNote": "🔒 सुरक्षित भुगतान · ऐप की ज़रूरत नहीं · खाते की ज़रूरत नहीं", "itemizedBill": "विस्तृत बिल", "totalBill": "कुल बिल", "remainingDue": "शेष राशि", "splitPayment": "भुगतान बाँटें", "splitFull": "पूरा", "splitEqual": "बराबर", "splitItems": "ग्रुप पेमेंट", "addTip": "टिप जोड़ें", "tipNone": "कोई नहीं", "payBtn": "{amt} का भुगतान करें", "processing": "भुगतान संसाधित हो रहा है...", "paySuccess": "भुगतान सफल!", "thanksDining": "हमारे यहाँ भोजन करने के लिए धन्यवाद। आपका भुगतान हो गया है।", "receiptOptions": "रसीद", "printReceipt": "🖨️ रसीद प्रिंट करें", "emailReceipt": "✉️ रसीद ईमेल करें", "printAndEmail": "🖨️✉️ प्रिंट + ईमेल", "noReceipt": "रसीद नहीं चाहिए", "receiptPrintedOk": "आपकी रसीद आपकी टेबल पर प्रिंट हो रही है ✓", "receiptSentTo": "रसीद {email} पर भेज दी गई ✓", "noReceiptOk": "रसीद नहीं — सब हो गया ✓", "howWasIt": "कैसा रहा?", "sendFeedback": "प्रतिक्रिया भेजें", "commentPlaceholder": "क्या बेहतर हो सकता था? (वैकल्पिक)", "thanksFeedback": "आपकी प्रतिक्रिया के लिए धन्यवाद", "leaveGoogleReview": "⭐ Google पर समीक्षा दें", "yourShare": "आपका हिस्सा:", "splitAmong": "{n} लोगों में बाँटें", "cardNumber": "कार्ड नंबर", "fullBody": "पूरी शेष राशि {amt} का भुगतान कर रहे हैं।", "sendReceipt": "रसीद भेजें", "receiptSummary": "रसीद सारांश", "totalSettled": "कुल निपटान", "thanksExcl": "धन्यवाद! 🎉", "validEmail": "कृपया मान्य ईमेल पता डालें।", "myItemsHelp": "आपने जो खाया, उसे चुनें — आपकी पसंद टेबल पर सबके फ़ोन पर दिखेगी, ताकि कोई चीज़ दो बार न चुकाई जाए। हर कोई अपने चुने आइटम का भुगतान करता है।", "claimedProgress": "{total} में से {n} आइटम चुने गए", "paidSoFar": "अब तक भुगतान: {total} में से {amt}", "splitCustom": "कस्टम", "customAmount": "कस्टम राशि", "orPayWithCard": "या कार्ड से भुगतान करें", "cardWord": "कार्ड", "googleReviewHelp": "खुशी है कि आपको पसंद आया — Google पर एक छोटी समीक्षा हमारी बहुत मदद करती है।", "wellWork": "हम इस पर काम करेंगे।"}, "pa": {"tableWord": "ਮੇਜ਼", "secureNote": "🔒 ਸੁਰੱਖਿਅਤ ਭੁਗਤਾਨ · ਐਪ ਦੀ ਲੋੜ ਨਹੀਂ · ਖਾਤੇ ਦੀ ਲੋੜ ਨਹੀਂ", "itemizedBill": "ਵਿਸਤ੍ਰਿਤ ਬਿੱਲ", "totalBill": "ਕੁੱਲ ਬਿੱਲ", "remainingDue": "ਬਾਕੀ ਰਕਮ", "splitPayment": "ਭੁਗਤਾਨ ਵੰਡੋ", "splitFull": "ਪੂਰਾ", "splitEqual": "ਬਰਾਬਰ", "splitItems": "ਗਰੁੱਪ ਭੁਗਤਾਨ", "addTip": "ਟਿੱਪ ਜੋੜੋ", "tipNone": "ਕੋਈ ਨਹੀਂ", "payBtn": "{amt} ਦਾ ਭੁਗਤਾਨ ਕਰੋ", "processing": "ਭੁਗਤਾਨ ਦੀ ਪ੍ਰਕਿਰਿਆ ਚੱਲ ਰਹੀ ਹੈ...", "paySuccess": "ਭੁਗਤਾਨ ਸਫਲ!", "thanksDining": "ਸਾਡੇ ਇੱਥੇ ਖਾਣਾ ਖਾਣ ਲਈ ਧੰਨਵਾਦ। ਤੁਹਾਡਾ ਭੁਗਤਾਨ ਹੋ ਗਿਆ ਹੈ।", "receiptOptions": "ਰਸੀਦ", "printReceipt": "🖨️ ਰਸੀਦ ਪ੍ਰਿੰਟ ਕਰੋ", "emailReceipt": "✉️ ਰਸੀਦ ਈਮੇਲ ਕਰੋ", "printAndEmail": "🖨️✉️ ਪ੍ਰਿੰਟ + ਈਮੇਲ", "noReceipt": "ਰਸੀਦ ਨਹੀਂ ਚਾਹੀਦੀ", "receiptPrintedOk": "ਤੁਹਾਡੀ ਰਸੀਦ ਤੁਹਾਡੀ ਮੇਜ਼ 'ਤੇ ਪ੍ਰਿੰਟ ਹੋ ਰਹੀ ਹੈ ✓", "receiptSentTo": "ਰਸੀਦ {email} 'ਤੇ ਭੇਜ ਦਿੱਤੀ ਗਈ ✓", "noReceiptOk": "ਰਸੀਦ ਨਹੀਂ — ਸਭ ਹੋ ਗਿਆ ✓", "howWasIt": "ਕਿਵੇਂ ਰਿਹਾ?", "sendFeedback": "ਪ੍ਰਤੀਕਿਰਿਆ ਭੇਜੋ", "commentPlaceholder": "ਕੀ ਬਿਹਤਰ ਹੋ ਸਕਦਾ ਸੀ? (ਵਿਕਲਪਿਕ)", "thanksFeedback": "ਤੁਹਾਡੀ ਪ੍ਰਤੀਕਿਰਿਆ ਲਈ ਧੰਨਵਾਦ", "leaveGoogleReview": "⭐ Google 'ਤੇ ਸਮੀਖਿਆ ਦਿਓ", "yourShare": "ਤੁਹਾਡਾ ਹਿੱਸਾ:", "splitAmong": "{n} ਲੋਕਾਂ ਵਿੱਚ ਵੰਡੋ", "cardNumber": "ਕਾਰਡ ਨੰਬਰ", "fullBody": "ਪੂਰੀ ਬਾਕੀ ਰਕਮ {amt} ਦਾ ਭੁਗਤਾਨ ਕਰ ਰਹੇ ਹੋ।", "sendReceipt": "ਰਸੀਦ ਭੇਜੋ", "receiptSummary": "ਰਸੀਦ ਸਾਰ", "totalSettled": "ਕੁੱਲ ਨਿਪਟਾਰਾ", "thanksExcl": "ਧੰਨਵਾਦ! 🎉", "validEmail": "ਕਿਰਪਾ ਕਰਕੇ ਸਹੀ ਈਮੇਲ ਪਤਾ ਦਰਜ ਕਰੋ।", "myItemsHelp": "ਜੋ ਤੁਸੀਂ ਖਾਧਾ, ਉਹ ਚੁਣੋ — ਤੁਹਾਡੀ ਚੋਣ ਮੇਜ਼ 'ਤੇ ਸਭ ਦੇ ਫ਼ੋਨ 'ਤੇ ਦਿਖੇਗੀ, ਤਾਂ ਜੋ ਕੁਝ ਵੀ ਦੋ ਵਾਰ ਨਾ ਚੁਕਾਇਆ ਜਾਵੇ। ਹਰ ਕੋਈ ਆਪਣੀਆਂ ਚੁਣੀਆਂ ਆਈਟਮਾਂ ਦਾ ਭੁਗਤਾਨ ਕਰਦਾ ਹੈ।", "claimedProgress": "{total} ਵਿੱਚੋਂ {n} ਆਈਟਮਾਂ ਚੁਣੀਆਂ ਗਈਆਂ", "paidSoFar": "ਹੁਣ ਤੱਕ ਭੁਗਤਾਨ: {total} ਵਿੱਚੋਂ {amt}", "splitCustom": "ਕਸਟਮ", "customAmount": "ਕਸਟਮ ਰਕਮ", "orPayWithCard": "ਜਾਂ ਕਾਰਡ ਨਾਲ ਭੁਗਤਾਨ ਕਰੋ", "cardWord": "ਕਾਰਡ", "googleReviewHelp": "ਖੁਸ਼ੀ ਹੈ ਕਿ ਤੁਹਾਨੂੰ ਪਸੰਦ ਆਇਆ — Google 'ਤੇ ਛੋਟੀ ਸਮੀਖਿਆ ਸਾਡੀ ਬਹੁਤ ਮਦਦ ਕਰਦੀ ਹੈ।", "wellWork": "ਅਸੀਂ ਇਸ 'ਤੇ ਕੰਮ ਕਰਾਂਗੇ।"}};
 const LOCALES = { en: 'en-CA', fa: 'fa-IR', zh: 'zh-CN', hi: 'hi-IN', pa: 'pa-IN' };
 const LANG_NAMES = { en: 'English', fa: 'فارسی', zh: '中文', hi: 'हिन्दी', pa: 'ਪੰਜਾਬੀ' };
 
@@ -26,6 +26,9 @@ const state = {
   serviceActive: false,
   paid: false,
   receiptDone: false,
+  receiptMsg: '',
+  feedbackSent: false,
+  payTimer: null,
   rated: 0,
   scanAt: null,
 };
@@ -41,8 +44,17 @@ function t(key, vars) {
 function fmt(cents) {
   return new Intl.NumberFormat(LOCALES[state.lang], { style: 'currency', currency: 'CAD' }).format(cents / 100);
 }
+// C3-9 L-d: staff-facing surfaces (live feed, floor card) are English — never
+// format their amounts with the guest phone's locale.
+function fmtStaff(cents) {
+  return new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(cents / 100);
+}
+// C3-9 L-f: defense-in-depth escaping for values interpolated into attributes.
+function escAttr(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
 function shareCents() {
-  if (state.mode === 'equal') return Math.round(TOTAL_CENTS / state.people);
+  if (state.mode === 'equal') return Math.ceil(TOTAL_CENTS / state.people);
   if (state.mode === 'items') {
     let s = 0;
     state.claims.forEach((i) => { s += ITEMS[i].qty * ITEMS[i].cents; });
@@ -160,13 +172,13 @@ function splitAreaHtml() {
       '<span class="g-stepper"><button type="button" id="pMinus" aria-label="Fewer people">−</button><strong>' + state.people + '</strong><button type="button" id="pPlus" aria-label="More people">+</button></span></div>';
   }
   if (state.mode === 'custom') {
-    return '<label style="font-size:0.92rem;display:block;margin-bottom:6px;">' + t('customAmount') + ' (CA$)</label>' +
-      '<input class="g-input" id="custAmt" type="number" min="0" max="130" step="0.50" value="' + state.customDollars + '" inputmode="decimal" style="margin-bottom:2px;">' +
+    return '<label for="custAmt" style="font-size:0.92rem;display:block;margin-bottom:6px;">' + t('customAmount') + ' (CA$)</label>' +
+      '<input class="g-input" id="custAmt" type="text" dir="ltr" value="' + escAttr(state.customDollars) + '" inputmode="decimal" style="margin-bottom:2px;">' +
       '<p style="font-size:0.82rem;color:var(--text-muted);">Pay any part of the bill — the rest stays open for the table.</p>';
   }
   const claims = ITEMS.map((it, i) => {
     const on = state.claims.has(i);
-    return '<button type="button" class="g-claim' + (on ? ' on' : '') + '" data-claim="' + i + '"><span>' +
+    return '<button type="button" class="g-claim' + (on ? ' on' : '') + '" data-claim="' + i + '" aria-pressed="' + (on ? 'true' : 'false') + '"><span>' +
       (it.qty > 1 ? it.qty + ' × ' : '') + it.name + '</span><span>' + fmt(it.qty * it.cents) +
       (on ? ' <span class="tick">✓</span>' : '') + '</span></button>';
   }).join('');
@@ -177,8 +189,8 @@ function splitAreaHtml() {
 function renderBill() {
   const items = ITEMS.map((it) =>
     '<div class="g-item"><span>' + (it.qty > 1 ? it.qty + ' × ' : '') + it.name + '</span><span class="amt">' + fmt(it.qty * it.cents) + '</span></div>').join('');
-  const tips = [0, 10, 15, 18, 20].map((p) =>
-    '<button type="button" class="g-chip' + (state.tipPct === p ? ' on' : '') + '" data-tip="' + p + '">' +
+  const tips = [15, 18, 20, 25, 0].map((p) =>
+    '<button type="button" class="g-chip' + (state.tipPct === p ? ' on' : '') + '" data-tip="' + p + '" aria-pressed="' + (state.tipPct === p ? 'true' : 'false') + '">' +
     (p === 0 ? t('tipNone') : p + '%') + '</button>').join('');
   const share = shareCents();
   phoneApp.innerHTML =
@@ -188,10 +200,10 @@ function renderBill() {
         '<div class="g-total"><span>' + t('totalBill') + '</span><span>' + fmt(TOTAL_CENTS) + '</span></div></div>' +
       '<div class="g-card"><h4>' + t('splitPayment') + '</h4>' +
         '<div class="g-seg">' +
-          '<button type="button" data-mode="full" class="' + (state.mode === 'full' ? 'on' : '') + '">' + t('splitFull') + '</button>' +
-          '<button type="button" data-mode="equal" class="' + (state.mode === 'equal' ? 'on' : '') + '">' + t('splitEqual') + '</button>' +
-          '<button type="button" data-mode="items" class="' + (state.mode === 'items' ? 'on' : '') + '">' + t('splitItems') + '</button>' +
-          '<button type="button" data-mode="custom" class="' + (state.mode === 'custom' ? 'on' : '') + '">' + t('splitCustom') + '</button>' +
+          '<button type="button" data-mode="full" aria-pressed="' + (state.mode === 'full' ? 'true' : 'false') + '" class="' + (state.mode === 'full' ? 'on' : '') + '">' + t('splitFull') + '</button>' +
+          '<button type="button" data-mode="equal" aria-pressed="' + (state.mode === 'equal' ? 'true' : 'false') + '" class="' + (state.mode === 'equal' ? 'on' : '') + '">' + t('splitEqual') + '</button>' +
+          '<button type="button" data-mode="items" aria-pressed="' + (state.mode === 'items' ? 'true' : 'false') + '" class="' + (state.mode === 'items' ? 'on' : '') + '">' + t('splitItems') + '</button>' +
+          '<button type="button" data-mode="custom" aria-pressed="' + (state.mode === 'custom' ? 'true' : 'false') + '" class="' + (state.mode === 'custom' ? 'on' : '') + '">' + t('splitCustom') + '</button>' +
         '</div><div id="splitArea">' + splitAreaHtml() + '</div>' +
         (state.mode !== 'full' ? '<div class="g-share"><span>' + t('yourShare') + '</span><span id="shareAmt">' + fmt(share) + '</span></div>' : '') +
       '</div>' +
@@ -230,7 +242,7 @@ function renderCard() {
       '<button class="g-applepay" id="applePayBtn">Pay with Apple&nbsp;Pay</button>' +
       '<div class="g-or">' + t('orPayWithCard') + '</div>' +
       '<div class="g-card"><h4>' + t('cardWord') + '</h4>' +
-      '<input class="g-input" id="ccNum" value="4242 4242 4242 4242" inputmode="numeric" aria-label="' + t('cardNumber') + '">' +
+      '<input class="g-input" id="ccNum" value="4111 1111 1111 1111" inputmode="numeric" aria-label="' + t('cardNumber') + '">' +
       '<div style="display:flex;gap:8px;"><input class="g-input" value="12/28" aria-label="Expiry"><input class="g-input" value="424" inputmode="numeric" aria-label="CVC"></div>' +
       '<p style="font-size:0.78rem;color:var(--text-muted);">Demo only — this card is Square&rsquo;s public test card. Nothing is charged.</p></div>' +
     '</div>' +
@@ -252,7 +264,11 @@ function doPay() {
   feed('💳 Guest is paying…');
   $('liveChip').textContent = 'PAYING';
   $('liveChip').className = 'chip paying';
-  setTimeout(() => {
+  // C3-9 M2: keep the timer id — Replay clears it, and the callback re-checks
+  // the phase, so a reset can never be flipped to PAID by a stale timer.
+  state.payTimer = setTimeout(() => {
+    state.payTimer = null;
+    if (state.phase !== 'processing') return;
     state.paid = true;
     state.phase = 'success';
     setStep(4);
@@ -260,10 +276,10 @@ function doPay() {
     setDeviceStatus('Payment received ✓');
     $('liveChip').textContent = 'PAID ✓';
     $('liveChip').className = 'chip paid';
-    $('liveSub').textContent = '4 guests · settled ' + fmt(dueCents());
+    $('liveSub').textContent = '4 guests · settled ' + fmtStaff(dueCents());
     const secs = Math.max(1, Math.round((Date.now() - state.scanAt) / 1000));
     $('settleTimer').textContent = Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
-    feed('✅ Payment received — ' + fmt(dueCents()) + ' · Table 5 is PAID');
+    feed('✅ Payment received — ' + fmtStaff(dueCents()) + ' · Table 5 is PAID');
     render();
   }, 1400);
 }
@@ -274,9 +290,15 @@ function receiptText() {
     return l + ' '.repeat(Math.max(1, 32 - s.length)) + r;
   };
   const rows = ['          SAMPLE BISTRO', '             Table 5', '--------------------------------'];
-  ITEMS.forEach((it) => rows.push(line((it.qty > 1 ? it.qty + ' x ' : '') + it.name, moneyPlain(it.qty * it.cents))));
-  rows.push('--------------------------------');
-  rows.push(line('Paid', moneyPlain(shareCents())));
+  // C3-9 L-c: a partial payment must not list the whole check against it —
+  // mirror the real app (C3-8 M1): show the share line instead of the items.
+  if (shareCents() >= TOTAL_CENTS) {
+    ITEMS.forEach((it) => rows.push(line((it.qty > 1 ? it.qty + ' x ' : '') + it.name, moneyPlain(it.qty * it.cents))));
+    rows.push('--------------------------------');
+    rows.push(line('Paid', moneyPlain(shareCents())));
+  } else {
+    rows.push(line('Your share of the check', moneyPlain(shareCents())));
+  }
   rows.push(line('Tip', moneyPlain(tipCents())));
   rows.push(line('TOTAL', moneyPlain(dueCents())));
   rows.push('--------------------------------', '           Thank you!', '        smarttablepay.com');
@@ -322,14 +344,15 @@ function renderSuccess() {
     if (state.receiptDone) return;
     const kind = b.dataset.rc;
     const status = $('rcStatus');
+    const setStatus = (txt) => { state.receiptMsg = txt; status.textContent = txt; };
     if (kind === 'print') {
       state.receiptDone = true;
       doPrint();
-      status.textContent = t('receiptPrintedOk');
+      setStatus(t('receiptPrintedOk'));
       lockReceiptButtons();
     } else if (kind === 'none') {
       state.receiptDone = true;
-      status.textContent = t('noReceiptOk');
+      setStatus(t('noReceiptOk'));
       lockReceiptButtons();
     } else {
       if (kind === 'both') {
@@ -337,7 +360,7 @@ function renderSuccess() {
         // gated behind the email step. The email form opens in parallel.
         state.receiptDone = true;
         doPrint();
-        status.textContent = t('receiptPrintedOk');
+        setStatus(t('receiptPrintedOk'));
         lockReceiptButtons();
       }
       $('emailZone').innerHTML = emailBlockHtml();
@@ -345,7 +368,7 @@ function renderSuccess() {
         const v = $('rcEmail').value.trim();
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) { toast(t('validEmail')); return; }
         state.receiptDone = true;
-        status.textContent = (kind === 'both' ? t('receiptPrintedOk') + ' · ' : '') + t('receiptSentTo', { email: v });
+        setStatus((kind === 'both' ? t('receiptPrintedOk') + ' · ' : '') + t('receiptSentTo', { email: v }));
         feed('✉️ Receipt emailed to the guest');
         $('emailZone').innerHTML = '';
         lockReceiptButtons();
@@ -353,26 +376,50 @@ function renderSuccess() {
     }
   }));
 
+  // C3-9 L-a: a re-render (e.g. language switch) rebuilds this screen from
+  // scratch — restore the receipt outcome instead of showing live-looking
+  // buttons that are dead behind the receiptDone guard.
+  if (state.receiptDone) {
+    $('rcStatus').textContent = state.receiptMsg;
+    lockReceiptButtons();
+  }
+
   phoneApp.querySelectorAll('[data-star]').forEach((b) => b.addEventListener('click', () => {
     state.rated = Number(b.dataset.star);
-    const zone = $('rateZone');
+    state.feedbackSent = false;
     phoneApp.querySelectorAll('[data-star]').forEach((s) => s.classList.toggle('lit', Number(s.dataset.star) <= state.rated));
-    if (state.rated >= 4) {
-      zone.innerHTML = '<p style="font-size:0.88rem;color:var(--text-muted);">' + t('googleReviewHelp') + '</p>' +
-        '<button class="g-opt" style="text-align:center;" id="gReviewBtn">' + t('leaveGoogleReview') + '</button>';
-      $('gReviewBtn').addEventListener('click', () => toast('Demo — this would open the Google review page'));
-      feed('⭐ Table 5 rated the visit ' + state.rated + '★');
-    } else {
-      zone.innerHTML = '<textarea class="g-input" rows="2" placeholder="' + t('commentPlaceholder') + '"></textarea>' +
-        '<button class="g-opt" style="text-align:center;background:var(--navy);color:#fff;border-color:var(--navy);" id="fbBtn">' + t('sendFeedback') + '</button>';
-      $('fbBtn').addEventListener('click', () => {
-        zone.innerHTML = '<p style="font-size:0.88rem;color:var(--green);font-weight:600;">' + t('thanksFeedback') + ' — ' + t('wellWork') + '</p>';
-        $('alertZone').innerHTML = '<div class="alert-row red"><span>🚨 Service Recovery — Table 5 rated ' + state.rated + '★. A manager can still turn this visit around.</span></div>';
-        feed('🚨 Service Recovery alert — Table 5 rated ' + state.rated + '★ (private, not a public review)');
-      });
-      feed('⭐ Table 5 rated the visit ' + state.rated + '★');
-    }
+    feed('⭐ Table 5 rated the visit ' + state.rated + '★');
+    renderRateZone();
   }));
+  if (state.rated > 0) renderRateZone();
+}
+
+// C3-9 L-a: the rating zone is rendered from state (not only on click), so a
+// language switch re-renders it — form, Google prompt or thanks — intact.
+function renderRateZone() {
+  const zone = $('rateZone');
+  if (!zone || state.rated === 0) return;
+  if (state.rated >= 4) {
+    zone.innerHTML = '<p style="font-size:0.88rem;color:var(--text-muted);">' + t('googleReviewHelp') + '</p>' +
+      '<button class="g-opt" style="text-align:center;" id="gReviewBtn">' + t('leaveGoogleReview') + '</button>';
+    $('gReviewBtn').addEventListener('click', () => toast('Demo — this would open the Google review page'));
+  } else if (state.feedbackSent) {
+    zone.innerHTML = '<p style="font-size:0.88rem;color:var(--green);font-weight:600;">' + t('thanksFeedback') + ' — ' + t('wellWork') + '</p>';
+  } else {
+    zone.innerHTML = '<textarea class="g-input" rows="2" placeholder="' + t('commentPlaceholder') + '" aria-label="' + t('commentPlaceholder') + '"></textarea>' +
+      '<button class="g-opt" style="text-align:center;background:var(--navy);color:#fff;border-color:var(--navy);" id="fbBtn">' + t('sendFeedback') + '</button>';
+    $('fbBtn').addEventListener('click', () => {
+      state.feedbackSent = true;
+      renderRateZone();
+      // C3-9 L-b: APPEND the recovery alert — overwriting alertZone would
+      // destroy an active amber service alert and its Mark-served button.
+      const row = document.createElement('div');
+      row.className = 'alert-row red';
+      row.innerHTML = '<span>🚨 Service Recovery — Table 5 rated ' + state.rated + '★. A manager can still turn this visit around.</span>';
+      $('alertZone').appendChild(row);
+      feed('🚨 Service Recovery alert — Table 5 rated ' + state.rated + '★ (private, not a public review)');
+    });
+  }
 }
 function lockReceiptButtons() {
   phoneApp.querySelectorAll('[data-rc]').forEach((b) => { b.disabled = true; });
@@ -380,9 +427,11 @@ function lockReceiptButtons() {
 
 /* ---------- replay ---------- */
 $('replayBtn').addEventListener('click', () => {
+  if (state.payTimer) { clearTimeout(state.payTimer); state.payTimer = null; }
   Object.assign(state, {
     phase: 'scan', mode: 'full', people: 2, customDollars: '50.00', tipPct: 15,
-    serviceActive: false, paid: false, receiptDone: false, rated: 0, scanAt: null,
+    serviceActive: false, paid: false, receiptDone: false, receiptMsg: '',
+    feedbackSent: false, rated: 0, scanAt: null,
   });
   state.claims = new Set();
   setLed();
