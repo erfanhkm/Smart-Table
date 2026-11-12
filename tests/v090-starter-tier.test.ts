@@ -34,6 +34,7 @@ const { query } = await import('../src/db.js');
 const { encryptSecret } = await import('../src/crypto.js');
 const { buildApp } = await import('../src/index.js');
 const { hashToken } = await import('../src/routes/portal.js');
+const { hashClaimCode } = await import('../src/routes/device.js');
 const { payCheck } = await import('../src/services/payments.js');
 const {
   ensureBillingAccount, getBillingState, setLocationTier, switchPlan,
@@ -268,7 +269,7 @@ describe('v0.9.0 starter tier', () => {
     const starterCode = '31415926';
     await query(
       `INSERT INTO device_claim_codes(code_hash, location_id, table_id, expires_at) VALUES ($1,$2,$3,$4)`,
-      [hashToken(starterCode), LOC_STARTER, T_STARTER, new Date(Date.now() + 10 * 60_000).toISOString()],
+      [hashClaimCode(starterCode), LOC_STARTER, T_STARTER, new Date(Date.now() + 10 * 60_000).toISOString()],
     );
     const refused = await app.inject({
       method: 'POST', url: '/api/device/claim', payload: { code: starterCode },
@@ -285,7 +286,7 @@ describe('v0.9.0 starter tier', () => {
     const baseCode = '27182818';
     await query(
       `INSERT INTO device_claim_codes(code_hash, location_id, table_id, expires_at) VALUES ($1,$2,$3,$4)`,
-      [hashToken(baseCode), LOC_BASE, T_BASE, new Date(Date.now() + 10 * 60_000).toISOString()],
+      [hashClaimCode(baseCode), LOC_BASE, T_BASE, new Date(Date.now() + 10 * 60_000).toISOString()],
     );
     const ok = await app.inject({
       method: 'POST', url: '/api/device/claim', payload: { code: baseCode },

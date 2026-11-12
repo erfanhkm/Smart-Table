@@ -242,6 +242,16 @@ export async function setLocationTier(
     // the second write failed.
     await withTx(async (client) => {
       await client.query(`UPDATE locations SET tier = $2 WHERE id = $1`, [locationId, tier]);
+      // v0.10.10 (C3-10 L-4): downgrading to Starter deletes the
+      // location's outstanding (unused) claim codes in the same
+      // transaction. A live code on a Starter location is refused at
+      // claim time — but the pre-check that produces that distinct 403
+      // doubles as a code-existence oracle; with the codes gone, a
+      // downgraded location's guesses get the generic error like any
+      // other unknown code, and no code can outlive the downgrade.
+      if (tier === 'starter') {
+        await client.query(`DELETE FROM device_claim_codes WHERE location_id = $1 AND used_at IS NULL`, [locationId]);
+      }
       if (applyDefaults) {
         await client.query(
           `UPDATE billing_accounts SET commission_bps = $2, subscription_price_cents = $3, updated_at = now() WHERE location_id = $1`,

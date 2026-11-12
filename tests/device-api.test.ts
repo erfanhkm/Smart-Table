@@ -27,6 +27,7 @@ const { migrate } = await import('../src/migrate.js');
 const { query } = await import('../src/db.js');
 const { buildApp } = await import('../src/index.js');
 const { hashToken } = await import('../src/routes/portal.js');
+const { hashClaimCode } = await import('../src/routes/device.js');
 
 const STAFF = { authorization: 'Bearer test-token' };
 const locId = randomUUID();
@@ -82,13 +83,12 @@ describe('pairing', () => {
 
   it('rejects an expired code', async () => {
     const code = '42424242';
-    // Stored under the LEGACY sha256 hash on purpose: v0.8.14 moved claim
-    // codes to keyed HMAC storage, and the claim path's legacy fallback
-    // must still find pre-change rows (they live 10 minutes at most).
+    // Stored under the current HMAC hash (v0.10.10 retired the legacy
+    // SHA-256 claim fallback — see the v0814 regression test).
     await query(
       `INSERT INTO device_claim_codes(code_hash, location_id, table_id, expires_at)
        VALUES ($1,$2,$3, now() - interval '1 minute')`,
-      [hashToken(code), locId, table2Id],
+      [hashClaimCode(code), locId, table2Id],
     );
     const res = await claim(code);
     assert.equal(res.statusCode, 400);

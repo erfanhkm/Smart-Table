@@ -143,7 +143,7 @@ describe('v0.10.8 C3-9 site hygiene (H1/M3/M4/M5/L-e/L-i/L-l/L-m/L-n/L-o)', () =
     assert.ok(!securityTxt.includes('Policy:'), 'security.txt no longer points Policy at the privacy policy');
   });
 
-  it('release version is 0.10.9 (was 0.10.8 at C3-9 ship)', () => {
-    assert.equal(pkg.version, '0.10.9', 'package.json at 0.10.9');
+  it('release version is 0.10.10 (was 0.10.9 at C3-9 M8 ship)', () => {
+    assert.equal(pkg.version, '0.10.10', 'package.json at 0.10.10');
   });
 });

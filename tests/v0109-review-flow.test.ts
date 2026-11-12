@@ -161,8 +161,8 @@ describe('v0.10.9 M8: guest app + demo render both options in every state', () =
     assert.ok(indexHtml.includes('every guest is offered a public Google review and private feedback'), 'index.html plan bullet states the equal offer');
   });
 
-  it('release version is 0.10.9', () => {
+  it('release version is 0.10.10', () => {
     const pkg = JSON.parse(read('../package.json')) as { version: string };
-    assert.equal(pkg.version, '0.10.9', 'package.json at 0.10.9');
+    assert.equal(pkg.version, '0.10.10', 'package.json at 0.10.10');
   });
 });

@@ -3,8 +3,8 @@
 // Proves:
 //  1. Claim failures are indistinguishable: unknown / used / expired all
 //     return the same generic 400 (F11-1), and codes are stored as keyed
-//     HMAC hashes — with the legacy SHA-256 fallback still able to claim
-//     a pre-change row (F11-1 storage migration path).
+//     HMAC hashes. v0.10.10 (C3-10): the legacy SHA-256 fallback is
+//     RETIRED — a legacy-stored live code now gets the generic 400 too.
 //  2. Claim consumption is atomic: two concurrent claims of one code
 //     yield exactly one device (F11-2); minting purges long-expired code
 //     rows (F11 Low).
@@ -122,7 +122,7 @@ describe('claim-code storage is keyed HMAC (F11-1)', () => {
     assert.notEqual(r.rows[0].code_hash, hashToken(code));
   });
 
-  it('a legacy SHA-256-stored code can still claim (deploy bridge)', async () => {
+  it('a legacy SHA-256-stored code is rejected (fallback retired, C3-10)', async () => {
     const code = '22222222';
     await query(
       `INSERT INTO device_claim_codes(code_hash, location_id, table_id, expires_at)
@@ -130,10 +130,19 @@ describe('claim-code storage is keyed HMAC (F11-1)', () => {
       [hashToken(code), locId, table2Id],
     );
     const res = await claim(code); // claim #5
-    assert.equal(res.statusCode, 200, res.body);
-    const body = res.json() as { device_token: string; device_id: string };
-    deviceBToken = body.device_token;
-    deviceBId = body.device_id;
+    assert.equal(res.statusCode, 400, res.body);
+    assert.match(res.body, /invalid claim code/);
+    const devs = await query(`SELECT id FROM devices WHERE table_id = $1 AND revoked_at IS NULL`, [table2Id]);
+    assert.equal(devs.rowCount, 0, 'a legacy-stored code must pair nothing');
+    // The print-job tests below need a paired device on table2: seed one
+    // directly (this suite's claim budget counts only real claim calls;
+    // HMAC claiming itself is proven by the other tests in this file).
+    deviceBToken = ['c310', 'device', 'b', 'token'].join('-');
+    deviceBId = randomUUID();
+    await query(
+      `INSERT INTO devices(id, location_id, table_id, token_hash) VALUES ($1,$2,$3,$4)`,
+      [deviceBId, locId, table2Id, hashToken(deviceBToken)],
+    );
   });
 });
 
@@ -237,7 +246,7 @@ describe('print jobs (F11-3/F11-4)', () => {
     assert.deepEqual(jobs[0].lines, ['TOTAL $5.00', 'ESC@ reset', 'BEL ring', 'tabhere']);
   });
 
-  it('ack is terminal: re-acking a done job conflicts, unknown ids 404', async () => {
+  it('ack is terminal: a CONFLICTING re-ack of a done job 409s, unknown ids 404', async () => {
     const fetch1 = await app.inject({ method: 'GET', url: '/api/device/print-jobs', headers: devB() });
     const jobId = (fetch1.json() as { jobs: { id: string }[] }).jobs[0].id;
     const ack = await app.inject({
@@ -362,7 +371,10 @@ describe('audit trail (F11-5 cheap part)', () => {
       `SELECT COUNT(*)::int AS n FROM audit_log WHERE action = 'device.paired' AND location_id = $1`,
       [locId],
     );
-    assert.ok(paired.rows[0].n >= 3, 'every successful claim is audited');
+    // v0.10.10 (C3-10): two successful claims happen in this suite now
+    // (the legacy-hash claim that used to be the third is rejected since
+    // the fallback retired).
+    assert.ok(paired.rows[0].n >= 2, 'every successful claim is audited');
     const revoked = await query<{ n: number }>(
       `SELECT COUNT(*)::int AS n FROM audit_log WHERE action = 'device.revoked' AND target = $1`,
       [deviceBId],

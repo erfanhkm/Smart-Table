@@ -20,7 +20,7 @@
 //   POST /api/portal/devices/:id/revoke
 //   POST /api/tables/:id/print-job        { lines[] } -> { job_id }
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { createHash, createHmac, randomBytes, randomInt, randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { query, withTx } from '../db.js';
 import { badRequest, conflict, httpError, notFound } from '../http.js';
 import { getLocationTier } from '../services/billing.js';
@@ -35,13 +35,21 @@ import { sanitizePrintLines } from '../services/receiptLines.js';
 // v0.8.14 (F11-1): claim codes are 8 digits (~27 bits) — a plain SHA-256 of
 // the code is a dictionary waiting to be enumerated offline. Store them
 // HMAC-keyed with the deployment's encryption key instead, so a database
-// copy alone reveals nothing. Codes minted before this change are stored
-// as legacy SHA-256; the claim path tries the HMAC hash first and falls
-// back to the legacy hash (codes live 10 minutes, so the fallback only
-// bridges the deploy window and can be dropped in a later release).
+// copy alone reveals nothing. v0.10.10 (C3-10, KEY QUESTION): the legacy
+// SHA-256 fallback is RETIRED — codes live 10 minutes, every code minted
+// since v0.8.14 is HMAC-stored (grep-verified: the mint route below is the
+// only INSERT INTO device_claim_codes in the codebase), and keeping the
+// fallback doubled the claim path's database work on every failed guess.
+// hashToken (SHA-256) remains correct for high-entropy device/portal
+// bearer tokens; it is no longer accepted for claim codes. And the key
+// derivation fails CLOSED: a malformed ENCRYPTION_KEY throws here instead
+// of silently deriving a weaker key from the staff token (assertSafeConfig
+// already refuses production boot in that state).
 function claimCodeKey(): Buffer {
-  if (/^[0-9a-fA-F]{64}$/.test(config.encryptionKeyHex)) return Buffer.from(config.encryptionKeyHex, 'hex');
-  return createHash('sha256').update(`stt101-claim-key:${config.staffApiToken}`).digest();
+  if (!/^[0-9a-fA-F]{64}$/.test(config.encryptionKeyHex)) {
+    throw new Error('ENCRYPTION_KEY must be exactly 64 hex characters to hash claim codes');
+  }
+  return Buffer.from(config.encryptionKeyHex, 'hex');
 }
 
 export function hashClaimCode(code: string): string {
@@ -55,6 +63,20 @@ export function hashClaimCode(code: string): string {
 // generic limiter counts successes too, which is correct here: a minted
 // code is single-use, so a successful claim needs no follow-up attempts.
 const claimLimiter = rateLimit({ name: 'device-claim', windowMs: 10 * 60_000, max: 15 });
+
+// v0.10.10 (C3-10 M-4): a global claim-attempt ceiling behind the per-IP
+// budget — a distributed guesser rotating source IPs should still hit a
+// wall. The per-IP limiter already keys through the shared normalizeIp
+// (IPv6 sources bucket by /64, F5-5); this second limiter composes with
+// the same core using a constant key. 300 attempts per 10 minutes across
+// every source is far above any legitimate install day and far below
+// useful enumeration of a 10-minute, single-use code space.
+const claimGlobalLimiter = rateLimit({
+  name: 'device-claim-global',
+  windowMs: 10 * 60_000,
+  max: 300,
+  key: () => 'all',
+});
 
 // v0.9.0: the Starter tier is printed QR codes only — no STT-101 device,
 // so pairing is refused for starter locations (both minting a claim code
@@ -81,13 +103,63 @@ export async function countActivePrintJobs(deviceId: string): Promise<number> {
   return Number(r.rows[0]?.n ?? 0);
 }
 
+/** Minimal query-runner shape shared by the pool and a tx client. */
+type QueryRunner = (
+  text: string,
+  params?: unknown[],
+) => Promise<{ rows: unknown[]; rowCount: number }>;
+
+const poolRunner: QueryRunner = async (text, params) => {
+  const r = await query(text, params);
+  return { rows: r.rows as unknown[], rowCount: r.rowCount ?? 0 };
+};
+
+function txRunner(client: { query: (text: string, params?: unknown[]) => Promise<{ rows: unknown[]; rowCount: number | null }> }): QueryRunner {
+  return async (text, params) => {
+    const r = await client.query(text, params);
+    return { rows: r.rows, rowCount: r.rowCount ?? 0 };
+  };
+}
+
+/**
+ * v0.10.10 (C3-10 M-2): release the receipt_printed_at claim of every
+ * payment whose print job just failed. A job that can never print must
+ * not keep the payment's one-print claim (migration 024) — the guest is
+ * allowed to ask for the receipt again. Jobs without a payment link
+ * (staff prints, pre-035 jobs) release nothing.
+ */
+async function releasePrintClaims(run: QueryRunner, paymentIds: (string | null)[]): Promise<void> {
+  const ids = [...new Set(paymentIds.filter((x): x is string => typeof x === 'string' && x.length > 0))];
+  if (ids.length === 0) return;
+  const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+  await run(`UPDATE payments SET receipt_printed_at = NULL WHERE id IN (${placeholders})`, ids);
+}
+
+/**
+ * Fail all of a device's active jobs with `error`, releasing the linked
+ * payments' print claims (M-2). Runs on whatever runner the caller holds
+ * so the claim replacement path can do it inside the pairing transaction
+ * (M-3): if the pairing later fails, the cancellation rolls back too.
+ */
+async function failActivePrintJobs(run: QueryRunner, deviceId: string, error: string): Promise<void> {
+  const r = await run(
+    `UPDATE print_jobs SET status = 'failed', error = $2
+     WHERE device_id = $1 AND status IN ('pending','sent') RETURNING payment_id`,
+    [deviceId, error],
+  );
+  await releasePrintClaims(run, (r.rows as { payment_id: string | null }[]).map((x) => x.payment_id));
+}
+
 /** Fail (server-side) any of the device's active jobs older than the TTL. */
 async function expireStalePrintJobs(deviceId: string): Promise<void> {
-  await query(
+  const r = await query<{ payment_id: string | null }>(
     `UPDATE print_jobs SET status = 'failed', error = 'expired before printing'
-     WHERE device_id = $1 AND status IN ('pending','sent') AND created_at < $2`,
+     WHERE device_id = $1 AND status IN ('pending','sent') AND created_at < $2
+     RETURNING payment_id`,
     [deviceId, new Date(Date.now() - PRINT_JOB_TTL_MS)],
   );
+  // M-2: an expired job releases its payment's print claim too.
+  await releasePrintClaims(poolRunner, r.rows.map((x) => x.payment_id));
 }
 
 function isUniqueViolation(e: unknown): boolean {
@@ -133,6 +205,29 @@ function device(req: FastifyRequest): DeviceIdentity {
   return req.device as DeviceIdentity;
 }
 
+/**
+ * Same Service Recovery rule as the guest button: 3+ calls in 10 minutes
+ * means the guest feels ignored — raise an alert (deduped while open).
+ * v0.10.10 (C3-10 L-9): a failure here must not fail the request or lose
+ * the call — the event is already durably inserted and the state poll
+ * keeps showing the pending call; the error is logged, and a later press
+ * (including a deduped one) re-drives this check.
+ */
+async function maybeRaiseRepeatAlert(req: FastifyRequest, d: DeviceIdentity): Promise<void> {
+  try {
+    const cutoff = new Date(Date.now() - 10 * 60 * 1000);
+    const recent = await query<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM events WHERE table_id = $1 AND type = 'call_waiter' AND created_at > $2`,
+      [d.table_id, cutoff],
+    );
+    if (Number(recent.rows[0]?.n ?? 0) >= 3) {
+      await raiseServiceAlert({ locationId: d.location_id, tableId: d.table_id, kind: 'waiter_repeat' });
+    }
+  } catch (e) {
+    req.log.error({ err: e, table_id: d.table_id }, 'waiter repeat alert failed; call event remains recorded');
+  }
+}
+
 export async function deviceRoutes(app: FastifyInstance) {
   // ---- Pairing -------------------------------------------------------------
   // v0.8.14 (F11-1/F11-2): one generic error for unknown / used / expired —
@@ -146,7 +241,11 @@ export async function deviceRoutes(app: FastifyInstance) {
   // parsing, so chunked bodies are capped too. This is the one
   // unauthenticated write route on the device surface; its real payload
   // is a single 8-digit code.
-  app.post('/api/device/claim', { preHandler: claimLimiter, bodyLimit: 65_536 }, async (req) => {
+  app.post('/api/device/claim', { preHandler: [claimLimiter, claimGlobalLimiter], bodyLimit: 65_536 }, async (req, reply) => {
+    // v0.10.10 (C3-10 L-11): the claim response carries a fresh bearer
+    // token — pin no-store on the route itself (the global /api/ onSend
+    // hook sets it too; this response must never rely on one layer).
+    reply.header('Cache-Control', 'no-store');
     const { code } = (req.body ?? {}) as { code?: unknown };
     if (typeof code !== 'string' || !/^\d{8}$/.test(code)) {
       throw badRequest('claim code is required (8 digits)');
@@ -154,55 +253,112 @@ export async function deviceRoutes(app: FastifyInstance) {
     // v0.9.0: a live code belonging to a Starter location is refused
     // BEFORE it is consumed — Starter has no devices to pair. Unknown /
     // used / expired codes fall through to the generic error below (the
-    // tier check must not become a code-existence oracle).
-    const live = await query<{ location_id: string }>(
-      `SELECT location_id FROM device_claim_codes
-       WHERE code_hash IN ($1, $2) AND used_at IS NULL AND expires_at > now()`,
-      [hashClaimCode(code), hashToken(code)],
+    // tier check must not become a code-existence oracle). v0.10.10
+    // (C3-10): the legacy SHA-256 hash is no longer consulted anywhere on
+    // this path (see claimCodeKey) — one HMAC lookup only.
+    const codeHash = hashClaimCode(code);
+    const live = await query<{ location_id: string; table_id: string }>(
+      `SELECT location_id, table_id FROM device_claim_codes
+       WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()`,
+      [codeHash],
     );
     if (live.rowCount > 0) await assertDevicesIncluded(live.rows[0].location_id);
 
+    // v0.10.10 (C3-10 L-5 + M-3): consumption, the table lookup, the old
+    // unit's job cancellation, its revocation and the new device insert
+    // all run on ONE transaction client. Previously the code was consumed
+    // on the pool BEFORE the pairing transaction opened, so any later
+    // failure (table gone, insert error) burned a single-use code for a
+    // pairing that never happened; and the replaced unit's queued jobs
+    // were left live-looking on a device that would never fetch again.
+    // A throw anywhere below rolls the consumption back with the rest.
+    const token = randomBytes(32).toString('hex');
+    const id = randomUUID();
     let cc: { location_id: string; table_id: string } | undefined;
-    for (const hash of [hashClaimCode(code), hashToken(code)]) {
-      const r = await query<{ location_id: string; table_id: string }>(
-        `UPDATE device_claim_codes SET used_at = now()
-         WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
-         RETURNING location_id, table_id`,
-        [hash],
-      );
-      if (r.rowCount > 0) {
-        cc = r.rows[0];
-        break;
-      }
+    let table: { id: string; name: string; qr_token: string } | undefined;
+    let replacedDeviceIds: string[] = [];
+    try {
+      await withTx(async (client) => {
+        const run = txRunner(client);
+        // The table lookup runs BEFORE the consume on purpose: the one
+        // foreseeable pairing failure (table deleted after minting) must
+        // not burn the code even in an environment whose transaction
+        // rollback is best-effort. Unknown codes skip it entirely — the
+        // consume below finds nothing and the answer stays generic.
+        if (live.rowCount > 0) {
+          const t = await client.query<{ id: string; name: string; qr_token: string }>(
+            `SELECT id, name, qr_token FROM tables WHERE id = $1`,
+            [live.rows[0].table_id],
+          );
+          if (t.rowCount === 0) throw badRequest('table no longer exists');
+          table = t.rows[0];
+        }
+
+        const consumed = await client.query<{ location_id: string; table_id: string }>(
+          `UPDATE device_claim_codes SET used_at = now()
+           WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
+           RETURNING location_id, table_id`,
+          [codeHash],
+        );
+        if (consumed.rowCount === 0) return; // handled as generic error below
+        cc = consumed.rows[0];
+        if (!table) {
+          // The code turned live between the pre-check and the consume
+          // (a mint racing this claim): resolve the table now; a miss
+          // aborts the transaction, rolling the consumption back.
+          const t = await client.query<{ id: string; name: string; qr_token: string }>(
+            `SELECT id, name, qr_token FROM tables WHERE id = $1`,
+            [cc.table_id],
+          );
+          if (t.rowCount === 0) throw badRequest('table no longer exists');
+          table = t.rows[0];
+        }
+
+        // M-3: cancel the replaced unit's queued jobs (releasing their
+        // payments' print claims per M-2) before revoking it.
+        const old = await client.query<{ id: string }>(
+          `SELECT id FROM devices WHERE table_id = $1 AND revoked_at IS NULL`,
+          [cc.table_id],
+        );
+        replacedDeviceIds = old.rows.map((d) => d.id);
+        for (const oldId of replacedDeviceIds) {
+          await failActivePrintJobs(run, oldId, 'device replaced');
+        }
+        await client.query(`UPDATE devices SET revoked_at = now() WHERE table_id = $1 AND revoked_at IS NULL`, [
+          cc.table_id,
+        ]);
+        await client.query(`INSERT INTO devices(id, location_id, table_id, token_hash) VALUES ($1,$2,$3,$4)`, [
+          id,
+          cc.location_id,
+          cc.table_id,
+          hashToken(token),
+        ]);
+      });
+    } catch (e) {
+      // A pairing that failed after the consume UPDATE must not burn the
+      // code: withTx has already rolled the transaction back; surface
+      // the original error.
+      throw e;
     }
-    if (!cc) {
+    if (!cc || !table) {
       req.log.warn({ ip: req.ip }, 'device claim failed');
       throw badRequest('invalid claim code');
     }
-
-    const t = await query<{ id: string; name: string; qr_token: string }>(
-      `SELECT id, name, qr_token FROM tables WHERE id = $1`,
-      [cc.table_id],
-    );
-    if (t.rowCount === 0) throw badRequest('table no longer exists');
-
-    // Re-pairing replaces the table's previous unit — atomically, so a
-    // concurrent claim for the same table can't interleave revoke/insert.
-    const token = randomBytes(32).toString('hex');
-    const id = randomUUID();
-    await withTx(async (client) => {
-      await client.query(`UPDATE devices SET revoked_at = now() WHERE table_id = $1 AND revoked_at IS NULL`, [
-        cc.table_id,
-      ]);
-      await client.query(`INSERT INTO devices(id, location_id, table_id, token_hash) VALUES ($1,$2,$3,$4)`, [
-        id,
-        cc.location_id,
-        cc.table_id,
-        hashToken(token),
-      ]);
-    });
     // v0.8.14 (F11-5): pairing is a credential-issuing event — audit it
     // like the staff surfaces (best-effort, never blocks the pairing).
+    // v0.10.10 (C3-10 L-8): the implicit re-pair revocation is audited
+    // too — until now a replaced unit vanished from the record with no
+    // device.revoked line of its own.
+    for (const oldId of replacedDeviceIds) {
+      await logAudit({
+        actorType: 'system',
+        ip: req.ip,
+        action: 'device.revoked',
+        locationId: cc.location_id,
+        target: oldId,
+        detail: 'implicit re-pair: device replaced',
+      });
+    }
     await logAudit({
       actorType: 'system',
       ip: req.ip,
@@ -214,8 +370,8 @@ export async function deviceRoutes(app: FastifyInstance) {
     return {
       device_token: token,
       device_id: id,
-      table: { id: t.rows[0].id, name: t.rows[0].name },
-      table_token: t.rows[0].qr_token,
+      table: { id: table.id, name: table.name },
+      table_token: table.qr_token,
     };
   });
 
@@ -304,25 +460,29 @@ export async function deviceRoutes(app: FastifyInstance) {
     // showing its table/QR instead of error-looping.)
     await assertDevicesIncluded(d.location_id);
     // Button-bounce guard: a press within 20s of the previous call is the
-    // same press, not a new request.
-    const last = await query<{ created_at: string }>(
-      `SELECT created_at FROM events WHERE table_id = $1 AND type = 'call_waiter' ORDER BY created_at DESC LIMIT 1`,
+    // same press, not a new request — UNLESS a waiter_ack landed after
+    // that call (C3-10 L-9): an acknowledged call starts a fresh service
+    // cycle, so a quick follow-up press is a NEW request, not bounce.
+    // The dedupe therefore looks at the newest of the two event types,
+    // exactly like the state poll does.
+    const last = await query<{ type: string; created_at: string }>(
+      `SELECT type, created_at FROM events WHERE table_id = $1 AND type IN ('call_waiter','waiter_ack')
+       ORDER BY created_at DESC LIMIT 1`,
       [d.table_id],
     );
-    if (last.rowCount > 0 && Date.now() - new Date(last.rows[0].created_at).getTime() < 20_000) {
+    if (
+      last.rowCount > 0 &&
+      last.rows[0].type === 'call_waiter' &&
+      Date.now() - new Date(last.rows[0].created_at).getTime() < 20_000
+    ) {
+      // A deduped press still re-drives the repeat-call alert below: if
+      // the press that crossed the threshold failed to raise it, this
+      // press is the recovery path instead of a dead end.
+      await maybeRaiseRepeatAlert(req, d);
       return { ok: true, deduped: true };
     }
     await query(`INSERT INTO events(id, table_id, type) VALUES ($1,$2,'call_waiter')`, [randomUUID(), d.table_id]);
-    // Same Service Recovery rule as the guest button: 3+ calls in 10 minutes
-    // means the guest feels ignored — raise an alert (deduped while open).
-    const cutoff = new Date(Date.now() - 10 * 60 * 1000);
-    const recent = await query<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM events WHERE table_id = $1 AND type = 'call_waiter' AND created_at > $2`,
-      [d.table_id, cutoff],
-    );
-    if (Number(recent.rows[0]?.n ?? 0) >= 3) {
-      await raiseServiceAlert({ locationId: d.location_id, tableId: d.table_id, kind: 'waiter_repeat' });
-    }
+    await maybeRaiseRepeatAlert(req, d);
     return { ok: true };
   });
 
@@ -372,15 +532,30 @@ export async function deviceRoutes(app: FastifyInstance) {
     // v0.8.14 (F11-4): the transition is constrained to the job's live
     // states in the UPDATE itself — the old select-then-update let a
     // re-ack silently overwrite a terminal state (done -> failed).
-    const r = await query(
+    const r = await query<{ payment_id: string | null }>(
       `UPDATE print_jobs SET status = $1, error = $2, acked_at = now()
-       WHERE id = $3 AND device_id = $4 AND status IN ('pending','sent') RETURNING id`,
+       WHERE id = $3 AND device_id = $4 AND status IN ('pending','sent') RETURNING payment_id`,
       [status, typeof error === 'string' ? error.slice(0, 200) : null, jobId, d.id],
     );
     if (r.rowCount === 0) {
-      const exists = await query(`SELECT id FROM print_jobs WHERE id = $1 AND device_id = $2`, [jobId, d.id]);
+      const exists = await query<{ status: string }>(
+        `SELECT status FROM print_jobs WHERE id = $1 AND device_id = $2`,
+        [jobId, d.id],
+      );
       if (exists.rowCount === 0) throw notFound('print job not found');
+      // v0.10.10 (C3-10 H-1): a re-ack of the SAME terminal state is an
+      // idempotent replay, not a conflict — a device (or a future
+      // firmware with an ack retry queue) whose success response was
+      // lost must be able to confirm the outcome without a 409. Only a
+      // CONFLICTING transition (done -> failed, failed -> done) is a
+      // 409. The added `replayed` field is additive; v0.2.0 firmware
+      // only checks for HTTP 200.
+      if (exists.rows[0].status === status) return { ok: true, replayed: true };
       throw conflict('print job already finalized');
+    }
+    // C3-10 M-2: a job acked 'failed' releases its payment's print claim.
+    if (status === 'failed') {
+      await releasePrintClaims(poolRunner, [r.rows[0].payment_id]);
     }
     return { ok: true };
   });
@@ -456,6 +631,19 @@ export async function deviceRoutes(app: FastifyInstance) {
         if (!isUniqueViolation(e) || attempt === 2) throw e;
       }
     }
+    // v0.10.10 (C3-10 L-8): minting is the credential-issuing half of
+    // pairing and is now audited like the pairing itself. The code value
+    // is NEVER logged — only its expiry.
+    await logAudit({
+      actorType: req.portalUser ? 'portal_user' : 'staff_token',
+      actorId: req.portalUser?.id ?? null,
+      role: req.portalUser?.role ?? null,
+      ip: req.ip,
+      action: 'device.claim_code_minted',
+      locationId: t.rows[0].location_id,
+      target: table_id,
+      detail: `expires ${expires.toISOString()}`,
+    });
     return { code, expires_at: expires.toISOString() };
   });
 
@@ -492,10 +680,9 @@ export async function deviceRoutes(app: FastifyInstance) {
     await query(`UPDATE devices SET revoked_at = now() WHERE id = $1`, [id]);
     // v0.8.14 (F11-4): a revoked unit never fetches again — cancel its
     // queued jobs instead of leaving live-looking work behind.
-    await query(
-      `UPDATE print_jobs SET status = 'failed', error = 'device revoked' WHERE device_id = $1 AND status IN ('pending','sent')`,
-      [id],
-    );
+    // v0.10.10 (C3-10 M-2): cancelling releases the linked payments'
+    // print claims, like every other job-failure path.
+    await failActivePrintJobs(poolRunner, id, 'device revoked');
     // v0.8.14 (F11-5): revocation is a credential event — audit it.
     await logAudit({
       actorType: req.portalUser ? 'portal_user' : 'staff_token',
@@ -538,14 +725,26 @@ export async function deviceRoutes(app: FastifyInstance) {
     );
     if (dev.rowCount === 0) throw badRequest('no paired device for this table');
     const deviceId = dev.rows[0].id;
+    // v0.10.10 (C3-10 L-6): the lines are sanitized ONCE, up front — the
+    // replay comparison below and the insert must see the same bytes.
+    const cleanLines = sanitizePrintLines(lines);
+    const linesJson = JSON.stringify(cleanLines);
     // v0.8.14 (F11-3): a retried request carrying the same idempotency key
     // replays the original job instead of queueing a duplicate receipt.
+    // v0.10.10 (C3-10 L-6): …but only when the CONTENT matches. Reusing a
+    // key with different lines used to silently return the first job —
+    // the caller's receipt never printed and nobody could tell.
     if (idemKey) {
-      const existing = await query<{ id: string }>(
-        `SELECT id FROM print_jobs WHERE device_id = $1 AND idempotency_key = $2`,
+      const existing = await query<{ id: string; lines: string }>(
+        `SELECT id, lines FROM print_jobs WHERE device_id = $1 AND idempotency_key = $2`,
         [deviceId, idemKey],
       );
-      if (existing.rowCount > 0) return { job_id: existing.rows[0].id, replayed: true };
+      if (existing.rowCount > 0) {
+        if (existing.rows[0].lines !== linesJson) {
+          throw conflict('idempotency key already used with different print lines');
+        }
+        return { job_id: existing.rows[0].id, replayed: true };
+      }
     }
     // v0.8.14 (F11-3): the queue is capped per device — an authorized
     // caller must not be able to bury a unit under unbounded jobs.
@@ -558,16 +757,22 @@ export async function deviceRoutes(app: FastifyInstance) {
         `INSERT INTO print_jobs(id, device_id, location_id, table_id, lines, idempotency_key) VALUES ($1,$2,$3,$4,$5,$6)`,
         // v0.8.14 (F11-3): lines are printed by ESC/POS hardware — strip
         // control characters before they can become printer commands.
-        [jobId, deviceId, t.rows[0].location_id, tableId, JSON.stringify(sanitizePrintLines(lines)), idemKey],
+        [jobId, deviceId, t.rows[0].location_id, tableId, linesJson, idemKey],
       );
     } catch (e) {
-      // Lost a race against the same idempotency key: replay the winner.
+      // Lost a race against the same idempotency key: replay the winner —
+      // with the same content check as the pre-insert lookup (L-6).
       if (idemKey && isUniqueViolation(e)) {
-        const existing = await query<{ id: string }>(
-          `SELECT id FROM print_jobs WHERE device_id = $1 AND idempotency_key = $2`,
+        const existing = await query<{ id: string; lines: string }>(
+          `SELECT id, lines FROM print_jobs WHERE device_id = $1 AND idempotency_key = $2`,
           [deviceId, idemKey],
         );
-        if (existing.rowCount > 0) return { job_id: existing.rows[0].id, replayed: true };
+        if (existing.rowCount > 0) {
+          if (existing.rows[0].lines !== linesJson) {
+            throw conflict('idempotency key already used with different print lines');
+          }
+          return { job_id: existing.rows[0].id, replayed: true };
+        }
       }
       throw e;
     }

@@ -894,9 +894,12 @@ export async function customerRoutes(app: FastifyInstance) {
     const jobId = randomUUID();
     try {
       await query(
-        `INSERT INTO print_jobs(id, device_id, location_id, table_id, check_id, lines) VALUES ($1,$2,$3,$4,$5,$6)`,
+        `INSERT INTO print_jobs(id, device_id, location_id, table_id, check_id, payment_id, lines) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
         // v0.8.14 (F11-3): sanitize at creation like every print-job path.
-        [jobId, dev.rows[0].id, t.rows[0].location_id, t.rows[0].id, pay.check_id, JSON.stringify(sanitizePrintLines(lines))],
+        // v0.10.10 (C3-10 M-2): payment_id (migration 035) links the job
+        // to the payment whose receipt_printed_at claim it holds, so any
+        // later job failure can release exactly that claim.
+        [jobId, dev.rows[0].id, t.rows[0].location_id, t.rows[0].id, pay.check_id, pay.id, JSON.stringify(sanitizePrintLines(lines))],
       );
     } catch (err) {
       // Release the claim so the guest can retry.

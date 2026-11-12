@@ -182,13 +182,13 @@ describe('v0.10.7 C3-8 dashboard source shapes', () => {
   });
 
   it('M21: the dashboard script is external and version-pinned; CSP drops unsafe-inline', () => {
-    assert.ok(dashHtml.includes('<script src="/dashboard/app.js?v=0.10.9" defer></script>'), 'versioned script URL');
+    assert.ok(dashHtml.includes('<script src="/dashboard/app.js?v=0.10.10" defer></script>'), 'versioned script URL');
     assert.ok(!dashHtml.includes("'use strict'"), 'no inline script left in the shell');
     const route = indexSrc.slice(indexSrc.indexOf("app.get('/dashboard'"), indexSrc.indexOf('// Restaurant portal'));
     assert.ok(route.includes("script-src 'self';"), 'dashboard script-src is self-only');
     assert.ok(!route.includes("script-src 'self' 'unsafe-inline'"), 'no script unsafe-inline');
     assert.ok(indexSrc.includes("urlPath === '/dashboard/app.js'") || indexSrc.includes("'/dashboard/app.js'"), 'app.js is on the no-cache pin list');
-    assert.equal(pkg.version, '0.10.9', 'package.json at 0.10.9');
+    assert.equal(pkg.version, '0.10.10', 'package.json at 0.10.10');
   });
 });
 
