@@ -1,1 +1,433 @@
-.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Wait Calculator | Smart Table</title>
+    <meta name="description" content="Free payment wait calculator for restaurant owners: enter tables, turns, wait and wage to see the guest hours and labour dollars the wait costs you each month.">
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+    <meta name="author" content="Smart Table">
+    <meta name="geo.region" content="CA-BC">
+    <meta name="geo.placename" content="Coquitlam">
+    <link rel="canonical" href="https://smarttablepay.com/tools/payment-wait-calculator/">
+    <meta name="theme-color" content="#0E1B2C">
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Smart Table">
+    <meta property="og:title" content="The Payment Wait Calculator">
+    <meta property="og:description" content="Run your own numbers: how many guest hours, server hours and labour dollars does the wait to pay cost your restaurant every month?">
+    <meta property="og:url" content="https://smarttablepay.com/tools/payment-wait-calculator/">
+    <meta property="og:locale" content="en_CA">
+    <meta property="og:image" content="https://smarttablepay.com/og-image.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Smart Table — QR code table payments for restaurants. The bill, without the wait.">
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="The Payment Wait Calculator">
+    <meta name="twitter:description" content="Run your own numbers: how many guest hours, server hours and labour dollars does the wait to pay cost your restaurant every month?">
+    <meta name="twitter:image" content="https://smarttablepay.com/og-image.jpg">
+    <meta name="twitter:image:alt" content="Smart Table — QR code table payments for restaurants. The bill, without the wait.">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230E1B2C'/%3E%3Ctext x='50' y='70' font-size='54' text-anchor='middle' fill='%23F59E0B' font-family='sans-serif' font-weight='bold'%3ES%3C/text%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebPage",
+          "@id": "https://smarttablepay.com/tools/payment-wait-calculator/#webpage",
+          "url": "https://smarttablepay.com/tools/payment-wait-calculator/",
+          "name": "The Payment Wait Calculator",
+          "description": "Free calculator for restaurant owners: enter your tables, turns, average payment wait and server wage to see the guest hours, server hours and labour dollars the end-of-meal wait costs you each month.",
+          "inLanguage": "en-CA",
+          "isPartOf": { "@id": "https://smarttablepay.com/#website" },
+          "publisher": { "@id": "https://smarttablepay.com/#organization" }
+        },
+        {
+          "@type": "Organization",
+          "@id": "https://smarttablepay.com/#organization",
+          "name": "Smart Table",
+          "url": "https://smarttablepay.com/",
+          "logo": "https://smarttablepay.com/icon-512.png",
+          "email": "info@smarttablepay.com",
+          "description": "Smart Table is a QR code table payment system for restaurants. Guests scan a table QR code, split and pay the bill from their phone browser — no app download, no account — while staff watch every table's state live.",
+          "address": { "@type": "PostalAddress", "addressLocality": "Coquitlam", "addressRegion": "BC", "addressCountry": "CA" },
+          "areaServed": { "@type": "AdministrativeArea", "name": "Metro Vancouver" }
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            { "@type": "Question", "name": "How does the Payment Wait Calculator work?", "acceptedAnswer": { "@type": "Answer", "text": "It multiplies your inputs together. Payments per month = tables × turns per night × nights open. Guest-wait hours = payments × your average wait in minutes ÷ 60. Server hours use a stated assumption of about 4 server-minutes of trips per payment (printing and delivering the bill, fetching the terminal, processing, receipts). Labour dollars = server hours × your server wage. Extra tables per night assumes each table frees up your wait minutes earlier on every turn, measured against a 90-minute average turn." } },
+            { "@type": "Question", "name": "Are these numbers real statistics about my restaurant?", "acceptedAnswer": { "@type": "Answer", "text": "No — and that is deliberate. There is no honest universal statistic for how long guests wait to pay; it depends entirely on your room and your night. This calculator does transparent arithmetic on the numbers you enter, with its two assumptions (about 4 server-minutes per payment; a 90-minute average turn) stated on the page. Measure your own wait for one weekend — plates cleared to cheque closed in your POS — and enter that." } },
+            { "@type": "Question", "name": "Does the labour figure mean I can cut those hours from my schedule?", "acceptedAnswer": { "@type": "Answer", "text": "Not automatically. Your servers are on shift either way, so treat the labour figure as capacity, not cash savings: it is the paid time currently spent on payment trips that could instead go to guests, extra tables, or a calmer floor. Whether any of it becomes a scheduling saving is your decision, and any vendor who promises it as guaranteed cash is overselling." } },
+            { "@type": "Question", "name": "What would remove the wait in my restaurant?", "acceptedAnswer": { "@type": "Answer", "text": "Removing the trips. When guests settle the cheque on their own phone — scanning the table's QR code, reviewing the itemized bill, splitting it, tipping, choosing a receipt and paying — the server stops shuttling between the table, the printer and the terminal, and tables settle in parallel instead of one device at a time. Smart Table does this alongside your existing Square account, and the traditional terminal route stays available for any guest who prefers it." } },
+            { "@type": "Question", "name": "How much does Smart Table cost?", "acceptedAnswer": { "@type": "Answer", "text": "In CAD: Starter is $49.99/month per location or 1% per payment, with a printed QR code per table and no hardware to buy. Base is $99/month or 2%. Pro, at $199/month, is listed as coming soon and is not yet buyable. Founding Pilot restaurants get Starter free for 30 days with no card required." } }
+          ]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://smarttablepay.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Payment Wait Calculator", "item": "https://smarttablepay.com/tools/payment-wait-calculator/" }
+          ]
+        }
+      ]
+    }
+    </script>
+    <link rel="dns-prefetch" href="https://static.cloudflareinsights.com">
+    <link href="/fonts/fonts.css" rel="stylesheet">
+    <style>
+        :root {
+            --navy: #0E1B2C;
+            --navy-dark: #08101C;
+            --paper: #FAF8F4;
+            --card-bg: #FFFFFF;
+            --text-main: #1E293B;
+            --text-muted: #64748B;
+            --border: #E2E8F0;
+            --blue: #2F80ED;
+            --amber: #F59E0B;
+            --green: #16A34A;
+            --gold: #B45309;
+            --gold-hover: #92400E;
+            --gold-soft: #FEF3C7;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, system-ui, -apple-system, sans-serif; }
+        body { background: var(--paper); color: var(--text-main); line-height: 1.6; font-size: 1rem; }
+
+        :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+        .skip-link { position: absolute; left: -9999px; top: 0; background: var(--navy); color: #fff; padding: 10px 16px; z-index: 200; border-radius: 0 0 8px 0; }
+        .skip-link:focus { left: 0; }
+
+        /* Navigation */
+        header { background: var(--navy); color: white; padding: 18px 40px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(255,255,255,0.08); }
+        .brand { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.025em; display: flex; align-items: center; gap: 6px; text-decoration: none; color: white; }
+        .brand span { color: var(--amber); }
+        .nav-links { display: flex; align-items: center; gap: 30px; }
+        .nav-links a { color: #94A3B8; text-decoration: none; font-size: 0.95rem; font-weight: 500; transition: color 0.2s; }
+        .nav-links a:hover { color: white; }
+        .nav-links a[aria-current="page"] { color: white; }
+        .nav-cta { background: var(--gold); color: white; padding: 10px 20px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 0.95rem; transition: background 0.2s; white-space: nowrap; }
+        .nav-cta:hover { background: var(--gold-hover); }
+        .nav-login { color: #94A3B8; text-decoration: none; font-size: 0.95rem; font-weight: 500; white-space: nowrap; }
+        .nav-login:hover { color: white; }
+
+        @media(max-width: 900px) {
+            .nav-links { display: none; }
+            header .nav-cta { display: none; }
+            header { padding: 16px 20px; }
+        }
+
+        /* Mobile hamburger menu (pure CSS; no JS) */
+        .nav-toggle-input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+        .nav-toggle { display: none; cursor: pointer; padding: 8px 4px; }
+        /* C3-9 L-h: visible focus style for the CSS-only hamburger label. */
+        .nav-toggle-input:focus-visible ~ .nav-toggle { outline: 2px solid var(--blue); outline-offset: 2px; }
+        .nav-toggle span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px; margin: 5px 0; }
+        .mobile-menu { display: none; }
+
+        @media(max-width: 900px) {
+            .nav-toggle { display: block; }
+            .nav-toggle-input:checked ~ .mobile-menu {
+                display: flex;
+                position: absolute;
+                top: 100%; left: 0; right: 0;
+                background: var(--navy);
+                flex-direction: column;
+                padding: 8px 20px 20px;
+                border-bottom: 1px solid rgba(255,255,255,0.08);
+                box-shadow: 0 12px 24px rgba(0,0,0,0.25);
+                z-index: 99;
+            }
+            .nav-toggle-input:checked ~ .mobile-menu a { color: #94A3B8; text-decoration: none; font-size: 1rem; font-weight: 500; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+            .nav-toggle-input:checked ~ .mobile-menu a:hover { color: #fff; }
+            .nav-toggle-input:checked ~ .mobile-menu .nav-cta { display: block; text-align: center; margin-top: 12px; padding: 12px 20px; border-bottom: none; }
+        }
+
+        /* Tool page */
+        section { padding: 90px 20px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        .tool-hero { background: var(--navy); color: white; padding: 64px 20px 54px; text-align: center; }
+        .tool-hero .crumbs { font-size: 0.85rem; color: #94A3B8; margin-bottom: 18px; }
+        .tool-hero .crumbs a { color: #94A3B8; text-decoration: none; }
+        .tool-hero .crumbs a:hover { color: white; }
+        .tool-hero h1 { font-size: clamp(1.9rem, 5.5vw, 2.7rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; max-width: 820px; margin: 0 auto 16px; }
+        .tool-hero .standfirst { color: #CBD5E1; max-width: 700px; margin: 0 auto; font-size: 1.08rem; }
+        .calc-card { background: white; border: 1px solid var(--border); border-radius: 20px; padding: 48px; max-width: 900px; margin: 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.02); }
+        .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+        @media(max-width: 760px) { .calc-grid { grid-template-columns: 1fr; } }
+        .calc-inputs h2, .calc-results h2 { font-size: 1.25rem; font-weight: 800; color: var(--navy); margin-bottom: 18px; }
+        .field { margin-bottom: 20px; }
+        .field label { display: block; font-weight: 600; color: var(--navy); font-size: 0.95rem; margin-bottom: 4px; }
+        .field .hint { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 8px; }
+        .field input { width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; font-size: 1.05rem; font-family: inherit; color: var(--text-main); background: var(--paper); }
+        .field input:focus { border-color: var(--blue); outline: none; box-shadow: 0 0 0 2px rgba(47,128,237,0.25); }
+        .result-row { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+        .result-row:last-child { border-bottom: none; }
+        .result-label { font-size: 0.95rem; color: var(--text-muted); }
+        .result-label strong { display: block; color: var(--navy); font-size: 1rem; }
+        .result-value { font-size: 1.5rem; font-weight: 800; color: var(--gold-hover); white-space: nowrap; }
+        .result-value small { font-size: 0.85rem; font-weight: 600; color: var(--text-muted); }
+        .assumptions { background: var(--paper); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; margin-top: 34px; }
+        .assumptions h3 { font-size: 1rem; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
+        .assumptions ul { margin: 0 0 0 20px; color: var(--text-muted); font-size: 0.93rem; }
+        .assumptions li { margin-bottom: 6px; }
+        .explainer { max-width: 820px; margin: 70px auto 0; }
+        .explainer h2 { font-size: 1.55rem; font-weight: 800; color: var(--navy); letter-spacing: -0.01em; line-height: 1.3; margin: 42px 0 14px; }
+        .explainer h2:first-of-type { margin-top: 6px; }
+        .explainer p { margin-bottom: 16px; font-size: 1.02rem; }
+        .explainer a { color: var(--blue); }
+        .explainer strong { color: var(--navy); }
+        .faq-list { display: flex; flex-direction: column; gap: 16px; margin-top: 20px; }
+        .faq-item { background: white; border: 1px solid var(--border); border-radius: 14px; padding: 24px; }
+        .faq-item h3 { font-size: 1.05rem; font-weight: 700; color: var(--navy); margin: 0 0 8px; }
+        .faq-item p { color: var(--text-muted); font-size: 0.97rem; margin-bottom: 0; }
+        .tool-cta { background: var(--navy); color: white; border-radius: 24px; padding: 50px 40px; max-width: 850px; margin: 70px auto 0; text-align: center; }
+        .tool-cta h2 { font-size: 1.8rem; font-weight: 800; margin-bottom: 12px; }
+        .tool-cta p { color: #94A3B8; margin-bottom: 26px; }
+        .btn-primary { background: var(--gold); color: white; padding: 14px 28px; border-radius: 10px; font-size: 1.05rem; font-weight: 700; text-decoration: none; display: inline-block; box-shadow: 0 4px 14px rgba(180, 83, 9, 0.3); transition: background 0.2s; }
+        .btn-primary:hover { background: var(--gold-hover); }
+        .btn-secondary { background: rgba(255,255,255,0.08); color: white; border: 1px solid rgba(255,255,255,0.2); padding: 14px 28px; border-radius: 10px; font-size: 1.05rem; font-weight: 600; text-decoration: none; display: inline-block; transition: background 0.2s; }
+        .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+        .tool-cta .btn-secondary { margin-left: 12px; }
+
+        /* Footer */
+        footer { background: var(--navy-dark); color: #94A3B8; padding: 50px 20px; text-align: center; font-size: 0.9rem; border-top: 1px solid rgba(255,255,255,0.08); }
+        .footer-content { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; align-items: center; }
+        .footer-contact-block { font-weight: 500; color: white; }
+        .footer-contact-block a { color: var(--amber); text-decoration: none; }
+
+        @media(max-width: 600px) {
+            header { padding: 14px 16px; }
+            section { padding: 56px 16px; }
+            .calc-card { padding: 28px 20px; }
+            .tool-cta { padding: 30px 22px; }
+            .tool-cta .btn-secondary { margin-left: 0; margin-top: 12px; }
+        }
+
+        @media (prefers-reduced-motion: no-preference) {
+            html { scroll-behavior: smooth; }
+        }
+    </style>
+<!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "50093eb2d5dc4982bad58e9e46723827"}'></script><!-- End Cloudflare Web Analytics -->
+</head>
+<body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <!-- Sticky Navigation -->
+    <header>
+        <a href="/" class="brand">Smart Table<span>.</span></a>
+        <nav class="nav-links" aria-label="Main">
+            <a href="/#product">Product</a>
+            <a href="/#device">Device</a>
+            <a href="/demo">Live demo</a>
+            <a href="/owner-demo">Owner demo</a>
+            <a href="/#roi">Savings</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#partner">Founding program</a>
+            <a href="/#faq">FAQ</a>
+            <a href="/blog/">Blog</a>
+        </nav>
+        <input type="checkbox" id="nav-toggle" class="nav-toggle-input">
+        <label for="nav-toggle" class="nav-toggle" aria-label="Menu"><span></span><span></span><span></span></label>
+        <nav class="mobile-menu" aria-label="Mobile">
+            <a href="/#product">Product</a>
+            <a href="/#device">Device</a>
+            <a href="/demo">Live demo</a>
+            <a href="/owner-demo">Owner demo</a>
+            <a href="/#roi">Savings</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#partner">Founding program</a>
+            <a href="/#faq">FAQ</a>
+            <a href="/blog/">Blog</a>
+            <a href="/#partner" class="nav-cta">Join the founding program</a>
+        </nav>
+        <a href="/#partner" class="nav-cta">Join the founding program</a>
+        <a href="https://portal.smarttablepay.com/portal" class="nav-login">Restaurant login</a>
+    </header>
+
+    <main id="main">
+    <div class="tool-hero">
+        <div class="crumbs"><a href="/">Home</a> &nbsp;›&nbsp; Tools</div>
+        <h1>The Payment Wait Calculator</h1>
+        <p class="standfirst">How much does the end-of-meal wait cost your restaurant? Enter your own numbers — no borrowed industry statistics, just transparent arithmetic with its assumptions stated on the page.</p>
+    </div>
+
+    <section>
+        <div class="container">
+            <div class="calc-card">
+                <div class="calc-grid">
+                    <div class="calc-inputs">
+                        <h2>Your restaurant</h2>
+                        <div class="field">
+                            <label for="in-tables">Tables in your restaurant</label>
+                            <input type="number" id="in-tables" min="1" max="500" step="1" value="20" inputmode="numeric">
+                        </div>
+                        <div class="field">
+                            <label for="in-turns">Table turns per night</label>
+                            <div class="hint">How many seatings each table averages on a typical night.</div>
+                            <input type="number" id="in-turns" min="0.5" max="10" step="0.5" value="2" inputmode="decimal">
+                        </div>
+                        <div class="field">
+                            <label for="in-wait">Average minutes guests wait to pay</label>
+                            <div class="hint">From "we're ready for the bill" to the cheque closed. Measure yours: plates cleared vs. cheque-closed time in your POS.</div>
+                            <input type="number" id="in-wait" min="0" max="60" step="1" value="10" inputmode="numeric">
+                        </div>
+                        <div class="field">
+                            <label for="in-wage">Server hourly wage (CAD $)</label>
+                            <input type="number" id="in-wage" min="0" max="100" step="0.25" value="18" inputmode="decimal">
+                        </div>
+                        <div class="field">
+                            <label for="in-nights">Nights open per month</label>
+                            <input type="number" id="in-nights" min="1" max="31" step="1" value="26" inputmode="numeric">
+                        </div>
+                    </div>
+                    <div class="calc-results" aria-live="polite">
+                        <h2>What the wait costs you</h2>
+                        <div class="result-row">
+                            <div class="result-label"><strong>Guest-wait time</strong>hours per month your guests spend waiting to pay</div>
+                            <div class="result-value"><span id="out-guest-hours">173</span> <small>hrs/mo</small></div>
+                        </div>
+                        <div class="result-row">
+                            <div class="result-label"><strong>Server time on payment trips</strong>hours per month spent printing, fetching and processing</div>
+                            <div class="result-value"><span id="out-server-hours">69</span> <small>hrs/mo</small></div>
+                        </div>
+                        <div class="result-row">
+                            <div class="result-label"><strong>Labour tied up in payment handling</strong>paid time on the payment relay instead of on guests</div>
+                            <div class="result-value">$<span id="out-labour">1,248</span> <small>/mo</small></div>
+                        </div>
+                        <div class="result-row">
+                            <div class="result-label"><strong>Extra tables you could turn</strong>per night, if payment stopped holding tables up</div>
+                            <div class="result-value"><span id="out-extra-tables">4.4</span> <small>/night</small></div>
+                        </div>
+                        <p style="margin-top:18px; color: var(--text-muted); font-size: 0.92rem;">That labour figure is about <strong style="color: var(--navy);">$<span id="out-labour-year">14,976</span> a year</strong> of paid time — capacity, not automatic cash savings. Your servers are scheduled either way; this is what their time could be doing instead.</p>
+                    </div>
+                </div>
+                <div class="assumptions">
+                    <h3>The assumptions, in plain sight</h3>
+                    <ul>
+                        <li><strong>Payments per month</strong> = tables × turns per night × nights open per month. Every seating ends in one payment.</li>
+                        <li><strong>Server time per payment ≈ 4 minutes.</strong> Printing and fetching the bill, delivering it and returning, fetching the terminal and processing, then receipts or change. Your room may be faster or slower — the shape of the math is the same.</li>
+                        <li><strong>Extra tables</strong> assumes each table frees up your full wait time earlier on every turn, measured against a <strong>90-minute average turn</strong>. It is a <em>potential</em>: it only becomes real covers on nights when demand is waiting and the kitchen can keep up.</li>
+                        <li><strong>Guest-wait time</strong> counts one wait per table, not per guest — a table of four waiting ten minutes is ten table-minutes here, not forty guest-minutes. If anything, this understates it.</li>
+                        <li>Nothing on this page is a statistic about your restaurant. It is your own inputs, multiplied honestly.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="explainer">
+                <h2>Why the wait costs more than it looks</h2>
+                <p>Paying the traditional way is a relay: flag the server, print and deliver the bill, wait for the server to return, fetch the terminal, process and split the cards, then receipts and change. No step is outrageous — the cost is the sum of the steps plus the queue at each one, and the queue peaks exactly when the room is fullest, because every table runs the same relay at the same time. That is why the wait quietly eats your last Friday-night turn and your servers' attention at the moment new tables are sitting down. We walk through the full anatomy, and how to measure your own settlement time in one weekend, in <a href="/blog/the-payment-wait-cost.html">how much does slow payment cost your restaurant?</a></p>
+                <h2>What removes it</h2>
+                <p>You cannot fix a queue by running it faster; you remove the trips. When guests settle on their own phone — scanning the table's QR code, reviewing the itemized bill, splitting it equally, by item or with group pay, tipping, choosing a receipt — emailed, or printed where a device is fitted, and leaving a rating — payment happens in parallel at every table instead of one terminal at a time, and your servers spend those recovered hours on guests. Smart Table does this alongside your existing Square account, with no app for guests to download; try the guest side in the <a href="/demo">live demo</a> or read the <a href="/blog/qr-code-payment-restaurants-guide.html">complete guide to QR code payment</a>. Guests who prefer the terminal keep it — the wait becomes a choice, not a queue.</p>
+
+                <h2>Frequently asked questions</h2>
+                <div class="faq-list">
+                    <div class="faq-item">
+                        <h3>How does the Payment Wait Calculator work?</h3>
+                        <p>It multiplies your inputs together. Payments per month = tables × turns per night × nights open. Guest-wait hours = payments × your average wait in minutes ÷ 60. Server hours use a stated assumption of about 4 server-minutes of trips per payment (printing and delivering the bill, fetching the terminal, processing, receipts). Labour dollars = server hours × your server wage. Extra tables per night assumes each table frees up your wait minutes earlier on every turn, measured against a 90-minute average turn.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>Are these numbers real statistics about my restaurant?</h3>
+                        <p>No — and that is deliberate. There is no honest universal statistic for how long guests wait to pay; it depends entirely on your room and your night. This calculator does transparent arithmetic on the numbers you enter, with its two assumptions (about 4 server-minutes per payment; a 90-minute average turn) stated on the page. Measure your own wait for one weekend — plates cleared to cheque closed in your POS — and enter that.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>Does the labour figure mean I can cut those hours from my schedule?</h3>
+                        <p>Not automatically. Your servers are on shift either way, so treat the labour figure as capacity, not cash savings: it is the paid time currently spent on payment trips that could instead go to guests, extra tables, or a calmer floor. Whether any of it becomes a scheduling saving is your decision, and any vendor who promises it as guaranteed cash is overselling.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>What would remove the wait in my restaurant?</h3>
+                        <p>Removing the trips. When guests settle the cheque on their own phone — scanning the table's QR code, reviewing the itemized bill, splitting it, tipping, choosing a receipt and paying — the server stops shuttling between the table, the printer and the terminal, and tables settle in parallel instead of one device at a time. Smart Table does this alongside your existing Square account, and the traditional terminal route stays available for any guest who prefers it.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>How much does Smart Table cost?</h3>
+                        <p>In CAD: Starter is $49.99/month per location or 1% per payment, with a printed QR code per table and no hardware to buy. Base is $99/month or 2%. Pro, at $199/month, is listed as coming soon and is not yet buyable. Founding Pilot restaurants get Starter free for 30 days with no card required.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tool-cta">
+                <h2>Run the pilot, then re-run your numbers</h2>
+                <p>Founding Pilot restaurants get Smart Table Starter free for 30 days — no card required. Measure your settlement time before and after, and judge us on your arithmetic, not ours.</p>
+                <a href="/#partner" class="btn-primary">Apply for the Founding Pilot</a>
+                <a href="/demo" class="btn-secondary">▶ Try the live demo</a>
+                <p style="margin-top:22px; margin-bottom:0;">Questions? <a href="mailto:info@smarttablepay.com" style="color: var(--amber); text-decoration: none;">info@smarttablepay.com</a> &nbsp;·&nbsp; <a href="/#pricing" style="color: var(--amber); text-decoration: none;">See pricing</a></p>
+            </div>
+        </div>
+    </section>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-content">
+            <div class="footer-contact-block">
+                QR code table payments for restaurants &nbsp;·&nbsp; Metro Vancouver, BC &nbsp;·&nbsp; <a href="mailto:info@smarttablepay.com">info@smarttablepay.com</a>
+            </div>
+            <p><a href="/privacy.html" style="color: #94A3B8; text-decoration: none;">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms.html" style="color: #94A3B8; text-decoration: none;">Terms of Service</a> &nbsp;·&nbsp; <a href="/blog/" style="color: #94A3B8; text-decoration: none;">Blog</a></p>
+            <p>&copy; 2026 smarttablepay · Metro Vancouver, BC</p>
+        </div>
+    </footer>
+
+    <script>
+    (function () {
+        var SERVER_MINUTES_PER_PAYMENT = 4;   // stated assumption: trips to print/deliver bill, fetch terminal, process, receipts
+        var AVERAGE_TURN_MINUTES = 90;        // stated assumption for the extra-tables estimate
+
+        var inputs = {
+            tables: document.getElementById('in-tables'),
+            turns: document.getElementById('in-turns'),
+            wait: document.getElementById('in-wait'),
+            wage: document.getElementById('in-wage'),
+            nights: document.getElementById('in-nights')
+        };
+        var out = {
+            guestHours: document.getElementById('out-guest-hours'),
+            serverHours: document.getElementById('out-server-hours'),
+            labour: document.getElementById('out-labour'),
+            labourYear: document.getElementById('out-labour-year'),
+            extraTables: document.getElementById('out-extra-tables')
+        };
+
+        function num(el, fallback) {
+            var v = parseFloat(el.value);
+            return isFinite(v) && v >= 0 ? v : fallback;
+        }
+        function fmtInt(n) {
+            return Math.round(n).toLocaleString('en-CA');
+        }
+
+        function calculate() {
+            var tables = num(inputs.tables, 0);
+            var turns = num(inputs.turns, 0);
+            var wait = num(inputs.wait, 0);
+            var wage = num(inputs.wage, 0);
+            var nights = num(inputs.nights, 0);
+
+            var paymentsPerMonth = tables * turns * nights;
+            var guestHours = paymentsPerMonth * wait / 60;
+            var serverHours = paymentsPerMonth * SERVER_MINUTES_PER_PAYMENT / 60;
+            var labour = serverHours * wage;
+            var freedMinutesPerTableNight = turns * wait;
+            var extraTables = tables * freedMinutesPerTableNight / AVERAGE_TURN_MINUTES;
+
+            out.guestHours.textContent = fmtInt(guestHours);
+            out.serverHours.textContent = fmtInt(serverHours);
+            out.labour.textContent = fmtInt(labour);
+            out.labourYear.textContent = fmtInt(labour * 12);
+            out.extraTables.textContent = extraTables.toFixed(1);
+        }
+
+        Object.keys(inputs).forEach(function (key) {
+            inputs[key].addEventListener('input', calculate);
+            inputs[key].addEventListener('change', calculate);
+        });
+        calculate();
+    })();
+    </script>
+
+</body>
+</html>
