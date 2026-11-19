@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart Table | QR Code Table Payments for Restaurants</title>
-    <meta name="description" content="QR code table payment system for restaurants: guests scan, split &amp; pay from their phone — no app, no waiting for the card machine. Staff see every table live.">
+    <meta name="description" content="QR code table payment system for restaurants: guests scan, split &amp; pay from their phone — no app, no waiting for the card machine. Staff see tables live.">
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
     <meta name="author" content="Smart Table">
     <meta name="geo.region" content="CA-BC">
@@ -59,12 +59,28 @@
           "@type": "SoftwareApplication",
           "name": "Smart Table",
           "applicationCategory": "BusinessApplication",
-          "operatingSystem": "Web browser",
+          "operatingSystem": "Web",
           "url": "https://smarttablepay.com/",
           "provider": { "@id": "https://smarttablepay.com/#organization" },
           "description": "QR code table payment and live floor management for restaurants. Guests split and pay the bill from their phone; staff see table states and settlement metrics in real time. Works with Square POS today.",
           "featureList": "Pay at the table by QR code, Split bills (equal, by items, or custom), Live table states, Timestamped waiter calls (with the table device), QR ordering from the POS menu, Service and settlement metrics",
-          "areaServed": { "@type": "AdministrativeArea", "name": "Metro Vancouver" }
+          "areaServed": { "@type": "AdministrativeArea", "name": "Metro Vancouver" },
+          "offers": [
+            {
+              "@type": "Offer",
+              "name": "Starter",
+              "price": "49.99",
+              "priceCurrency": "CAD",
+              "description": "Per location per month, or 1% commission per payment. Printed table QR codes only — no device, printer or waiter-call. Founding Pilot: free for the first 30 days, no card required."
+            },
+            {
+              "@type": "Offer",
+              "name": "Base",
+              "price": "99.00",
+              "priceCurrency": "CAD",
+              "description": "Per location per month, or 2% commission per payment. Software available now; the STT-101 table device is planned as a separate one-time purchase per table."
+            }
+          ]
         },
         {
           "@type": "FAQPage",
@@ -72,7 +88,7 @@
             { "@type": "Question", "name": "Does it replace our POS?", "acceptedAnswer": { "@type": "Answer", "text": "No — today it works with Square. It reads your open checks and records payments back." } },
             { "@type": "Question", "name": "Do guests need an app?", "acceptedAnswer": { "@type": "Answer", "text": "No — everything happens in the phone browser." } },
             { "@type": "Question", "name": "What about cash?", "acceptedAnswer": { "@type": "Answer", "text": "Staff record cash payments from the dashboard." } },
-            { "@type": "Question", "name": "What does it cost?", "acceptedAnswer": { "@type": "Answer", "text": "Two tiers, each with a choice of billing: Starter (printed QR codes only, no device) is $49.99/month or 1% per card payment; Base (with the STT-101 table device) is $99/month or 2% per card payment. Prices are per location in CAD. A one-time device purchase applies per table on Base. A Pro plan at $199/month is coming soon." } },
+            { "@type": "Question", "name": "What does it cost?", "acceptedAnswer": { "@type": "Answer", "text": "Two tiers, each with a choice of billing: Starter (printed QR codes only, no device) is $49.99/month or 1% per card payment; Base is $99/month or 2% per card payment. Prices are per location in CAD. The STT-101 table device is planned as a separate one-time purchase per table on Base. A Pro plan at $199/month is coming soon." } },
             { "@type": "Question", "name": "When is it available?", "acceptedAnswer": { "@type": "Answer", "text": "We're onboarding founding restaurants across Metro Vancouver now. The software works with Square today; the tabletop device is planned next, and founding restaurants get first units." } }
           ]
         }
@@ -784,7 +800,7 @@
                 </div>
                 <div class="faq-item">
                     <h3>What does it cost?</h3>
-                    <p>Two tiers, each with a choice of billing: Starter (printed QR codes only, no device) is $49.99/month or 1% per card payment; Base (with the STT-101 table device) is $99/month or 2% per card payment. Prices are per location in CAD. A one-time device purchase applies per table on Base. A Pro plan at $199/month is coming soon.</p>
+                    <p>Two tiers, each with a choice of billing: Starter (printed QR codes only, no device) is $49.99/month or 1% per card payment; Base is $99/month or 2% per card payment. Prices are per location in CAD. The STT-101 table device is planned as a separate one-time purchase per table on Base. A Pro plan at $199/month is coming soon.</p>
                 </div>
                 <div class="faq-item">
                     <h3>When is it available?</h3>
