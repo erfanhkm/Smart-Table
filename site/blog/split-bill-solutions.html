@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Split Bill App for Restaurants | Smart Table</title>
+    <meta name="description" content="How to split a restaurant bill without the terminal queue: equal, by-item and group pay explained, with edge cases and a worked CAD example.">
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+    <meta name="author" content="Smart Table">
+    <meta name="geo.region" content="CA-BC">
+    <meta name="geo.placename" content="Coquitlam">
+    <link rel="canonical" href="https://smarttablepay.com/blog/split-bill-solutions.html">
+    <meta name="theme-color" content="#0E1B2C">
+    <!-- Open Graph -->
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Smart Table">
+    <meta property="og:title" content="Split Bill Solutions: How Group Pay Ends the Cheque-Splitting Argument">
+    <meta property="og:description" content="Equal, by-item and group pay explained honestly: how splitting really works, the edge cases that break it, and how to end the midnight terminal queue.">
+    <meta property="og:url" content="https://smarttablepay.com/blog/split-bill-solutions.html">
+    <meta property="og:locale" content="en_CA">
+    <meta property="og:image" content="https://smarttablepay.com/og-image.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Smart Table — QR code table payments for restaurants. The bill, without the wait.">
+    <meta property="article:published_time" content="2026-11-25T00:00:00-07:00">
+    <meta property="article:modified_time" content="2026-11-25T00:00:00-07:00">
+    <meta property="article:author" content="Smart Table">
+    <meta property="article:section" content="Operations">
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Split Bill Solutions: How Group Pay Ends the Cheque-Splitting Argument">
+    <meta name="twitter:description" content="Equal, by-item and group pay explained honestly: how splitting really works, the edge cases that break it, and how to end the midnight terminal queue.">
+    <meta name="twitter:image" content="https://smarttablepay.com/og-image.jpg">
+    <meta name="twitter:image:alt" content="Smart Table — QR code table payments for restaurants. The bill, without the wait.">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230E1B2C'/%3E%3Ctext x='50' y='70' font-size='54' text-anchor='middle' fill='%23F59E0B' font-family='sans-serif' font-weight='bold'%3ES%3C/text%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Article",
+          "@id": "https://smarttablepay.com/blog/split-bill-solutions.html#article",
+          "headline": "Split Bill Solutions: How Group Pay Ends the Cheque-Splitting Argument",
+          "description": "How to split a restaurant bill fairly and fast: the three split modes — equal, by item and custom — what group pay adds with live paid and remaining tracking, the edge cases that break splitting (shared plates, early leavers, partial cash), a worked illustrative example in CAD, and a server-workflow checklist for BC restaurants.",
+          "url": "https://smarttablepay.com/blog/split-bill-solutions.html",
+          "mainEntityOfPage": "https://smarttablepay.com/blog/split-bill-solutions.html",
+          "image": "https://smarttablepay.com/og-image.jpg",
+          "datePublished": "2026-11-25",
+          "dateModified": "2026-11-25",
+          "author": {
+            "@id": "https://smarttablepay.com/#organization"
+          },
+          "publisher": {
+            "@id": "https://smarttablepay.com/#organization"
+          },
+          "inLanguage": "en-CA",
+          "articleSection": "Operations",
+          "keywords": "split bill app restaurant, how to split a restaurant bill, group pay restaurant, split cheque, restaurant split bill, BC restaurant, Vancouver"
+        },
+        {
+          "@type": "Organization",
+          "@id": "https://smarttablepay.com/#organization",
+          "name": "Smart Table",
+          "url": "https://smarttablepay.com/",
+          "logo": "https://smarttablepay.com/icon-512.png",
+          "email": "info@smarttablepay.com",
+          "description": "Smart Table is a QR code table payment system for restaurants. Guests scan a table QR code, split and pay the bill from their phone browser — no app download, no account — while staff watch every table's state live.",
+          "address": {
+            "@type": "PostalAddress",
+            "addressLocality": "Coquitlam",
+            "addressRegion": "BC",
+            "addressCountry": "CA"
+          },
+          "areaServed": {
+            "@type": "AdministrativeArea",
+            "name": "Metro Vancouver"
+          }
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "What is the easiest way to split a restaurant bill?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "For most tables, an equal split is easiest when everyone ordered roughly the same, and a by-item split is fairest when orders differ a lot. Group pay makes either option easier in practice: each guest chooses their share on their own phone, pays it against the same cheque, and the system tracks what has been paid and what remains — so the server is not running one card after another at the terminal."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "What is group pay at a restaurant?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Group pay means several guests pay toward one shared cheque, each from their own phone, instead of the server splitting the bill at a single terminal. Each guest can pay an equal share, pay for specific items, or pay a custom amount. The cheque shows a live paid and remaining balance, and it closes only when the full amount — including tax and tip — is covered."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "How should a restaurant handle a guest who leaves early?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Let the early guest settle their share first while they are still at the table. With group pay they can pay for their own items, or their equal share, from their phone and leave; the remaining balance stays visible to the rest of the table and to staff. The old alternative — one guest covering everything and chasing e-transfers later — is the part guests actually remember unhappily."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Does splitting the bill work with Square?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes, when the payment tool is integrated with Square. Smart Table reads the table's open cheque from Square, lets guests pay shares against it from their phones, and records the payments back into Square, so payouts, refunds and reports stay in your own merchant account. The traditional terminal route also stays available for any guest who prefers it, or for a guest without a phone."
+              }
+            }
+          ]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Home",
+              "item": "https://smarttablepay.com/"
+            },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "Blog",
+              "item": "https://smarttablepay.com/blog/"
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": "Split Bill Solutions for Restaurants",
+              "item": "https://smarttablepay.com/blog/split-bill-solutions.html"
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+    <link rel="dns-prefetch" href="https://static.cloudflareinsights.com">
+    <link href="/fonts/fonts.css" rel="stylesheet">
+    <style>
+        :root {
+            --navy: #0E1B2C;
+            --navy-dark: #08101C;
+            --paper: #FAF8F4;
+            --card-bg: #FFFFFF;
+            --text-main: #1E293B;
+            --text-muted: #64748B;
+            --border: #E2E8F0;
+            --blue: #2F80ED;
+            --amber: #F59E0B;
+            --green: #16A34A;
+            --gold: #B45309;
+            --gold-hover: #92400E;
+            --gold-soft: #FEF3C7;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, system-ui, -apple-system, sans-serif; }
+        body { background: var(--paper); color: var(--text-main); line-height: 1.6; font-size: 1rem; }
+
+        :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+        .skip-link { position: absolute; left: -9999px; top: 0; background: var(--navy); color: #fff; padding: 10px 16px; z-index: 200; border-radius: 0 0 8px 0; }
+        .skip-link:focus { left: 0; }
+
+        /* Navigation */
+        header { background: var(--navy); color: white; padding: 18px 40px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(255,255,255,0.08); }
+        .brand { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.025em; display: flex; align-items: center; gap: 6px; text-decoration: none; color: white; }
+        .brand span { color: var(--amber); }
+        .nav-links { display: flex; align-items: center; gap: 30px; }
+        .nav-links a { color: #94A3B8; text-decoration: none; font-size: 0.95rem; font-weight: 500; transition: color 0.2s; }
+        .nav-links a:hover { color: white; }
+        .nav-links a[aria-current="page"] { color: white; }
+        .nav-cta { background: var(--gold); color: white; padding: 10px 20px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 0.95rem; transition: background 0.2s; white-space: nowrap; }
+        .nav-cta:hover { background: var(--gold-hover); }
+        .nav-login { color: #94A3B8; text-decoration: none; font-size: 0.95rem; font-weight: 500; white-space: nowrap; }
+        .nav-login:hover { color: white; }
+
+        @media(max-width: 900px) {
+            .nav-links { display: none; }
+            header .nav-cta { display: none; }
+            header { padding: 16px 20px; }
+        }
+
+        /* Mobile hamburger menu (pure CSS; no JS) */
+        .nav-toggle-input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+        .nav-toggle { display: none; cursor: pointer; padding: 8px 4px; }
+        /* C3-9 L-h: visible focus style for the CSS-only hamburger label. */
+        .nav-toggle-input:focus-visible ~ .nav-toggle { outline: 2px solid var(--blue); outline-offset: 2px; }
+        .nav-toggle span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px; margin: 5px 0; }
+        .mobile-menu { display: none; }
+
+        @media(max-width: 900px) {
+            .nav-toggle { display: block; }
+            .nav-toggle-input:checked ~ .mobile-menu {
+                display: flex;
+                position: absolute;
+                top: 100%; left: 0; right: 0;
+                background: var(--navy);
+                flex-direction: column;
+                padding: 8px 20px 20px;
+                border-bottom: 1px solid rgba(255,255,255,0.08);
+                box-shadow: 0 12px 24px rgba(0,0,0,0.25);
+                z-index: 99;
+            }
+            .nav-toggle-input:checked ~ .mobile-menu a { color: #94A3B8; text-decoration: none; font-size: 1rem; font-weight: 500; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+            .nav-toggle-input:checked ~ .mobile-menu a:hover { color: #fff; }
+            .nav-toggle-input:checked ~ .mobile-menu .nav-cta { display: block; text-align: center; margin-top: 12px; padding: 12px 20px; border-bottom: none; }
+        }
+
+        /* Article */
+        section { padding: 90px 20px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        .article-hero { background: var(--navy); color: white; padding: 64px 20px 54px; text-align: center; }
+        .article-hero .crumbs { font-size: 0.85rem; color: #94A3B8; margin-bottom: 18px; }
+        .article-hero .crumbs a { color: #94A3B8; text-decoration: none; }
+        .article-hero .crumbs a:hover { color: white; }
+        .article-hero h1 { font-size: clamp(1.9rem, 5.5vw, 2.7rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; max-width: 820px; margin: 0 auto 16px; }
+        .article-hero .standfirst { color: #CBD5E1; max-width: 700px; margin: 0 auto 18px; font-size: 1.08rem; }
+        .article-hero .hero-meta { font-size: 0.88rem; color: #94A3B8; }
+        .article-hero .hero-meta span { color: var(--amber); font-weight: 600; }
+        .article-card { background: white; border: 1px solid var(--border); border-radius: 20px; padding: 48px; max-width: 820px; margin: 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.02); }
+        .article-body p { margin-bottom: 16px; font-size: 1.02rem; }
+        .article-body h2 { font-size: 1.55rem; font-weight: 800; color: var(--navy); letter-spacing: -0.01em; line-height: 1.3; margin: 42px 0 14px; }
+        .article-body h2:first-of-type { margin-top: 6px; }
+        .article-body h3 { font-size: 1.15rem; font-weight: 700; color: var(--navy); margin: 26px 0 10px; }
+        .article-body ul, .article-body ol { margin: 0 0 16px 22px; }
+        .article-body li { margin-bottom: 8px; }
+        .article-body a { color: var(--blue); }
+        .article-body strong { color: var(--navy); }
+        .callout { background: var(--gold-soft); border: 1px solid #FDE68A; border-radius: 14px; padding: 24px 26px; margin: 30px 0; }
+        .callout h2, .callout h3 { margin-top: 0; }
+        .callout p:last-child { margin-bottom: 0; }
+        .faq-list { display: flex; flex-direction: column; gap: 16px; margin-top: 20px; }
+        .faq-item { background: var(--paper); border: 1px solid var(--border); border-radius: 14px; padding: 24px; }
+        .faq-item h3 { font-size: 1.05rem; font-weight: 700; color: var(--navy); margin: 0 0 8px; }
+        .faq-item p { color: var(--text-muted); font-size: 0.97rem; margin-bottom: 0; }
+        .article-author { border-top: 1px solid var(--border); margin-top: 44px; padding-top: 22px; color: var(--text-muted); font-size: 0.92rem; }
+        .article-author strong { color: var(--navy); }
+
+        /* Footer */
+        footer { background: var(--navy-dark); color: #94A3B8; padding: 50px 20px; text-align: center; font-size: 0.9rem; border-top: 1px solid rgba(255,255,255,0.08); }
+        .footer-content { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; align-items: center; }
+        .footer-contact-block { font-weight: 500; color: white; }
+        .footer-contact-block a { color: var(--amber); text-decoration: none; }
+
+        @media(max-width: 600px) {
+            header { padding: 14px 16px; }
+            section { padding: 56px 16px; }
+            .article-card { padding: 28px 20px; }
+        }
+
+        @media (prefers-reduced-motion: no-preference) {
+            html { scroll-behavior: smooth; }
+        }
+    </style>
+<!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "50093eb2d5dc4982bad58e9e46723827"}'></script><!-- End Cloudflare Web Analytics -->
+</head>
+<body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <!-- Sticky Navigation -->
+    <header>
+        <a href="/" class="brand">Smart Table<span>.</span></a>
+        <nav class="nav-links" aria-label="Main">
+            <a href="/#product">Product</a>
+            <a href="/#device">Device</a>
+            <a href="/demo">Live demo</a>
+            <a href="/owner-demo">Owner demo</a>
+            <a href="/#roi">Savings</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#partner">Founding program</a>
+            <a href="/#faq">FAQ</a>
+            <a href="/blog/" aria-current="page">Blog</a>
+        </nav>
+        <input type="checkbox" id="nav-toggle" class="nav-toggle-input">
+        <label for="nav-toggle" class="nav-toggle" aria-label="Menu"><span></span><span></span><span></span></label>
+        <nav class="mobile-menu" aria-label="Mobile">
+            <a href="/#product">Product</a>
+            <a href="/#device">Device</a>
+            <a href="/demo">Live demo</a>
+            <a href="/owner-demo">Owner demo</a>
+            <a href="/#roi">Savings</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#partner">Founding program</a>
+            <a href="/#faq">FAQ</a>
+            <a href="/blog/">Blog</a>
+            <a href="/#partner" class="nav-cta">Join the founding program</a>
+        </nav>
+        <a href="/#partner" class="nav-cta">Join the founding program</a>
+        <a href="https://portal.smarttablepay.com/portal" class="nav-login">Restaurant login</a>
+    </header>
+
+    <main id="main">
+    <div class="article-hero">
+        <div class="crumbs"><a href="/">Home</a> &nbsp;›&nbsp; <a href="/blog/">Blog</a> &nbsp;›&nbsp; Operations</div>
+        <h1>Split Bill Solutions: How Group Pay Ends the Cheque-Splitting Argument</h1>
+        <p class="standfirst">Six friends, one cheque, one terminal, and a server doing arithmetic at midnight while their whole section waits. Splitting a bill should not be the hardest part of the meal — for the guests or for your team. Here is how the three split modes actually work, where they break, and what group pay changes.</p>
+        <div class="hero-meta">By the <span>Smart Table team</span> · <time datetime="2026-11-25">November 25, 2026</time> · 9 min read</div>
+    </div>
+
+    <section>
+        <div class="container">
+            <article class="article-card article-body">
+                <p>Every server knows the moment. A table of six has had a good night — shared starters, a couple of bottles, desserts for some and not others — and then someone says: "Can we split it?" What follows is rarely about money. It is about fairness, embarrassment and time: guests doing mental arithmetic over who had the extra cocktail, one person quietly resenting the equal split, and a server splitting a cheque six ways while three other tables wait.</p>
+                <p>This guide is about how to split a restaurant bill properly. It explains the three split modes — equal, by item and custom amount — what each one is good for, the edge cases that break all of them, and what changes when guests pay their shares themselves, from their own phones, against one cheque. That model is usually called <strong>group pay</strong>, and it is the reason a split bill app for a restaurant is a workflow tool first and a payment tool second.</p>
+
+                <h2>Why splitting hurts more than it should</h2>
+                <p>A split bill concentrates every weakness of the traditional end-of-meal relay into one table. As we showed in <a href="/blog/the-payment-wait-cost.html">how much slow payment costs your restaurant</a>, the normal payment wait is already a queue: flag the server, print the bill, wait, fetch the terminal, run the card. A split multiplies the last step by the number of guests paying. Each card means its own tip screen, its own receipt decision and its own small chance of a decline, a forgotten PIN or a card left behind — all sequentially, on one device, with the server as operator.</p>
+                <p>The hidden cost is what the server is <em>not</em> doing while they stand there: greeting the new table, running food, noticing the guest who needs help. Splitting turns floor staff into a cashier at the peak moment the room needs them most. And guests negotiate in public, in front of the server — which is why many quietly overpay "to keep it simple" and remember the meal a little less fondly.</p>
+
+                <h2>The three split modes, explained honestly</h2>
+                <h3>1. Equal split</h3>
+                <p>The cheque total — food, drinks, tax and tip — is divided evenly by the number of paying guests. Equal split is fast, socially smooth and the right answer when everyone ordered in the same range: a team lunch, a set-menu dinner, a round-heavy evening where tracking individual drinks would be absurd. Its weakness is obvious: when one guest had a salad and sparkling water and another had a steak and two cocktails, "equal" stops feeling fair, and the guest who ordered lightly subsidizes the guest who did not. Good systems let the table choose equal split without forcing it.</p>
+                <h3>2. Split by item</h3>
+                <p>Each guest claims the items they ordered — their main, their drinks, their dessert — and pays for those items plus their share of tax and tip. This is the fairest mode and the one guests ask for on mixed tables: a birthday dinner where grandparents, teenagers and colleagues all ordered very differently. Done at a terminal, by-item splitting is painfully slow — the server rebuilds the cheque item by item. On their own phones, guests simply tap their own items in parallel. The catch is shared items, covered below.</p>
+                <h3>3. Custom amount split</h3>
+                <p>Each guest pays a fixed amount they choose: "Put $40 on mine." Custom amounts handle the real-world cases the tidy modes miss — one guest treating another, a parent covering the kids, a guest with a gift card or a budget cap, or a host quietly covering the balance at the end. A custom split only works safely if someone — ideally the system, not the server — tracks the running total, because the classic failure is a cheque that ends the night $12 short with everyone insisting they paid.</p>
+
+                <h2>What group pay adds: one cheque, many phones, a live balance</h2>
+                <p>Group pay takes those three modes and removes the queue. Every guest at the table opens the same cheque on their own phone — in Smart Table's case by scanning the table's QR code, with no app download and no account — chooses equal, by-item or a custom amount, adds their tip, and pays. The payments happen <strong>in parallel</strong>, not one terminal at a time.</p>
+                <p>The part that ends the argument is <strong>live paid and remaining tracking</strong>. The cheque always shows what has been paid and what is outstanding, to guests and staff alike. Nobody asks "did you get mine?", covers a shortfall by accident, or pays twice. When the balance reaches zero, the cheque closes; until then it stays visibly open.</p>
+                <p>Group pay also matters for turnover. As we argued in <a href="/blog/speed-up-table-turnover.html">how to increase table turnover without rushing guests</a>, a split at the terminal is the slowest version of the slowest moment. Group pay removes that queue: a large party settles in the time its slowest guest takes to find their card — not the sum of everyone's card time.</p>
+
+                <h2>A worked example, labelled as one</h2>
+                <p>Here is one table, with round numbers chosen for clarity — <strong>an illustration, not a finding</strong>; run yours in the <a href="/tools/payment-wait-calculator/">Payment Wait Calculator</a>.</p>
+                <ul>
+                    <li><strong>The party:</strong> 6 guests · shared starters $36.00 · mains and drinks varying from $28.00 to $61.00 per person · subtotal $248.00</li>
+                    <li><strong>Tax and tip:</strong> GST and PST on the applicable items, plus the tip each guest chooses on their own share — in this illustration the cheque total comes to <strong>$312.40 CAD</strong></li>
+                    <li><strong>Equal split:</strong> $312.40 ÷ 6 = <strong>$52.07 per guest</strong> — simple, but the lightest orderer pays about $19 more than their own food and drink</li>
+                    <li><strong>By-item split:</strong> each guest pays their own items plus their proportionate tax, and tips on their own share — the lightest orderer pays roughly $33, the heaviest roughly $77, and the shared starters are claimed jointly or split six ways at $6.00 each before tax</li>
+                    <li><strong>At the terminal:</strong> six sequential card payments by one server · <strong>With group pay:</strong> six parallel payments, one live balance, cheque closes when the last share lands</li>
+                </ul>
+                <p>Neither answer is "correct." The table — not your server or your terminal — should choose which kind of fair it wants, without costing your floor ten minutes.</p>
+
+                <h2>The edge cases that break splitting (and how to handle them)</h2>
+                <ul>
+                    <li><strong>Shared appetizers and bottles.</strong> The by-item purist's nightmare. The practical fix: shared items can be split among just the people who shared them, or divided across the whole table, instead of landing on whoever ordered them for the group. Decide the rule with the table in one sentence — "shall we split the starters six ways?" — and let the system do the arithmetic.</li>
+                    <li><strong>One guest leaves early.</strong> The early leaver should settle first, while they are still there: their items, or their equal share, paid and done. The remaining balance stays open for the rest of the table. The alternative — a friend covering them and chasing an e-transfer for three days — is the single most resented outcome of group dining.</li>
+                    <li><strong>Partial cash.</strong> One guest wants to pay cash. That is fine, and your process should expect it: staff record the cash portion against the cheque, the remaining balance drops by that amount, and the other guests split what is actually left — not the original total.</li>
+                    <li><strong>Someone underpays by mistake.</strong> With a live remaining balance, a shortfall is a number on a screen while everyone is still seated, not a discovery at cash-out. The host can cover it with a custom amount in seconds, without a scene.</li>
+                    <li><strong>A guest has no phone, or no battery.</strong> Any phone-based system must have a traditional fallback. That guest's share can be paid by a companion as a custom amount, or run the old way at the terminal. A tool that only works when every guest is equipped is not ready for a Friday night.</li>
+                    <li><strong>Tips on split cheques.</strong> Each guest should tip on their own share, with the same clear tip prompts they would see on a full cheque. Splitting must never quietly shrink the tip pool because the arithmetic got awkward — prompt design and tip handling are covered in our <a href="/blog/qr-code-payment-restaurants-guide.html">complete guide to QR code payment for restaurants</a>.</li>
+                </ul>
+
+                <h2>A server workflow that ends the midnight arithmetic</h2>
+                <p>Whatever technology you use, the workflow rule is the same: <strong>the terminal should never do arithmetic at midnight.</strong> Set your team up like this:</p>
+                <ol>
+                    <li><strong>Ask once, early.</strong> When dessert is offered, a simple "Will you be splitting the bill tonight?" lets the table decide calmly instead of negotiating over a printed cheque.</li>
+                    <li><strong>Offer the modes, not a lecture.</strong> "You can split it evenly, pay for your own items, or put a set amount on each card — whichever suits you." Three options.</li>
+                    <li><strong>Let guests do their own shares in parallel.</strong> Your server's job during a split should be clearing and checking in — not operating six payments.</li>
+                    <li><strong>Watch the balance, not the table.</strong> Staff should see paid and remaining at a glance, and step in only if a balance stalls.</li>
+                    <li><strong>Close the loop.</strong> When the cheque reaches zero, thank the table once, together.</li>
+                </ol>
+
+                <h2>Questions to ask any split bill app for your restaurant</h2>
+                <ul>
+                    <li>Does it offer all three modes — equal, by item and custom amount — or only equal splits dressed up as flexibility?</li>
+                    <li>Is there a live paid and remaining balance that both guests and staff can see?</li>
+                    <li>How are shared items, partial cash and an early leaver handled — in the product, not as a workaround?</li>
+                    <li>Does each guest tip on their own share, and does tip reporting stay clean for pooling and bookkeeping?</li>
+                    <li>Where does the money settle? The right answer is your own merchant account, through your existing POS — for Square users, payments recorded back into Square so payouts, refunds and reports behave like any other payment.</li>
+                    <li>What happens for a guest without a phone? There must be a dignified fallback at every table.</li>
+                </ul>
+
+                <div class="callout">
+                    <h2>Where Smart Table fits</h2>
+                    <p>Smart Table was built around exactly this moment. A guest scans their table's printed QR code and sees the itemized cheque from your Square account on their own phone — no app, no account. With <strong>Group Pay</strong>, each guest chooses an equal share, their own items or a custom amount, tips on their share, and pays, while you and the table watch the paid and remaining balance update live until the cheque closes. Try the flow yourself in the <a href="/demo">live demo</a>, and see the staff side in the <a href="/owner-demo">owner demo</a>.</p>
+                    <p>Pricing is in CAD: <a href="/#pricing">Starter is $49.99/month per location or 1% per payment</a> — printed QR code per table, no device to buy. Base is $99/month or 2%, with the STT-101 table device planned as a separate one-time purchase per table. Pro at $199/month is coming soon and is not yet built. We are onboarding <strong>Founding Pilot</strong> restaurants now: <strong>Starter free for 30 days, no card required</strong>. <a href="/#partner">Apply for the Founding Pilot here</a>, or write to us at <a href="mailto:info@smarttablepay.com">info@smarttablepay.com</a>. More background is on the <a href="/">Smart Table home page</a> and in the other guides on the <a href="/blog/">blog</a>.</p>
+                </div>
+
+                <h2>Frequently asked questions</h2>
+                <div class="faq-list">
+                    <div class="faq-item">
+                        <h3>What is the easiest way to split a restaurant bill?</h3>
+                        <p>For most tables, an equal split is easiest when everyone ordered roughly the same, and a by-item split is fairest when orders differ a lot. Group pay makes either option easier in practice: each guest chooses their share on their own phone, pays it against the same cheque, and the system tracks what has been paid and what remains — so the server is not running one card after another at the terminal.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>What is group pay at a restaurant?</h3>
+                        <p>Group pay means several guests pay toward one shared cheque, each from their own phone, instead of the server splitting the bill at a single terminal. Each guest can pay an equal share, pay for specific items, or pay a custom amount. The cheque shows a live paid and remaining balance, and it closes only when the full amount — including tax and tip — is covered.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>How should a restaurant handle a guest who leaves early?</h3>
+                        <p>Let the early guest settle their share first while they are still at the table. With group pay they can pay for their own items, or their equal share, from their phone and leave; the remaining balance stays visible to the rest of the table and to staff. The old alternative — one guest covering everything and chasing e-transfers later — is the part guests actually remember unhappily.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>Does splitting the bill work with Square?</h3>
+                        <p>Yes, when the payment tool is integrated with Square. Smart Table reads the table's open cheque from Square, lets guests pay shares against it from their phones, and records the payments back into Square, so payouts, refunds and reports stay in your own merchant account. The traditional terminal route also stays available for any guest who prefers it, or for a guest without a phone.</p>
+                    </div>
+                </div>
+
+                <div class="article-author">
+                    <p><strong>About the authors.</strong> The Smart Table team builds QR table payment for independent restaurants in Metro Vancouver, BC. Questions or corrections: <a href="mailto:info@smarttablepay.com">info@smarttablepay.com</a>. More guides on the <a href="/blog/">Smart Table blog</a>.</p>
+                </div>
+            </article>
+        </div>
+    </section>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-content">
+            <div class="footer-contact-block">
+                QR code table payments for restaurants &nbsp;·&nbsp; Metro Vancouver, BC &nbsp;·&nbsp; <a href="mailto:info@smarttablepay.com">info@smarttablepay.com</a> &nbsp;·&nbsp; <a href="https://www.instagram.com/smarttablepay" target="_blank" rel="noopener">Instagram</a> &nbsp;·&nbsp; <a href="https://www.youtube.com/@smarttablepay" target="_blank" rel="noopener">YouTube</a>
+            </div>
+            <p><a href="/privacy.html" style="color: #94A3B8; text-decoration: none;">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms.html" style="color: #94A3B8; text-decoration: none;">Terms of Service</a> &nbsp;·&nbsp; <a href="/blog/" style="color: #94A3B8; text-decoration: none;">Blog</a></p>
+            <p>&copy; 2026 smarttablepay · Metro Vancouver, BC</p>
+        </div>
+    </footer>
+
+</body>
+</html>
