@@ -433,6 +433,45 @@ export async function platformLocation(): Promise<{ id: string; currency: string
   return { id: String(loc.id), currency: String(loc.currency ?? 'CAD'), name: String(loc.name ?? '') };
 }
 
+// ---- App-fee pre-flight (v0.10.11) -----------------------------------------
+let platformCurrencyCache: { currency: string; at: number } | null = null;
+const PLATFORM_CURRENCY_TTL_MS = 10 * 60_000;
+
+/**
+ * Currency of the APPLICATION OWNER's Square account (the account
+ * app_fee_money is paid out to), or null when it cannot be determined.
+ * Square rejects app_fee_money outright when this currency differs from
+ * the charge currency ("This application is not allowed to accept
+ * currency X", proven live 2026-10-25) — and that rejection lands AFTER
+ * the guest's single-use card nonce has been redeemed, so the designed
+ * no-fee retry in the Square adapter re-presents a dead nonce and fails
+ * too (the 2026-11-25 demo payment failure: a definitive Square 4xx, no
+ * payment object ever created, guest charged nothing but told the card
+ * was declined). Callers therefore decide the fee BEFORE the first
+ * charge attempt instead of recovering from the rejection. Cached
+ * briefly; a failed lookup returns null and callers fall back to the
+ * attempt-and-retry behaviour.
+ */
+export async function platformCurrency(): Promise<string | null> {
+  if (platformCurrencyCache && Date.now() - platformCurrencyCache.at < PLATFORM_CURRENCY_TTL_MS) {
+    return platformCurrencyCache.currency;
+  }
+  try {
+    const loc = await platformLocation();
+    const currency = String(loc.currency ?? '').toUpperCase();
+    if (!currency) return null;
+    platformCurrencyCache = { currency, at: Date.now() };
+    return currency;
+  } catch (e) {
+    console.warn('[square] platform currency lookup failed; app-fee pre-flight skipped:', e);
+    return null;
+  }
+}
+
+export function invalidatePlatformCurrencyCache(): void {
+  platformCurrencyCache = null;
+}
+
 /** Create the subscription plan + its monthly variation; returns the variation id (what subscriptions reference). */
 export async function createSubscriptionPlanVariation(
   priceCents: number,
