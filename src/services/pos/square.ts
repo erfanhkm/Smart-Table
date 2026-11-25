@@ -26,6 +26,7 @@ import {
   orderRemaining,
   orderTenderRemaining,
   payOrder,
+  platformCurrency,
   retrieveOrder,
   retrievePayment,
   searchCatalogItems,
@@ -248,6 +249,26 @@ export const squareAdapter: PosAdapter = {
     // immediately so the payments row can be marked FAILED with the
     // guest-safe decline code.
     const fee = args.appFeeCents && args.appFeeCents > 0 ? args.appFeeCents : 0;
+    // v0.10.11 pre-flight: when the application owner's account currency
+    // differs from the charge currency, Square rejects app_fee_money
+    // outright (see platformCurrency) — and the rejection can consume
+    // the guest's single-use card nonce, silently defeating the no-fee
+    // retry below (its second attempt re-presents the same nonce). For
+    // that known shape, skip the in-flight fee from the start: the
+    // charge goes out fee-free and the fee accrues in the ledger,
+    // exactly the degradation the retry was designed to reach. When the
+    // platform currency cannot be determined, fall through to the
+    // historical attempt-and-retry behaviour.
+    let effectiveFee = fee;
+    if (fee > 0) {
+      const ownerCurrency = await platformCurrency();
+      if (ownerCurrency && ownerCurrency !== String(args.currency).toUpperCase()) {
+        console.error(
+          `[billing] app fee skipped in-flight: application account currency ${ownerCurrency} != charge currency ${args.currency} (order ${args.checkId}); the fee accrues in the ledger instead`,
+        );
+        effectiveFee = 0;
+      }
+    }
     let payment;
     let feeCollected = false;
     try {
@@ -260,15 +281,15 @@ export const squareAdapter: PosAdapter = {
           tipCents: args.tipCents,
           autocomplete: false,
           idempotencyKey: args.idempotencyKey,
-          appFeeCents: fee || undefined,
+          appFeeCents: effectiveFee || undefined,
         },
         args.token,
       ));
-      feeCollected = fee > 0;
+      feeCollected = effectiveFee > 0;
     } catch (e) {
       const definitive =
         e instanceof SquareError && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429;
-      if (fee <= 0 || !definitive || !isAppFeeRejection(e)) throw e;
+      if (effectiveFee <= 0 || !definitive || !isAppFeeRejection(e)) throw e;
       console.error(
         `[billing] Square rejected payment with app fee (order ${args.checkId}); retrying without fee:`,
         e.message,
