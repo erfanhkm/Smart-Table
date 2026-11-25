@@ -1,4 +1,4 @@
-// Smart Table — Staff Dashboard (v0.10.10)
+// Smart Table — Staff Dashboard (v0.10.11)
 'use strict';
 // ---------------------------------------------------------------------------
 // Smart Table — staff dashboard. API contract (current backend), all staff calls need `Authorization: Bearer <STAFF_API_TOKEN>`:
